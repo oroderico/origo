@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  host-simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source and pinned submodules
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+        with:
+          submodules: recursive
+
+      - name: Install SDL development files
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      - name: Build and test shared host core
+        run: ./tools/run-simulator.sh --self-test
+
   deterministic-firmware:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.4

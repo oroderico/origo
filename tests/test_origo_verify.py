@@ -68,9 +68,18 @@ class SeedToolVerifierTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
     def test_firmware_uses_rng_only_for_secp_blinding(self):
-        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
-        self.assertEqual(source.count("esp_fill_random"), 1)
-        self.assertIn("wally_secp_randomize", source)
+        root = Path(__file__).parents[1]
+        app = (root / "main/seedtool_app.c").read_text()
+        platform = (root / "main/seedtool_platform_esp.c").read_text()
+        self.assertEqual(app.count("seedtool_platform_random"), 1)
+        self.assertEqual(platform.count("esp_fill_random"), 1)
+        self.assertIn("wally_secp_randomize", app)
+
+    def test_host_simulator_reuses_firmware_logic_and_renderer(self):
+        cmake = (Path(__file__).parents[1] / "host/CMakeLists.txt").read_text()
+        for shared in ("seedtool_app.c", "seedtool_core.c", "seedtool_render.c", "qrcode.c"):
+            self.assertIn(shared, cmake)
+        self.assertNotIn("origo_verify.py", cmake)
 
     def test_project_has_a_private_minimal_component_graph(self):
         cmake = (Path(__file__).parents[1] / "main/CMakeLists.txt").read_text()

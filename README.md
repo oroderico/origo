@@ -45,6 +45,31 @@ The viewer displays the master fingerprint and mainnet receive addresses for
 indices 0 through 99 at `m/84'/0'/0'/0/i` and `m/86'/0'/0'/0/i`. QR codes contain
 only the raw address. Mnemonics, passphrases, and xpubs are never encoded as QR.
 
+## Run on a PC
+
+The SDL simulator runs the firmware's actual application flow, deterministic
+core, renderer, fonts, QR encoder and pinned libwally source. Only the display,
+buttons, clock and secp256k1 blinding randomness are replaced by host adapters.
+
+Install the native build dependencies and run it:
+
+```sh
+# Fedora
+sudo dnf install gcc cmake pkgconf-pkg-config SDL2-devel
+
+# Ubuntu/Debian
+sudo apt install build-essential cmake pkg-config libsdl2-dev
+
+./tools/run-simulator.sh
+```
+
+Use `Left` or `A` for the left TTGO button; use `Right`, `D`, `Enter` or `Space`
+for the right button. `Q` or `Escape` closes the simulator. Run the non-graphical
+compiled-core check with `./tools/run-simulator.sh --self-test`.
+
+The simulator is for development with published test vectors. Do not enter a
+real mnemonic, passphrase or entropy transcript on a network-connected PC.
+
 ## Build and flash
 
 Clone the repository and its pinned libwally dependency, then build with

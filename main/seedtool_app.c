@@ -1,36 +1,22 @@
 #include "seedtool_core.h"
 
-#include <driver/gpio.h>
-#include <esp_random.h>
-#include <esp_system.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include <stdio.h>
 #include <string.h>
 #include <wally_bip39.h>
 #include <wally_core.h>
 
 #include "seedtool_display.h"
+#include "seedtool_platform.h"
 
 #define SESSION_TIMEOUT_MS (10 * 60 * 1000)
 #define WARNING_TIMEOUT_MS (60 * 1000)
-#define POLL_MS 20
-
-typedef enum { KEY_LEFT, KEY_RIGHT, KEY_TIMEOUT } key_t;
-
-static TickType_t last_action;
+static uint64_t last_action;
 
 static void seedtool_require(const bool condition)
 {
     if (!condition) {
-        esp_restart();
+        seedtool_platform_restart();
     }
-}
-
-void __wrap_abort(void)
-{
-    esp_restart();
-    __builtin_unreachable();
 }
 
 static void screen_text(const char* title, const char* line1, const char* line2, const char* footer)
@@ -38,40 +24,28 @@ static void screen_text(const char* title, const char* line1, const char* line2,
     seedtool_display_screen(title, line1, line2, footer);
 }
 
-static bool pressed(const gpio_num_t pin)
+static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
 {
-    return gpio_get_level(pin) == 0;
-}
-
-static key_t wait_key_raw(const uint32_t timeout_ms)
-{
-    const TickType_t start = xTaskGetTickCount();
-    while ((xTaskGetTickCount() - start) * portTICK_PERIOD_MS < timeout_ms) {
-        if (pressed(SEEDTOOL_BUTTON_LEFT_GPIO) || pressed(SEEDTOOL_BUTTON_RIGHT_GPIO)) {
-            const key_t key = pressed(SEEDTOOL_BUTTON_LEFT_GPIO) ? KEY_LEFT : KEY_RIGHT;
-            while (pressed(SEEDTOOL_BUTTON_LEFT_GPIO) || pressed(SEEDTOOL_BUTTON_RIGHT_GPIO)) {
-                vTaskDelay(POLL_MS / portTICK_PERIOD_MS);
-            }
-            last_action = xTaskGetTickCount();
-            return key;
-        }
-        vTaskDelay(POLL_MS / portTICK_PERIOD_MS);
+    const seedtool_key_t key = seedtool_platform_wait_key(timeout_ms);
+    if (key != KEY_TIMEOUT) {
+        last_action = seedtool_platform_milliseconds();
     }
-    return KEY_TIMEOUT;
+    return key;
 }
 
-static key_t wait_key(void)
+static seedtool_key_t wait_key(void)
 {
     for (;;) {
-        const uint32_t idle_ms = (xTaskGetTickCount() - last_action) * portTICK_PERIOD_MS;
+        const uint64_t elapsed = seedtool_platform_milliseconds() - last_action;
+        const uint32_t idle_ms = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
         if (idle_ms < SESSION_TIMEOUT_MS) {
-            const key_t key = wait_key_raw(SESSION_TIMEOUT_MS - idle_ms);
+            const seedtool_key_t key = wait_key_raw(SESSION_TIMEOUT_MS - idle_ms);
             if (key != KEY_TIMEOUT) {
                 return key;
             }
         }
         screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "LEFT=erase RIGHT=extend");
-        const key_t key = wait_key_raw(WARNING_TIMEOUT_MS);
+        const seedtool_key_t key = wait_key_raw(WARNING_TIMEOUT_MS);
         if (key != KEY_RIGHT) {
             return KEY_TIMEOUT;
         }
@@ -91,7 +65,7 @@ static int choose(const char* title, const char* const* items, const size_t coun
         char pos[32];
         (void)snprintf(pos, sizeof(pos), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
         screen_text(title, items[selected], pos, "LEFT=next RIGHT=select");
-        const key_t key = wait_key();
+        const seedtool_key_t key = wait_key();
         if (key == KEY_TIMEOUT) {
             return -1;
         }
@@ -111,7 +85,7 @@ static bool enter_value(const char* title, const unsigned position, const unsign
         (void)snprintf(line1, sizeof(line1), "Entry %u of %u", position, total);
         (void)snprintf(line2, sizeof(line2), "%u", current);
         screen_text(title, line1, line2, "LEFT=change RIGHT=accept");
-        const key_t key = wait_key();
+        const seedtool_key_t key = wait_key();
         if (key == KEY_TIMEOUT) {
             return false;
         }
@@ -145,7 +119,7 @@ static bool page_text(const char* title, const char* text, const size_t width)
         (void)snprintf(counter, sizeof(counter), "%u/%u", (unsigned)(offset / width + 1),
             (unsigned)((len + width - 1) / width));
         screen_text(title, page, counter, "LEFT=exit RIGHT=next");
-        const key_t key = wait_key();
+        const seedtool_key_t key = wait_key();
         if (key != KEY_RIGHT) {
             return false;
         }
@@ -178,7 +152,7 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
             (void)snprintf(choice, sizeof(choice), "character: %c", (char)(0x20 + selected));
         }
         screen_text("BIP39 passphrase", visible, choice, "LEFT=next RIGHT=select");
-        const key_t key = wait_key();
+        const seedtool_key_t key = wait_key();
         if (key == KEY_TIMEOUT) {
             return false;
         }
@@ -391,33 +365,27 @@ static void verify_seed(void)
     seedtool_zero(mnemonic, sizeof(mnemonic));
 }
 
-void app_main(void)
+void seedtool_run(void)
 {
-    gpio_config_t buttons = { .pin_bit_mask = (1ULL << SEEDTOOL_BUTTON_LEFT_GPIO)
-            | (1ULL << SEEDTOOL_BUTTON_RIGHT_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE };
-    ESP_ERROR_CHECK(gpio_config(&buttons));
-    seedtool_display_init();
+    seedtool_platform_init();
     seedtool_require(wally_init(0) == WALLY_OK);
 
     /* This RNG is exclusively secp256k1 side-channel blinding. Core output
      * generation has no RNG parameter and remains invariant if this is stubbed. */
     uint8_t blinding[WALLY_SECP_RANDOMIZE_LEN];
-    esp_fill_random(blinding, sizeof(blinding));
+    seedtool_platform_random(blinding, sizeof(blinding));
     seedtool_require(wally_secp_randomize(blinding, sizeof(blinding)) == WALLY_OK);
     seedtool_zero(blinding, sizeof(blinding));
-    last_action = xTaskGetTickCount();
+    last_action = seedtool_platform_milliseconds();
 
-    if (!acknowledge("JADE SEED TOOL", "OFFLINE / STATELESS", "User entropy only")) {
-        esp_restart();
+    if (!acknowledge("ORIGO", "OFFLINE / STATELESS", "User entropy only")) {
+        seedtool_platform_restart();
     }
     for (;;) {
         const char* menu[] = { "Create Seed", "Complete Checksum", "Verify Existing Seed", "About / Safety" };
         const int selected = choose("Origo", menu, 4);
         if (selected < 0) {
-            esp_restart();
+            seedtool_platform_restart();
         } else if (selected == 0) {
             create_seed();
         } else if (selected == 1) {
@@ -427,6 +395,6 @@ void app_main(void)
         } else {
             (void)page_text("Safety", "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and record entropy independently.", 72);
         }
-        last_action = xTaskGetTickCount();
+        last_action = seedtool_platform_milliseconds();
     }
 }

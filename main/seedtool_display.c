@@ -1,6 +1,6 @@
 #include "seedtool_display.h"
 
-#include "qrcode.h"
+#include "seedtool_render.h"
 
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
@@ -31,24 +31,6 @@
 #define LCD_CMD_COLMOD 0x3a
 #define LCD_CMD_RAMCTRL 0xb0
 
-#define COLOR_BLACK UINT16_C(0x0000)
-#define COLOR_WHITE UINT16_C(0xffff)
-
-extern const unsigned char tft_DefaultFont[];
-extern const unsigned char tft_Ubuntu16[];
-
-typedef struct {
-    uint8_t y_offset;
-    uint8_t width;
-    uint8_t height;
-    int8_t x_offset;
-    uint8_t x_advance;
-    const uint8_t* bitmap;
-} glyph_t;
-
-/* Regular internal DRAM is DMA-capable on ESP32. Keeping this zero-initialized
- * array in BSS avoids embedding an empty 64.8 KiB framebuffer in the image. */
-_Alignas(4) static uint16_t framebuffer[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
 static spi_device_handle_t display;
 
 static void transmit(const void* const data, const size_t length)
@@ -76,119 +58,6 @@ static void lcd_command(const uint8_t command, const void* const data, const siz
     }
 }
 
-static void fill_rect(int x, int y, int width, int height, const uint16_t color)
-{
-    if (x < 0) {
-        width += x;
-        x = 0;
-    }
-    if (y < 0) {
-        height += y;
-        y = 0;
-    }
-    if (x + width > SEEDTOOL_DISPLAY_WIDTH) {
-        width = SEEDTOOL_DISPLAY_WIDTH - x;
-    }
-    if (y + height > SEEDTOOL_DISPLAY_HEIGHT) {
-        height = SEEDTOOL_DISPLAY_HEIGHT - y;
-    }
-    if (width <= 0 || height <= 0) {
-        return;
-    }
-    for (int row = 0; row < height; ++row) {
-        uint16_t* out = framebuffer + (y + row) * SEEDTOOL_DISPLAY_WIDTH + x;
-        for (int col = 0; col < width; ++col) {
-            out[col] = color;
-        }
-    }
-}
-
-static bool find_glyph(const uint8_t* font, const unsigned char character, glyph_t* glyph)
-{
-    const uint8_t* cursor = font + 4;
-    while (*cursor != character && *cursor != 0xff) {
-        const size_t bitmap_size = cursor[2] ? ((size_t)cursor[2] * cursor[3] + 7) / 8 : 0;
-        cursor += 6 + bitmap_size;
-    }
-    if (*cursor == 0xff) {
-        return false;
-    }
-    glyph->y_offset = cursor[1];
-    glyph->width = cursor[2];
-    glyph->height = cursor[3];
-    glyph->x_offset = cursor[4] < 0x80 ? (int8_t)cursor[4] : (int8_t)(cursor[4] - 0x100);
-    glyph->x_advance = cursor[5];
-    glyph->bitmap = cursor + 6;
-    return true;
-}
-
-static int glyph_advance(const uint8_t* font, const unsigned char character)
-{
-    glyph_t glyph;
-    return find_glyph(font, character, &glyph) ? (glyph.width > glyph.x_advance ? glyph.width : glyph.x_advance) + 1 : 0;
-}
-
-static int text_width(const uint8_t* font, const char* text, const size_t length)
-{
-    int width = 0;
-    for (size_t i = 0; i < length; ++i) {
-        width += glyph_advance(font, (unsigned char)text[i]);
-    }
-    return width ? width - 1 : 0;
-}
-
-static void draw_glyph(const uint8_t* font, const unsigned char character, const int x, const int y)
-{
-    glyph_t glyph;
-    if (!find_glyph(font, character, &glyph)) {
-        return;
-    }
-    size_t bit = 0;
-    for (uint8_t row = 0; row < glyph.height; ++row) {
-        for (uint8_t col = 0; col < glyph.width; ++col, ++bit) {
-            if (glyph.bitmap[bit / 8] & (UINT8_C(0x80) >> (bit % 8))) {
-                fill_rect(x + glyph.x_offset + col, y + glyph.y_offset + row, 1, 1, COLOR_WHITE);
-            }
-        }
-    }
-}
-
-static void draw_centered_line(const uint8_t* font, const char* text, const size_t length, const int y)
-{
-    int x = (SEEDTOOL_DISPLAY_WIDTH - text_width(font, text, length)) / 2;
-    if (x < 0) {
-        x = 0;
-    }
-    for (size_t i = 0; i < length; ++i) {
-        draw_glyph(font, (unsigned char)text[i], x, y);
-        x += glyph_advance(font, (unsigned char)text[i]);
-    }
-}
-
-static void draw_centered(const uint8_t* font, const char* text, int y)
-{
-    if (!text) {
-        return;
-    }
-    const int line_height = font[1];
-    const char* cursor = text;
-    while (*cursor && y + line_height <= SEEDTOOL_DISPLAY_HEIGHT) {
-        const char* end = cursor;
-        int width = 0;
-        while (*end && *end != '\n') {
-            const int advance = glyph_advance(font, (unsigned char)*end);
-            if (end != cursor && width + advance > SEEDTOOL_DISPLAY_WIDTH) {
-                break;
-            }
-            width += advance;
-            ++end;
-        }
-        draw_centered_line(font, cursor, (size_t)(end - cursor), y);
-        cursor = *end == '\n' ? end + 1 : end;
-        y += line_height;
-    }
-}
-
 static void flush(void)
 {
     const uint16_t x_start = LCD_GAP_X;
@@ -201,14 +70,13 @@ static void flush(void)
     lcd_command(LCD_CMD_RASET, rows, sizeof(rows));
     lcd_command(LCD_CMD_RAMWR, NULL, 0);
     ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_DC, 1));
-    transmit(framebuffer, sizeof(framebuffer));
+    transmit(seedtool_render_pixels(), SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT * sizeof(uint16_t));
 }
 
 void seedtool_display_init(void)
 {
     const gpio_config_t control_pins = {
-        .pin_bit_mask = (UINT64_C(1) << LCD_PIN_DC) | (UINT64_C(1) << LCD_PIN_RST)
-            | (UINT64_C(1) << LCD_PIN_BACKLIGHT),
+        .pin_bit_mask = (UINT64_C(1) << LCD_PIN_DC) | (UINT64_C(1) << LCD_PIN_RST) | (UINT64_C(1) << LCD_PIN_BACKLIGHT),
         .mode = GPIO_MODE_OUTPUT,
     };
     ESP_ERROR_CHECK(gpio_config(&control_pins));
@@ -219,7 +87,7 @@ void seedtool_display_init(void)
         .miso_io_num = GPIO_NUM_NC,
         .quadwp_io_num = GPIO_NUM_NC,
         .quadhd_io_num = GPIO_NUM_NC,
-        .max_transfer_sz = sizeof(framebuffer),
+        .max_transfer_sz = SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT * sizeof(uint16_t),
     };
     ESP_ERROR_CHECK(spi_bus_initialize(LCD_HOST, &bus_config, SPI_DMA_CH_AUTO));
 
@@ -238,50 +106,30 @@ void seedtool_display_init(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     lcd_command(LCD_CMD_SLPOUT, NULL, 0);
     vTaskDelay(pdMS_TO_TICKS(100));
-    const uint8_t orientation = 0x60; /* mirror X and swap X/Y */
-    const uint8_t color_mode = 0x55;  /* RGB565 */
-    const uint8_t ram_control[] = { 0x00, 0xf0 }; /* big-endian pixel stream */
+    const uint8_t orientation = 0x60;
+    const uint8_t color_mode = 0x55;
+    const uint8_t ram_control[] = { 0x00, 0xf0 };
     lcd_command(LCD_CMD_MADCTL, &orientation, sizeof(orientation));
     lcd_command(LCD_CMD_COLMOD, &color_mode, sizeof(color_mode));
     lcd_command(LCD_CMD_RAMCTRL, ram_control, sizeof(ram_control));
     lcd_command(LCD_CMD_INVON, NULL, 0);
     lcd_command(LCD_CMD_DISPON, NULL, 0);
     ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_BACKLIGHT, 1));
-    fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK);
+    seedtool_render_clear();
     flush();
 }
 
 void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer)
 {
-    fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK);
-    draw_centered(tft_Ubuntu16, title, 5);
-    draw_centered(tft_DefaultFont, line1, 39);
-    draw_centered(tft_DefaultFont, line2, 65);
-    draw_centered(tft_DefaultFont, footer, 111);
+    seedtool_render_screen(title, line1, line2, footer);
     flush();
 }
 
 bool seedtool_display_qr(const char* text)
 {
-    uint8_t modules[qrcode_getBufferSize(5)];
-    QRCode qr;
-    if (qrcode_initText(&qr, modules, 5, ECC_LOW, text) != 0) {
-        return false;
+    const bool ok = seedtool_render_qr(text);
+    if (ok) {
+        flush();
     }
-    const int scale = 3;
-    const int extent = (qr.size + 2) * scale;
-    const int left = (SEEDTOOL_DISPLAY_WIDTH - extent) / 2;
-    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
-    fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK);
-    fill_rect(left, top, extent, extent, COLOR_WHITE);
-    for (uint8_t y = 0; y < qr.size; ++y) {
-        for (uint8_t x = 0; x < qr.size; ++x) {
-            if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(left + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
-            }
-        }
-    }
-    flush();
-    memset(modules, 0, sizeof(modules));
-    return true;
+    return ok;
 }
