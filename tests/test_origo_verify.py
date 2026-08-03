@@ -75,6 +75,41 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(platform.count("esp_fill_random"), 1)
         self.assertIn("wally_secp_randomize", app)
 
+    def test_word_entry_never_consults_the_rng(self):
+        # Every screen in the word-entry path must be a pure function of what
+        # the user typed. Randomising the initial key or the suggestion order
+        # would put the device RNG back into the one path this tool exists to
+        # keep it out of.
+        root = Path(__file__).parents[1]
+        for name in ("main/seedtool_wordlist.c", "main/seedtool_render.c"):
+            source = (root / name).read_text()
+            for forbidden in ("random", "rand(", "esp_fill"):
+                self.assertNotIn(forbidden, source, name)
+
+    def test_two_button_navigation_uses_a_chord_to_select(self):
+        root = Path(__file__).parents[1]
+        platform = (root / "main/seedtool_platform_esp.c").read_text()
+        header = (root / "main/seedtool_platform.h").read_text()
+        for key in ("KEY_PREV", "KEY_NEXT", "KEY_SELECT", "KEY_TIMEOUT"):
+            self.assertIn(key, header)
+        # Both buttons together stand in for the select button the board lacks,
+        # and holding both must not repeat that select.
+        self.assertIn("left_seen && right_seen", platform)
+        self.assertIn("left_seen != right_seen", platform)
+
+    def test_passphrase_keyboards_cover_printable_ascii(self):
+        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
+        layouts = source.split("passphrase_layouts[PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]
+        covered = set()
+        for line in layouts.splitlines():
+            line = line.strip()
+            if not line.startswith('"'):
+                continue
+            body = line[1 : line.rindex('"')]
+            covered.update(body.replace("\\n", "").replace("\\b", "").replace("\\t", "").replace("\\r", "")
+                           .replace('\\"', '"').replace("\\\\", "\\"))
+        self.assertEqual(covered, {chr(c) for c in range(0x20, 0x7F)})
+
     def test_host_simulator_reuses_firmware_logic_and_renderer(self):
         cmake = (Path(__file__).parents[1] / "host/CMakeLists.txt").read_text()
         for shared in ("seedtool_app.c", "seedtool_core.c", "seedtool_render.c", "qrcode.c"):
@@ -105,10 +140,24 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertNotIn("LOCK_VERSION == 3", source)
 
     def test_bip84_and_bip86_published_vectors(self):
-        fingerprint, addresses = verify.addresses(self.MNEMONIC, "", 0)
+        fingerprint, addresses, accounts = verify.addresses(self.MNEMONIC, "", 0)
         self.assertEqual(fingerprint, "73c5da0a")
         self.assertEqual(addresses[84], "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu")
         self.assertEqual(addresses[86], "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr")
+        # Account xpubs as published in BIP84 and BIP86 themselves.
+        self.assertEqual(
+            accounts[84],
+            "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V",
+        )
+        self.assertEqual(
+            accounts[86],
+            "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ",
+        )
+
+    def test_base58check_handles_leading_zero_bytes(self):
+        # Version byte plus an all-zero hash160: every leading zero byte must
+        # survive as a literal '1', which plain integer encoding would drop.
+        self.assertEqual(verify.base58check(bytes(21)), "1" * 21 + "4oLvT2")
 
     def test_input_ranges(self):
         with self.assertRaises(ValueError):

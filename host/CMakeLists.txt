@@ -40,6 +40,7 @@ add_executable(origo-simulator
     "${ORIGO_ROOT}/main/seedtool_app.c"
     "${ORIGO_ROOT}/main/seedtool_core.c"
     "${ORIGO_ROOT}/main/seedtool_render.c"
+    "${ORIGO_ROOT}/main/seedtool_wordlist.c"
     "${ORIGO_ROOT}/main/qrcode.c"
     "${ORIGO_ROOT}/main/fonts/DefaultFont.c"
     "${ORIGO_ROOT}/main/fonts/Ubuntu16.c")

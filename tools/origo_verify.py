@@ -17,6 +17,8 @@ N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
 G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
      0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+XPUB_VERSION = b"\x04\x88\xb2\x1e"
 WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/data/wordlists/english.txt"
 
 
@@ -117,23 +119,48 @@ def hash160(data):
     return hashlib.new("ripemd160", hashlib.sha256(data).digest()).digest()
 
 
+# A node is (secret, chaincode, depth, parent fingerprint, child number); the
+# last three carry no key material and exist only to serialise an xpub.
 def master(mnemonic, passphrase):
     seed = hashlib.pbkdf2_hmac("sha512", mnemonic.encode(), ("mnemonic" + passphrase).encode(), 2048)
     digest = hmac.new(b"Bitcoin seed", seed, hashlib.sha512).digest()
     secret = int.from_bytes(digest[:32], "big")
     if not 0 < secret < N:
         raise ValueError("invalid BIP32 master key")
-    return secret, digest[32:]
+    return secret, digest[32:], 0, bytes(4), 0
 
 
 def child_private(node, index):
-    secret, chain = node
+    secret, chain, depth, _, _ = node
     data = b"\0" + secret.to_bytes(32, "big") if index & H else pubkey(secret)
     digest = hmac.new(chain, data + index.to_bytes(4, "big"), hashlib.sha512).digest()
     child = (secret + int.from_bytes(digest[:32], "big")) % N
     if not child:
         raise ValueError("invalid BIP32 child key")
-    return child, digest[32:]
+    return child, digest[32:], depth + 1, hash160(pubkey(secret))[:4], index
+
+
+def derive(node, path):
+    for part in path:
+        node = child_private(node, part)
+    return node
+
+
+def base58check(payload):
+    data = payload + hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    number = int.from_bytes(data, "big")
+    encoded = ""
+    while number:
+        number, remainder = divmod(number, 58)
+        encoded = BASE58[remainder] + encoded
+    return "1" * (len(data) - len(data.lstrip(b"\0"))) + encoded
+
+
+def xpub(node):
+    secret, chain, depth, parent, index = node
+    return base58check(
+        XPUB_VERSION + bytes([depth]) + parent + index.to_bytes(4, "big") + chain + pubkey(secret)
+    )
 
 
 def polymod(values):
@@ -176,21 +203,20 @@ def tagged_hash(tag, data):
 
 def addresses(mnemonic, passphrase, index):
     root = master(mnemonic, passphrase)
-    result = {}
+    result, accounts = {}, {}
     for purpose in (84, 86):
-        node = root
-        for part in (purpose | H, 0 | H, 0 | H, 0, index):
-            node = child_private(node, part)
-        point = mul(node[0])
+        account = derive(root, (purpose | H, 0 | H, 0 | H))
+        accounts[purpose] = xpub(account)
+        node = derive(account, (0, index))
         if purpose == 84:
             result[purpose] = segwit(hash160(pubkey(node[0])), 0)
         else:
-            x, y = point
+            x, y = mul(node[0])
             internal = N - node[0] if y & 1 else node[0]
             tweak = int.from_bytes(tagged_hash(b"TapTweak", x.to_bytes(32, "big")), "big")
             out_x, _ = mul((internal + tweak) % N)
             result[purpose] = segwit(out_x.to_bytes(32, "big"), 1)
-    return hash160(pubkey(root[0]))[:4].hex(), result
+    return hash160(pubkey(root[0]))[:4].hex(), result, accounts
 
 
 def generate(args):
@@ -208,11 +234,13 @@ def generate(args):
 
 def inspect(args):
     mnemonic_entropy(args.mnemonic)
-    fingerprint, addrs = addresses(args.mnemonic, args.passphrase, args.index)
+    fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index)
     print("checksum:   valid")
     print("fingerprint:", fingerprint)
-    print(f"m/84'/0'/0'/0/{args.index}: {addrs[84]}")
-    print(f"m/86'/0'/0'/0/{args.index}: {addrs[86]}")
+    for purpose in (84, 86):
+        print(f"[{fingerprint}/{purpose}'/0'/0']: {accounts[purpose]}")
+    for purpose in (84, 86):
+        print(f"m/{purpose}'/0'/0'/0/{args.index}: {addrs[purpose]}")
 
 
 def complete(args):

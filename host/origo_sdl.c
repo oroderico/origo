@@ -64,6 +64,13 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     present();
 }
 
+void seedtool_display_keyboard(
+    const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
+{
+    seedtool_render_keyboard(title, text, layout, enabled, selected);
+    present();
+}
+
 bool seedtool_display_qr(const char* text)
 {
     const bool ok = seedtool_render_qr(text);
@@ -76,10 +83,21 @@ bool seedtool_display_qr(const char* text)
 void seedtool_platform_init(void)
 {
     seedtool_display_init();
-    puts("Controls: Left/A = next or back; Right/D/Enter/Space = select; Q/Esc = quit");
+    puts("Controls: Left/A = previous; Right/D = next; Enter/Space, or Left+Right "
+         "together as on the device = select; Q/Esc = quit");
 }
 
 uint64_t seedtool_platform_milliseconds(void) { return SDL_GetTicks64(); }
+
+/* The device has no select button: pressing both navigation buttons together
+ * stands in for it, so the simulator accepts that chord as well as Enter. */
+static bool other_button_down(const SDL_Keycode pressed)
+{
+    const Uint8* const keys = SDL_GetKeyboardState(NULL);
+    const bool left_down = keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A];
+    const bool right_down = keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D];
+    return (pressed == SDLK_LEFT || pressed == SDLK_a) ? right_down : left_down;
+}
 
 seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
 {
@@ -97,18 +115,23 @@ seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
         if (event.type == SDL_QUIT) {
             seedtool_platform_restart();
         }
-        if (event.type != SDL_KEYDOWN || event.key.repeat) {
+        if (event.type != SDL_KEYDOWN) {
             continue;
         }
-        switch (event.key.keysym.sym) {
+        const SDL_Keycode key = event.key.keysym.sym;
+        switch (key) {
         case SDLK_LEFT:
         case SDLK_a:
-            return KEY_LEFT;
+            return other_button_down(key) ? KEY_SELECT : KEY_PREV;
         case SDLK_RIGHT:
         case SDLK_d:
+            return other_button_down(key) ? KEY_SELECT : KEY_NEXT;
         case SDLK_RETURN:
         case SDLK_SPACE:
-            return KEY_RIGHT;
+            if (!event.key.repeat) {
+                return KEY_SELECT;
+            }
+            break;
         case SDLK_ESCAPE:
         case SDLK_q:
             seedtool_platform_restart();

@@ -1,6 +1,9 @@
 build*/
 sdkconfig
 sdkconfig.old
+
+# Local checkout of Blockstream Jade, kept alongside for reference only.
+jade/
 __pycache__/
 *.py[cod]
 

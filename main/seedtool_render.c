@@ -8,6 +8,13 @@
 
 #define COLOR_BLACK UINT16_C(0x0000)
 #define COLOR_WHITE UINT16_C(0xffff)
+#define COLOR_DIM UINT16_C(0x39e7)
+#define COLOR_HIGHLIGHT UINT16_C(0xfd20)
+
+#define KEYBOARD_COLUMNS 10
+#define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
+#define KEY_HEIGHT 27
+#define KEYBOARD_TOP (SEEDTOOL_DISPLAY_HEIGHT - 3 * KEY_HEIGHT)
 
 extern const unsigned char tft_DefaultFont[];
 extern const unsigned char tft_Ubuntu16[];
@@ -85,7 +92,8 @@ static int text_width(const uint8_t* font, const char* text, const size_t length
     return width ? width - 1 : 0;
 }
 
-static void draw_glyph(const uint8_t* font, const unsigned char character, const int x, const int y)
+static void draw_glyph(
+    const uint8_t* font, const unsigned char character, const int x, const int y, const uint16_t color)
 {
     glyph_t glyph;
     if (!find_glyph(font, character, &glyph)) {
@@ -95,10 +103,31 @@ static void draw_glyph(const uint8_t* font, const unsigned char character, const
     for (uint8_t row = 0; row < glyph.height; ++row) {
         for (uint8_t col = 0; col < glyph.width; ++col, ++bit) {
             if (glyph.bitmap[bit / 8] & (UINT8_C(0x80) >> (bit % 8))) {
-                fill_rect(x + glyph.x_offset + col, y + glyph.y_offset + row, 1, 1, COLOR_WHITE);
+                fill_rect(x + glyph.x_offset + col, y + glyph.y_offset + row, 1, 1, color);
             }
         }
     }
+}
+
+static void draw_line_at(
+    const uint8_t* font, const char* text, const size_t length, int x, const int y, const uint16_t color)
+{
+    for (size_t i = 0; i < length; ++i) {
+        draw_glyph(font, (unsigned char)text[i], x, y, color);
+        x += glyph_advance(font, (unsigned char)text[i]);
+    }
+}
+
+/* Centre `text` inside the box of `width` pixels starting at `x`. */
+static void draw_centered_in(const uint8_t* font, const char* text, const int x, const int width, const int y,
+    const uint16_t color)
+{
+    const size_t length = strlen(text);
+    int offset = (width - text_width(font, text, length)) / 2;
+    if (offset < 0) {
+        offset = 0;
+    }
+    draw_line_at(font, text, length, x + offset, y, color);
 }
 
 static void draw_centered_line(const uint8_t* font, const char* text, const size_t length, const int y)
@@ -107,10 +136,7 @@ static void draw_centered_line(const uint8_t* font, const char* text, const size
     if (x < 0) {
         x = 0;
     }
-    for (size_t i = 0; i < length; ++i) {
-        draw_glyph(font, (unsigned char)text[i], x, y);
-        x += glyph_advance(font, (unsigned char)text[i]);
-    }
+    draw_line_at(font, text, length, x, y, COLOR_WHITE);
 }
 
 static void draw_centered(const uint8_t* font, const char* text, int y)
@@ -137,6 +163,20 @@ static void draw_centered(const uint8_t* font, const char* text, int y)
     }
 }
 
+size_t seedtool_render_fit(const char* text, const size_t limit)
+{
+    int width = 0;
+    size_t count = 0;
+    for (; count < limit && text[count]; ++count) {
+        const int advance = glyph_advance(tft_DefaultFont, (unsigned char)text[count]);
+        if (width + advance > SEEDTOOL_DISPLAY_WIDTH - 4) {
+            break;
+        }
+        width += advance;
+    }
+    return count;
+}
+
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
 
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer)
@@ -146,6 +186,67 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
     draw_centered(tft_DefaultFont, line1, 39);
     draw_centered(tft_DefaultFont, line2, 65);
     draw_centered(tft_DefaultFont, footer, 111);
+}
+
+static const char* key_label(const char key, char* scratch)
+{
+    switch (key) {
+    case SEEDTOOL_KEY_BACKSPACE:
+        return "del";
+    case SEEDTOOL_KEY_PAGE:
+        return ">>";
+    case SEEDTOOL_KEY_ACCEPT:
+        return "OK";
+    case ' ':
+        return "SP";
+    default:
+        scratch[0] = key;
+        scratch[1] = '\0';
+        return scratch;
+    }
+}
+
+static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    fill_rect(x, y, width, 1, color);
+    fill_rect(x, y + height - 1, width, 1, color);
+    fill_rect(x, y, 1, height, color);
+    fill_rect(x + width - 1, y, 1, height, color);
+}
+
+void seedtool_render_keyboard(
+    const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, 2);
+    draw_centered(tft_DefaultFont, text, 32);
+
+    size_t key = 0;
+    int y = KEYBOARD_TOP;
+    for (const char* row = layout; *row;) {
+        const char* end = row;
+        while (*end && *end != '\n') {
+            ++end;
+        }
+        const int count = (int)(end - row);
+        const int left = (SEEDTOOL_DISPLAY_WIDTH - count * KEY_WIDTH) / 2;
+        for (int column = 0; column < count; ++column, ++key) {
+            const bool active = !enabled || enabled[key];
+            const bool highlighted = key == selected;
+            const int x = left + column * KEY_WIDTH;
+            char scratch[2];
+            const char* const label = key_label(row[column], scratch);
+            if (highlighted) {
+                fill_rect(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, COLOR_HIGHLIGHT);
+            } else {
+                draw_border(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, active ? COLOR_DIM : COLOR_BLACK);
+            }
+            const uint16_t ink = highlighted ? COLOR_BLACK : active ? COLOR_WHITE : COLOR_DIM;
+            draw_centered_in(tft_DefaultFont, label, x, KEY_WIDTH, y + (KEY_HEIGHT - tft_DefaultFont[1]) / 2, ink);
+        }
+        y += KEY_HEIGHT;
+        row = *end ? end + 1 : end;
+    }
 }
 
 bool seedtool_render_qr(const char* text)

@@ -10,6 +10,7 @@
 #define SEEDTOOL_MAX_MNEMONIC_LEN 240
 #define SEEDTOOL_MAX_PASSPHRASE_LEN 100
 #define SEEDTOOL_MAX_ADDRESS_LEN 96
+#define SEEDTOOL_MAX_XPUB_LEN 112
 
 typedef enum {
     SEEDTOOL_OK = 0,
@@ -55,6 +56,12 @@ seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 
 seedtool_result_t seedtool_master_fingerprint(
     const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
+
+/* Watch-only account key at m/type'/0'/0' in standard BIP32 serialisation. The
+ * caller shows it with its derivation path; no SLIP-132 variants are produced. */
+seedtool_result_t seedtool_account_xpub(
+    const char* mnemonic, const char* passphrase, seedtool_address_type_t type, char* output, size_t output_len);
+
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t index, char* output, size_t output_len);
 

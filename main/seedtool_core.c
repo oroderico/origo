@@ -280,6 +280,40 @@ seedtool_result_t seedtool_master_fingerprint(
     return ret;
 }
 
+seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase,
+    const seedtool_address_type_t type, char* output, const size_t output_len)
+{
+    if (!output || !output_len || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
+        return SEEDTOOL_EINVAL;
+    }
+    uint8_t seed[64];
+    struct ext_key root, account;
+    char* base58 = NULL;
+    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, 0 | HARDENED };
+    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
+    if (ret != SEEDTOOL_OK
+        || bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &account)
+            != WALLY_OK
+        || bip32_key_to_base58(&account, BIP32_FLAG_KEY_PUBLIC, &base58) != WALLY_OK || !base58) {
+        ret = SEEDTOOL_ECRYPTO;
+        goto done;
+    }
+    if (strlen(base58) + 1 > output_len) {
+        ret = SEEDTOOL_ENOSPACE;
+    } else {
+        strcpy(output, base58);
+        ret = SEEDTOOL_OK;
+    }
+done:
+    if (base58) {
+        wally_free_string(base58);
+    }
+    seedtool_zero(seed, sizeof(seed));
+    seedtool_zero(&root, sizeof(root));
+    seedtool_zero(&account, sizeof(account));
+    return ret;
+}
+
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase,
     const seedtool_address_type_t type, const uint32_t index, char* output, const size_t output_len)
 {

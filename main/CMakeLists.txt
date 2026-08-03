@@ -4,6 +4,7 @@ idf_component_register(
          "seedtool_display.c"
          "seedtool_render.c"
          "seedtool_platform_esp.c"
+         "seedtool_wordlist.c"
          "origo_esp_main.c"
          "qrcode.c"
          "fonts/DefaultFont.c"

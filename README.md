@@ -35,15 +35,43 @@ words plus exactly 3 flips. Those flips are the missing entropy bits and lead
 to one checksum-valid final word; the firmware never randomly selects from the
 128 or 8 otherwise-valid endings.
 
-Existing mnemonics are validated before derivation. Words are entered by their
-zero-based BIP39 English index (`abandon` is 0 and `zoo` is 2047), which keeps
-entry unambiguous on the two-button display. An optional printable-ASCII
-passphrase of at most 100 characters is entered twice and exists for that
-derivation session only.
+## Controls
 
-The viewer displays the master fingerprint and mainnet receive addresses for
-indices 0 through 99 at `m/84'/0'/0'/0/i` and `m/86'/0'/0'/0/i`. QR codes contain
-only the raw address. Mnemonics, passphrases, and xpubs are never encoded as QR.
+The board has two buttons and no select button. The left button moves to the
+previous item, the right button to the next, and both pressed together select.
+Holding one button repeats it. A press is acted on only once both buttons are
+released, so a chord is never mistaken for a step.
+
+Words are typed on a letter keyboard. Only letters that still lead to a BIP39
+word are reachable, and once ten or fewer words remain they are offered directly
+instead. Deleting past the start of a word steps back to the previous one. The
+suggestion order and the initially selected key are a pure function of what has
+been typed. Neither is randomised: no screen in the entry path may depend on the
+device RNG.
+
+An optional printable-ASCII passphrase of at most 100 characters is typed on a
+four-page keyboard covering the whole printable range, entered twice, and exists
+for that derivation session only.
+
+## Restore and inspect
+
+Existing mnemonics are validated before derivation; a bad checksum blocks the
+address viewer entirely. For a valid mnemonic the viewer shows:
+
+- the master fingerprint;
+- the watch-only account key at `m/84'/0'/0'` and `m/86'/0'/0'`, in standard
+  BIP32 `xpub` serialisation, titled with its key origin such as
+  `[73c5da0a/84'/0'/0']`. No SLIP-132 `zpub` variants are produced;
+- mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i` and
+  `m/86'/0'/0'/0/i`.
+
+Long values are paged two lines at a time, split by what actually fits the
+display rather than by a character count, so a proportional font can never drop
+a character from a value that is about to be transcribed.
+
+QR codes contain only the raw address. Mnemonics, passphrases, and xpubs are
+never encoded as QR: an account xpub in a photographed QR would expose every
+past and future address of that account.
 
 ## Run on a PC
 
@@ -63,9 +91,13 @@ sudo apt install build-essential cmake pkg-config libsdl2-dev
 ./tools/run-simulator.sh
 ```
 
-Use `Left` or `A` for the left TTGO button; use `Right`, `D`, `Enter` or `Space`
-for the right button. `Q` or `Escape` closes the simulator. Run the non-graphical
-compiled-core check with `./tools/run-simulator.sh --self-test`.
+Use `Left` or `A` for the left TTGO button and `Right` or `D` for the right one.
+Select with `Enter` or `Space`, or by holding one arrow and pressing the other
+as you would on the device. `Q` or `Escape` closes the simulator. Run the
+non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
+it verifies the published BIP84/BIP86 address and account xpub vectors, that
+every prefix of every BIP39 word is reachable through the keyboard, and that
+paged text reassembles byte for byte.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
@@ -106,9 +138,13 @@ python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 ```
 
+`inspect` prints the checksum verdict, master fingerprint, both account xpubs
+and both addresses, so every value the device can display has an independent
+second implementation to be compared against.
+
 Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and
-compare the transcript, full hash, fingerprint, and addresses.
+compare the transcript, full hash, fingerprint, xpubs, and addresses.
 
 ## Safety boundaries
 

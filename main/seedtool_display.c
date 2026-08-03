@@ -125,6 +125,13 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     flush();
 }
 
+void seedtool_display_keyboard(
+    const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
+{
+    seedtool_render_keyboard(title, text, layout, enabled, selected);
+    flush();
+}
+
 bool seedtool_display_qr(const char* text)
 {
     const bool ok = seedtool_render_qr(text);
