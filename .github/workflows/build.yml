@@ -14,7 +14,7 @@ jobs:
     container: espressif/idf:v5.5.4
     steps:
       - name: Check out source and pinned submodules
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
         with:
           submodules: recursive
           fetch-depth: 0
@@ -29,7 +29,9 @@ jobs:
           /tmp/origo-qrcode-smoke
 
       - name: Build twice and audit
+        shell: bash
         run: |
+          source /opt/esp/idf/export.sh
           idf.py -B "$GITHUB_WORKSPACE/build-a" \
             -D SDKCONFIG="$GITHUB_WORKSPACE/build-a/sdkconfig" build
           idf.py -B "$GITHUB_WORKSPACE/build-b" \
@@ -44,11 +46,10 @@ jobs:
           sha256sum build-a/origo.bin > SHA256SUMS
 
       - name: Upload audited firmware
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: origo-${{ github.sha }}
           path: |
             build-a/origo.bin
             SHA256SUMS
           if-no-files-found: error
-
