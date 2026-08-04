@@ -64,6 +64,19 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     present();
 }
 
+void seedtool_display_splash(void)
+{
+    seedtool_render_splash();
+    present();
+}
+
+void seedtool_display_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* footer)
+{
+    seedtool_render_list(title, items, count, selected, top, footer);
+    present();
+}
+
 void seedtool_display_keyboard(
     const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
 {
@@ -71,9 +84,9 @@ void seedtool_display_keyboard(
     present();
 }
 
-bool seedtool_display_qr(const char* text)
+bool seedtool_display_qr(const char* title, const char* text)
 {
-    const bool ok = seedtool_render_qr(text);
+    const bool ok = seedtool_render_qr(title, text);
     if (ok) {
         present();
     }

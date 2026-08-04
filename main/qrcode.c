@@ -83,6 +83,15 @@ static const int16_t NUM_ERROR_CORRECTION_CODEWORDS[4] = { 48, 26, 88, 72 };
 static const int8_t NUM_ERROR_CORRECTION_BLOCKS[4] = { 2, 1, 4, 4 };
 static const uint16_t NUM_RAW_DATA_MODULES = 1079;
 
+#elif LOCK_VERSION == 6
+
+/* Version 6 only, the column for version 6 of the tables above in the same
+ * M/L/H/Q order. At ECC_LOW this holds 134 bytes, which is what a key origin
+ * and an account xpub need. */
+static const int16_t NUM_ERROR_CORRECTION_CODEWORDS[4] = { 64, 36, 112, 96 };
+static const int8_t NUM_ERROR_CORRECTION_BLOCKS[4] = { 4, 2, 4, 4 };
+static const uint16_t NUM_RAW_DATA_MODULES = 1383;
+
 #else
 
 #error Unsupported LOCK_VERSION (add it...)

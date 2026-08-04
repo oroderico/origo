@@ -18,6 +18,14 @@ device RNG is stubbed.
 The transcript is shown before its full SHA256 and mnemonic. Record it so the
 calculation can be reproduced independently.
 
+While the entries are being keyed in, the transcript so far is shown under the
+value being entered, so a mis-keyed roll is caught against the paper then rather
+than after ninety-nine of them. Only the tail that fits one line is drawn, which
+is the part that just changed, and stepping back unwrites the last entry. What is
+on screen is always a prefix of the finished transcript — the self-test checks
+that for every prefix length of every source, since a separator that appeared
+only later would mean checking a string the device then rewrites.
+
 | Source | 12 words | 24 words | Canonical transcript |
 |---|---:|---:|---|
 | D6 | 50 rolls | 99 rolls | digits concatenated, e.g. `123456` |
@@ -35,6 +43,25 @@ words plus exactly 3 flips. Those flips are the missing entropy bits and lead
 to one checksum-valid final word; the firmware never randomly selects from the
 128 or 8 otherwise-valid endings.
 
+The opening screen shows the logo as drawn — mark, wordmark and tagline in one
+picture — for a couple of seconds and then gives way to the menu on its own.
+Presses are discarded while it is up: it is where the user is still learning that
+both buttons together mean select, and a screen that offers no choice must not
+turn a stray press into one.
+
+That artwork is the only picture in the firmware: a 98x110 array of sixteen
+palette entries at two pixels per byte, about 5.4 KiB, written straight into the
+framebuffer by indexing that palette. It is deliberately not compressed. Deflate
+would take it to roughly 2 KiB, but the decompressor is one of the components the
+audit rejects by name, and trading an audited absence for two kilobytes in an
+image that already has twelve to spare is a bad exchange. Sixteen colours are the
+compression: they differ from full RGB565 by well under one percent on this
+artwork, which is drawn with a limited palette to begin with.
+
+`tools/make_logo.py` regenerates `main/seedtool_logo.c` from `assets/logo.png`
+and is the one place Pillow is used; the firmware, the verifier and the tests
+stay dependency-free.
+
 ## Controls
 
 The board has two buttons and no select button. The left button moves to the
@@ -42,12 +69,67 @@ previous item, the right button to the next, and both pressed together select.
 Holding one button repeats it. A press is acted on only once both buttons are
 released, so a chord is never mistaken for a step.
 
-Words are typed on a letter keyboard. Only letters that still lead to a BIP39
-word are reachable, and once ten or fewer words remain they are offered directly
-instead. Deleting past the start of a word steps back to the previous one. The
-suggestion order and the initially selected key are a pure function of what has
-been typed. Neither is randomised: no screen in the entry path may depend on the
-device RNG.
+Pressing a button teaches left, right and hold. It cannot teach the chord, since
+nothing moves until both buttons are released, so `L/R move   BOTH select` sits
+under the first screens and disappears for good once the chord has been used
+once. What stays under a screen after that is its position counter alone. The
+two footers that name a consequence rather than a gesture — `BOTH continue   L/R
+back`, and the timeout's `BOTH extend   L/R erase` — are always shown, because
+guessing wrong there costs a session.
+
+Three gestures is all two buttons afford, and all three are spoken for, so going
+back cannot be a button: it is a place on the screen. Every screen has one, and
+it steps back exactly one stage rather than abandoning the flow. Menus carry a
+`Back` row; the word list carries `[delete]`; deleting past the start of a word
+returns to the previous word, and past the first word to the menu before it. The
+numeric carousel carries `[back]` one step below its lowest value, so a misread
+roll 29 of 50 is corrected by stepping back to it rather than by waiting out the
+session timeout and starting the transcript again.
+
+Every choice is a list showing three options at once with the selection
+highlighted, so an option is always read alongside its neighbours. Three rather
+than five, because three rows leave room for the 16px face instead of the 11px
+one and this is read at arm's length off a screen an inch across; the cost is
+that more lists scroll. A longer list scrolls by the least it can and carries a
+scrollbar down its right edge: the thumb is as tall a fraction of the track as
+the visible rows are of the list, and it sits flush with the top on the first row
+and flush with the bottom on the last. Three rows on their own say nothing about
+how much is below them; the thumb says how much and where. The end of a list is
+never padded with blank rows. Only labels are listed. Values meant to be transcribed are paged
+instead, split by what fits the display.
+
+The last row of every list is the way out of it — `Back`, `Reboot`,
+`Done / erase`, `[delete]` — and a rule is drawn above it so it is not read as
+one more choice. That row is always last, in every list, so leaving a screen is
+always in the same place.
+
+Entering a mnemonic asks first whether the words will be typed as letters or as
+word numbers, and every word of that mnemonic is then entered the chosen way.
+
+Typed as letters, only letters that still lead to a BIP39 word are reachable, and
+once ten or fewer words remain they are listed outright. Typed as numbers, only
+digits that still lead to a word number are reachable, and the number is shown as
+the word it means, to be confirmed, before the next word is asked for. In both
+cases deleting past the start of a word steps back to the previous one.
+
+A word number is one-based: the position in a printed BIP39 English wordlist,
+where `abandon` is 1 and `zoo` is 2048. It is one more than the zero-based index
+the encoding itself uses, so a list numbered from zero must be read with that in
+mind. `tools/origo_verify.py inspect` prints the same one-based numbers for a
+mnemonic, and the self-test requires all 2048 of them to be typeable both plainly
+and padded to four digits.
+
+The keyboards are QWERTY. The cursor opens on the middle key of the middle row —
+`g` on the letter keyboards, `5` on the number one — because on a ring of thirty
+keys walked with two buttons the corner is the furthest possible place to start
+from. It then keeps its place, so repeating a character is one press rather than
+a walk back, and returns to the centre when a keyboard is opened or a symbol page
+is turned. When the letter it was resting on stops leading to a word, it moves to
+the nearest key that still does.
+
+The suggestion order, the initially selected key and where a list has scrolled to
+are pure functions of what has been typed and chosen. None is randomised: no
+screen in the entry path may depend on the device RNG.
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
 four-page keyboard covering the whole printable range, entered twice, and exists
@@ -65,19 +147,41 @@ address viewer entirely. For a valid mnemonic the viewer shows:
 - mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i` and
   `m/86'/0'/0'/0/i`.
 
-Long values are paged two lines at a time, split by what actually fits the
-display rather than by a character count, so a proportional font can never drop
-a character from a value that is about to be transcribed.
+Long values are paged two lines at a time in the 16px face, split by what
+actually fits the display rather than by a character count, so a proportional
+font can never drop a character from a value that is about to be transcribed.
+The larger face costs four characters a line and no extra page: it is 45% taller
+than the small one but only 18% wider on base58. Footers keep the small face,
+where 16px would run off the bottom of the display, and so do the keys still
+spelled with a word: `OK` at 16px is 24px wide in a 24px cell. Backspace is drawn
+as an arrow instead of spelled, since the fonts are 95 printable ASCII characters
+and have no glyph for it.
 
-QR codes contain only the raw address. Mnemonics, passphrases, and xpubs are
-never encoded as QR: an account xpub in a photographed QR would expose every
-past and future address of that account.
+Both account keys and both addresses can be shown as QR codes. The QR screen
+steps sideways through all four, each one named in the margin beside it, so an
+account key and the address it belongs to are one press apart. An account key is
+encoded together with its key origin, as `[73c5da0a/84'/0'/0']xpub...`, which is
+what a watch-only wallet needs to import the account without being told the
+derivation path; 131 of the 134 bytes a version-6 code holds. There is nothing
+animated to scan: it is one image.
+
+**Photographing an account key QR reveals every address of that account, past and
+future.** That is the whole point of the code and the whole cost of it, and the
+device says so before showing one. Mnemonics and passphrases are never encoded as
+QR under any circumstance.
 
 ## Run on a PC
 
 The SDL simulator runs the firmware's actual application flow, deterministic
 core, renderer, fonts, QR encoder and pinned libwally source. Only the display,
 buttons, clock and secp256k1 blinding randomness are replaced by host adapters.
+
+Everything below the framebuffer is therefore outside its reach: the SPI path,
+the panel's initialisation and the byte order pixels are sent in are exercised
+only on the device. A colour that is right in the simulator can still be wrong on
+the board, and once was. What can be pinned from the host is pinned — the wire
+byte order has its own check in the self-test, and another test asserts the
+driver still calls it — but a screen is finally judged on the hardware.
 
 Install the native build dependencies and run it:
 
@@ -96,8 +200,11 @@ Select with `Enter` or `Space`, or by holding one arrow and pressing the other
 as you would on the device. `Q` or `Escape` closes the simulator. Run the
 non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
 it verifies the published BIP84/BIP86 address and account xpub vectors, that
-every prefix of every BIP39 word is reachable through the keyboard, and that
-paged text reassembles byte for byte.
+every prefix of every BIP39 word and all 2048 word numbers are reachable through
+their keyboards, that paged text reassembles byte for byte, that a scrolling list
+always keeps the selection on screen and never pads its end with blank rows, that
+the rearranged keyboards still hold every letter and every printable character,
+and that an account key with its origin still fits a single QR code.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
@@ -138,7 +245,8 @@ python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 ```
 
-`inspect` prints the checksum verdict, master fingerprint, both account xpubs
+`inspect` prints the checksum verdict, one-based word numbers, master
+fingerprint, both account xpubs, the exact payload of both account key QR codes
 and both addresses, so every value the device can display has an independent
 second implementation to be compared against.
 

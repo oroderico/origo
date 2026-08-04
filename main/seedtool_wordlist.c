@@ -37,6 +37,61 @@ size_t seedtool_words_with_prefix(
     return matches;
 }
 
+/* The digits read as a plain integer, whether or not it is a word number. At
+ * most four digits, so 9999 is the largest value this can produce. */
+static bool digits_value(const char* digits, const size_t digits_len, unsigned* value)
+{
+    unsigned result = 0;
+    for (size_t i = 0; i < digits_len; ++i) {
+        if (digits[i] < '0' || digits[i] > '9') {
+            return false;
+        }
+        result = result * 10 + (unsigned)(digits[i] - '0');
+    }
+    *value = result;
+    return true;
+}
+
+unsigned seedtool_word_number(const char* digits, const size_t digits_len)
+{
+    unsigned value = 0;
+    if (!digits || !digits_len || digits_len > SEEDTOOL_MAX_WORD_DIGITS || !digits_value(digits, digits_len, &value)) {
+        return 0;
+    }
+    return value >= 1 && value <= SEEDTOOL_WORDLIST_LEN ? value : 0;
+}
+
+size_t seedtool_next_digits(const char* digits, const size_t digits_len, bool enabled[SEEDTOOL_DIGITS])
+{
+    if (!digits || !enabled) {
+        return 0;
+    }
+    memset(enabled, 0, sizeof(bool) * SEEDTOOL_DIGITS);
+    unsigned prefix = 0;
+    if (digits_len >= SEEDTOOL_MAX_WORD_DIGITS || !digits_value(digits, digits_len, &prefix)) {
+        return 0;
+    }
+    const size_t remaining = SEEDTOOL_MAX_WORD_DIGITS - digits_len - 1;
+    size_t count = 0;
+    for (unsigned digit = 0; digit < SEEDTOOL_DIGITS; ++digit) {
+        /* With `remaining` digits still to come, what this prefix can still
+         * reach are the ranges [low, low + span - 1] as it is padded out. The
+         * digit is offered only if one of them holds a word number, which is
+         * what keeps 2049 unreachable while 2048 stays typeable. */
+        unsigned low = prefix * 10 + digit, span = 1;
+        for (size_t k = 0; k <= remaining; ++k) {
+            if (low + span - 1 >= 1 && low <= SEEDTOOL_WORDLIST_LEN) {
+                enabled[digit] = true;
+                ++count;
+                break;
+            }
+            low *= 10;
+            span *= 10;
+        }
+    }
+    return count;
+}
+
 size_t seedtool_next_letters(const char* prefix, const size_t prefix_len, bool enabled[SEEDTOOL_LETTERS])
 {
     if (!prefix || !enabled) {

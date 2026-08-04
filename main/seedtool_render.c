@@ -1,6 +1,7 @@
 #include "seedtool_render.h"
 
 #include "qrcode.h"
+#include "seedtool_logo.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,6 +16,37 @@
 #define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
 #define KEY_HEIGHT 27
 #define KEYBOARD_TOP (SEEDTOOL_DISPLAY_HEIGHT - 3 * KEY_HEIGHT)
+
+/* The 16px title, three 33px rows and the 11px footer fill the 135px display
+ * exactly. The rightmost strip carries the scroll arrows and is kept clear of
+ * the selection bar so a long label never runs underneath one. */
+#define LIST_TITLE_Y 3
+#define LIST_TOP 21
+#define LIST_ROW_HEIGHT 33
+#define LIST_FOOTER_Y 122
+#define LIST_GUTTER 10
+#define LIST_BAR_X 2
+#define LIST_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - LIST_GUTTER - 2 * LIST_BAR_X)
+#define LIST_TEXT_X 6
+#define LIST_TEXT_WIDTH (LIST_BAR_X + LIST_BAR_WIDTH - LIST_TEXT_X)
+#define LIST_SCROLL_X (SEEDTOOL_DISPLAY_WIDTH - 7)
+#define LIST_SCROLL_WIDTH 4
+#define LIST_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * LIST_ROW_HEIGHT)
+#define LIST_SCROLL_MIN 10
+
+/* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
+ * xpub in one image. Raising it again is a compile error rather than a code
+ * quietly clipped by the bottom of the display. */
+#define QR_VERSION 6
+#define QR_SCALE 3
+#define QR_MODULES (17 + 4 * QR_VERSION)
+#define QR_EXTENT ((QR_MODULES + 2) * QR_SCALE)
+#define QR_LEFT 3
+#define QR_TITLE_X (QR_LEFT + QR_EXTENT + 5)
+#define QR_TITLE_WIDTH (SEEDTOOL_DISPLAY_WIDTH - QR_TITLE_X - 3)
+#define QR_TITLE_Y 50
+_Static_assert(QR_EXTENT <= SEEDTOOL_DISPLAY_HEIGHT, "the QR no longer fits the display");
+_Static_assert(QR_TITLE_WIDTH >= 80, "no room left beside the QR to name what it holds");
 
 extern const unsigned char tft_DefaultFont[];
 extern const unsigned char tft_Ubuntu16[];
@@ -130,16 +162,18 @@ static void draw_centered_in(const uint8_t* font, const char* text, const int x,
     draw_line_at(font, text, length, x + offset, y, color);
 }
 
-static void draw_centered_line(const uint8_t* font, const char* text, const size_t length, const int y)
+static void draw_centered_line(
+    const uint8_t* font, const char* text, const size_t length, const int x, const int width, const int y)
 {
-    int x = (SEEDTOOL_DISPLAY_WIDTH - text_width(font, text, length)) / 2;
-    if (x < 0) {
-        x = 0;
+    int offset = (width - text_width(font, text, length)) / 2;
+    if (offset < 0) {
+        offset = 0;
     }
-    draw_line_at(font, text, length, x, y, COLOR_WHITE);
+    draw_line_at(font, text, length, x + offset, y, COLOR_WHITE);
 }
 
-static void draw_centered(const uint8_t* font, const char* text, int y)
+/* Centred and wrapped inside the box of `width` pixels starting at `x`. */
+static void draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
 {
     if (!text) {
         return;
@@ -148,28 +182,49 @@ static void draw_centered(const uint8_t* font, const char* text, int y)
     const char* cursor = text;
     while (*cursor && y + line_height <= SEEDTOOL_DISPLAY_HEIGHT) {
         const char* end = cursor;
-        int width = 0;
+        int used = 0;
         while (*end && *end != '\n') {
             const int advance = glyph_advance(font, (unsigned char)*end);
-            if (end != cursor && width + advance > SEEDTOOL_DISPLAY_WIDTH) {
+            if (end != cursor && used + advance > width) {
                 break;
             }
-            width += advance;
+            used += advance;
             ++end;
         }
-        draw_centered_line(font, cursor, (size_t)(end - cursor), y);
+        draw_centered_line(font, cursor, (size_t)(end - cursor), x, width, y);
         cursor = *end == '\n' ? end + 1 : end;
         y += line_height;
     }
 }
 
-size_t seedtool_render_fit(const char* text, const size_t limit)
+static void draw_centered(const uint8_t* font, const char* text, const int y)
+{
+    draw_centered_box(font, text, 0, SEEDTOOL_DISPLAY_WIDTH, y);
+}
+
+/* What has been typed so far, read back to be checked, so it takes the larger
+ * face. Only the tail that fits one line is drawn: a passphrase long enough to
+ * wrap would push a second line down into the keyboard. */
+static void draw_typed(const uint8_t* font, const char* text, const int y)
+{
+    const size_t length = strlen(text);
+    size_t start = 0;
+    while (start < length && text_width(font, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
+        ++start;
+    }
+    draw_centered_line(font, text + start, length - start, 0, SEEDTOOL_DISPLAY_WIDTH, y);
+}
+
+/* Leading characters of `text` that fit in `max_width` pixels, at most `limit`
+ * of them. The body font is proportional, so every caller that has to know where
+ * text stops measures it here rather than counting characters. */
+static size_t fit_in(const uint8_t* font, const char* text, const size_t limit, const int max_width)
 {
     int width = 0;
     size_t count = 0;
     for (; count < limit && text[count]; ++count) {
-        const int advance = glyph_advance(tft_DefaultFont, (unsigned char)text[count]);
-        if (width + advance > SEEDTOOL_DISPLAY_WIDTH - 4) {
+        const int advance = glyph_advance(font, (unsigned char)text[count]);
+        if (width + advance > max_width) {
             break;
         }
         width += advance;
@@ -177,22 +232,214 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
     return count;
 }
 
+size_t seedtool_render_fit(const char* text, const size_t limit)
+{
+    return fit_in(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+}
+
+size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
+
+size_t seedtool_render_fit_tail(const char* text)
+{
+    const size_t length = strlen(text);
+    size_t start = 0;
+    while (start < length && text_width(tft_Ubuntu16, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
+        ++start;
+    }
+    return length - start;
+}
+
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
+
+/* The splash is the logo as it was drawn — mark, wordmark and tagline in one
+ * picture — and nothing else: it holds the screen briefly and then the menu
+ * takes over, so there is no instruction to give. */
+_Static_assert(SEEDTOOL_LOGO_WIDTH <= SEEDTOOL_DISPLAY_WIDTH, "the logo is wider than the display");
+_Static_assert(SEEDTOOL_LOGO_HEIGHT <= SEEDTOOL_DISPLAY_HEIGHT, "the logo is taller than the display");
+
+/* Sixteen palette entries at two pixels per byte, high nibble first. Written
+ * straight into the framebuffer: it is one picture on one screen, not a drawing
+ * surface for anything else to use. */
+static void draw_logo(const int x, const int y)
+{
+    for (int row = 0; row < SEEDTOOL_LOGO_HEIGHT; ++row) {
+        uint16_t* const out = framebuffer + (y + row) * SEEDTOOL_DISPLAY_WIDTH + x;
+        for (int column = 0; column < SEEDTOOL_LOGO_WIDTH; ++column) {
+            const int index = row * SEEDTOOL_LOGO_WIDTH + column;
+            const uint8_t packed = seedtool_logo_pixels[index / 2];
+            out[column] = seedtool_logo_palette[index % 2 ? packed & 0x0f : packed >> 4];
+        }
+    }
+}
+
+void seedtool_render_splash(void)
+{
+    seedtool_render_clear();
+    draw_logo((SEEDTOOL_DISPLAY_WIDTH - SEEDTOOL_LOGO_WIDTH) / 2,
+        (SEEDTOOL_DISPLAY_HEIGHT - SEEDTOOL_LOGO_HEIGHT) / 2);
+}
 
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer)
 {
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, 5);
-    draw_centered(tft_DefaultFont, line1, 39);
-    draw_centered(tft_DefaultFont, line2, 65);
+    /* The body carries the values that get transcribed, so it takes the larger
+     * face. It costs four characters a line and no extra page: this font is 45%
+     * taller than the small one but only 18% wider on base58. The footer stays
+     * small because 16px there would run off the bottom of the display. */
+    draw_centered(tft_Ubuntu16, line1, 39);
+    draw_centered(tft_Ubuntu16, line2, 65);
     draw_centered(tft_DefaultFont, footer, 111);
+}
+
+seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
+{
+    seedtool_thumb_t thumb = { 0, track };
+    if (count <= SEEDTOOL_LIST_ROWS) {
+        return thumb;
+    }
+    thumb.height = (int)((size_t)track * SEEDTOOL_LIST_ROWS / count);
+    if (thumb.height < LIST_SCROLL_MIN) {
+        thumb.height = LIST_SCROLL_MIN;
+    }
+    /* Spread the remaining travel over the scrollable range, so the thumb sits
+     * against the top at the first row and flush with the bottom at the last:
+     * the end of a list has to look like the end of it here too. */
+    thumb.offset = (int)((size_t)(track - thumb.height) * top / (count - SEEDTOOL_LIST_ROWS));
+    return thumb;
+}
+
+size_t seedtool_list_top(const size_t count, const size_t selected, size_t previous_top)
+{
+    if (count <= SEEDTOOL_LIST_ROWS) {
+        return 0;
+    }
+    /* Never leave blank rows below the last item: the end of a list has to look
+     * like the end of it. */
+    const size_t last_top = count - SEEDTOOL_LIST_ROWS;
+    if (previous_top > last_top) {
+        previous_top = last_top;
+    }
+    if (selected < previous_top) {
+        return selected;
+    }
+    if (selected >= previous_top + SEEDTOOL_LIST_ROWS) {
+        return selected - SEEDTOOL_LIST_ROWS + 1;
+    }
+    return previous_top;
+}
+
+void seedtool_render_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* footer)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    for (size_t row = 0; row < SEEDTOOL_LIST_ROWS && top + row < count; ++row) {
+        const char* const item = items[top + row];
+        const bool highlighted = top + row == selected;
+        const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
+        /* The last row of every list is the way out of it — Back, Reboot,
+         * Done / erase, [delete]. A rule above it lifts it out of the choices,
+         * which is what it is not. It goes in the gap between cells so the
+         * selection bar never paints over it. */
+        if (top + row == count - 1 && count > 1) {
+            fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
+        }
+        if (highlighted) {
+            fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, LIST_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
+        }
+        draw_line_at(tft_Ubuntu16, item, seedtool_render_fit_row(item), LIST_TEXT_X,
+            y + (LIST_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, highlighted ? COLOR_BLACK : COLOR_WHITE);
+    }
+    if (count > SEEDTOOL_LIST_ROWS) {
+        /* With three rows visible, "there is more" is not enough on its own: the
+         * thumb's size says how much more and its place says where in it. */
+        const seedtool_thumb_t thumb = seedtool_list_thumb(count, top, LIST_SCROLL_HEIGHT);
+        fill_rect(LIST_SCROLL_X, LIST_TOP, LIST_SCROLL_WIDTH, LIST_SCROLL_HEIGHT, COLOR_DIM);
+        fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
+    }
+    draw_centered(tft_DefaultFont, footer, LIST_FOOTER_Y);
+}
+
+/* One past the last key of the row starting at `row`. */
+static const char* row_end(const char* row)
+{
+    while (*row && *row != '\n') {
+        ++row;
+    }
+    return row;
+}
+
+size_t seedtool_layout_keys(const char* layout)
+{
+    size_t count = 0;
+    for (const char* cursor = layout; *cursor; ++cursor) {
+        if (*cursor != '\n') {
+            ++count;
+        }
+    }
+    return count;
+}
+
+char seedtool_layout_key(const char* layout, size_t index)
+{
+    for (const char* cursor = layout; *cursor; ++cursor) {
+        if (*cursor != '\n' && !index--) {
+            return *cursor;
+        }
+    }
+    return '\0';
+}
+
+size_t seedtool_layout_center(const char* layout)
+{
+    size_t rows = 0;
+    for (const char* cursor = layout; *cursor;) {
+        const char* const end = row_end(cursor);
+        ++rows;
+        cursor = *end ? end + 1 : end;
+    }
+    if (!rows) {
+        return 0;
+    }
+    const size_t middle = (rows - 1) / 2;
+    size_t index = 0, row = 0;
+    for (const char* cursor = layout; *cursor; ++row) {
+        const char* const end = row_end(cursor);
+        const size_t length = (size_t)(end - cursor);
+        if (row == middle) {
+            return length ? index + (length - 1) / 2 : index;
+        }
+        index += length;
+        cursor = *end ? end + 1 : end;
+    }
+    return 0;
+}
+
+/* A backspace arrow, drawn rather than spelled: the fonts are 95 printable ASCII
+ * characters and have no glyph for it, and the word "del" needed the small face
+ * to fit a key the letters had already outgrown. */
+#define BACKSPACE_WIDTH 15
+#define BACKSPACE_HEIGHT 11
+
+static void draw_backspace(const int x, const int y, const uint16_t ink, const uint16_t ground)
+{
+    const int half = BACKSPACE_HEIGHT / 2;
+    for (int column = 0; column <= half; ++column) {
+        fill_rect(x + column, y + half - column, 1, 2 * column + 1, ink);
+    }
+    fill_rect(x + half + 1, y, BACKSPACE_WIDTH - half - 1, BACKSPACE_HEIGHT, ink);
+    /* An x cut out of the body, so the key reads as "delete" rather than as a
+     * plain arrow that could just as well mean "go back". */
+    for (int i = 0; i < 5; ++i) {
+        fill_rect(x + 8 + i, y + 3 + i, 1, 1, ground);
+        fill_rect(x + 8 + i, y + 7 - i, 1, 1, ground);
+    }
 }
 
 static const char* key_label(const char key, char* scratch)
 {
     switch (key) {
-    case SEEDTOOL_KEY_BACKSPACE:
-        return "del";
     case SEEDTOOL_KEY_PAGE:
         return ">>";
     case SEEDTOOL_KEY_ACCEPT:
@@ -219,15 +466,12 @@ void seedtool_render_keyboard(
 {
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, 2);
-    draw_centered(tft_DefaultFont, text, 32);
+    draw_typed(tft_Ubuntu16, text, 32);
 
     size_t key = 0;
     int y = KEYBOARD_TOP;
     for (const char* row = layout; *row;) {
-        const char* end = row;
-        while (*end && *end != '\n') {
-            ++end;
-        }
+        const char* const end = row_end(row);
         const int count = (int)(end - row);
         const int left = (SEEDTOOL_DISPLAY_WIDTH - count * KEY_WIDTH) / 2;
         for (int column = 0; column < count; ++column, ++key) {
@@ -236,41 +480,63 @@ void seedtool_render_keyboard(
             const int x = left + column * KEY_WIDTH;
             char scratch[2];
             const char* const label = key_label(row[column], scratch);
+            /* Letters and digits take the larger face; the keys still spelled
+             * with a word keep the small one, because "OK" at 16px is 24px wide
+             * in a 24px cell and would bleed into the key beside it. */
+            const bool worded = row[column] == SEEDTOOL_KEY_PAGE || row[column] == SEEDTOOL_KEY_ACCEPT
+                || row[column] == ' ';
+            const unsigned char* const face = worded ? tft_DefaultFont : tft_Ubuntu16;
             if (highlighted) {
                 fill_rect(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, COLOR_HIGHLIGHT);
             } else {
                 draw_border(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, active ? COLOR_DIM : COLOR_BLACK);
             }
             const uint16_t ink = highlighted ? COLOR_BLACK : active ? COLOR_WHITE : COLOR_DIM;
-            draw_centered_in(tft_DefaultFont, label, x, KEY_WIDTH, y + (KEY_HEIGHT - tft_DefaultFont[1]) / 2, ink);
+            if (row[column] == SEEDTOOL_KEY_BACKSPACE) {
+                draw_backspace(x + (KEY_WIDTH - BACKSPACE_WIDTH) / 2, y + (KEY_HEIGHT - BACKSPACE_HEIGHT) / 2 - 1,
+                    ink, highlighted ? COLOR_HIGHLIGHT : COLOR_BLACK);
+            } else {
+                draw_centered_in(face, label, x, KEY_WIDTH, y + (KEY_HEIGHT - face[1]) / 2, ink);
+            }
         }
         y += KEY_HEIGHT;
         row = *end ? end + 1 : end;
     }
 }
 
-bool seedtool_render_qr(const char* text)
+bool seedtool_render_qr(const char* title, const char* text)
 {
-    uint8_t modules[qrcode_getBufferSize(5)];
+    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initText(&qr, modules, 5, ECC_LOW, text) != 0) {
+    if (qrcode_initText(&qr, modules, QR_VERSION, ECC_LOW, text) != 0) {
         return false;
     }
-    const int scale = 3;
-    const int extent = (qr.size + 2) * scale;
-    const int left = (SEEDTOOL_DISPLAY_WIDTH - extent) / 2;
+    /* The code sits left with its quiet zone intact and the title goes in the
+     * margin beside it: on a screen that steps through several codes, one that
+     * does not say what it holds is one that gets scanned into the wrong place. */
+    const int extent = (qr.size + 2) * QR_SCALE;
     const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
     seedtool_render_clear();
-    fill_rect(left, top, extent, extent, COLOR_WHITE);
+    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr.size; ++y) {
         for (uint8_t x = 0; x < qr.size; ++x) {
             if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(left + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
+                fill_rect(QR_LEFT + (x + 1) * QR_SCALE, top + (y + 1) * QR_SCALE, QR_SCALE, QR_SCALE, COLOR_BLACK);
             }
         }
     }
+    draw_centered_box(tft_DefaultFont, title, QR_TITLE_X, QR_TITLE_WIDTH, QR_TITLE_Y);
     memset(modules, 0, sizeof(modules));
     return true;
 }
 
 const uint16_t* seedtool_render_pixels(void) { return framebuffer; }
+
+void seedtool_render_wire_rows(uint16_t* const out, const size_t first_row, const size_t rows)
+{
+    const size_t count = rows * SEEDTOOL_DISPLAY_WIDTH;
+    const uint16_t* const pixels = framebuffer + first_row * SEEDTOOL_DISPLAY_WIDTH;
+    for (size_t i = 0; i < count; ++i) {
+        out[i] = (uint16_t)((pixels[i] >> 8) | (pixels[i] << 8));
+    }
+}

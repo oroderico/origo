@@ -41,6 +41,13 @@ typedef struct {
 
 size_t seedtool_required_events(seedtool_source_t source, size_t words);
 
+/* The canonical transcript of the first `values_len` events. Callable with a
+ * prefix of a run: what it writes is byte for byte the start of what the whole
+ * run will write, which is what lets the screen show a running history that the
+ * reader can compare against paper as it grows. */
+seedtool_result_t seedtool_transcript(
+    seedtool_source_t source, const uint8_t* values, size_t values_len, char* output, size_t output_len);
+
 /* Values are numeric: D6=1..6, D20=1..20, coin=0/1. Cards are
  * 0..51 in canonical AC..KC, AD..KD, AH..KH, AS..KS order. */
 seedtool_result_t seedtool_generate(

@@ -58,6 +58,22 @@ static void lcd_command(const uint8_t command, const void* const data, const siz
     }
 }
 
+/* The panel reads each pixel most significant byte first, and the framebuffer
+ * holds it the other way round because the CPU does. Converting a chunk at a
+ * time keeps a second whole frame out of RAM and leaves what the renderer drew
+ * untouched. */
+#define FLUSH_ROWS 15
+_Static_assert(SEEDTOOL_DISPLAY_HEIGHT % FLUSH_ROWS == 0, "the flush chunk must divide the display height");
+
+static void transmit_pixels(void)
+{
+    static uint16_t wire[SEEDTOOL_DISPLAY_WIDTH * FLUSH_ROWS];
+    for (size_t row = 0; row < SEEDTOOL_DISPLAY_HEIGHT; row += FLUSH_ROWS) {
+        seedtool_render_wire_rows(wire, row, FLUSH_ROWS);
+        transmit(wire, sizeof(wire));
+    }
+}
+
 static void flush(void)
 {
     const uint16_t x_start = LCD_GAP_X;
@@ -70,7 +86,7 @@ static void flush(void)
     lcd_command(LCD_CMD_RASET, rows, sizeof(rows));
     lcd_command(LCD_CMD_RAMWR, NULL, 0);
     ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_DC, 1));
-    transmit(seedtool_render_pixels(), SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT * sizeof(uint16_t));
+    transmit_pixels();
 }
 
 void seedtool_display_init(void)
@@ -125,6 +141,19 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     flush();
 }
 
+void seedtool_display_splash(void)
+{
+    seedtool_render_splash();
+    flush();
+}
+
+void seedtool_display_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* footer)
+{
+    seedtool_render_list(title, items, count, selected, top, footer);
+    flush();
+}
+
 void seedtool_display_keyboard(
     const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
 {
@@ -132,9 +161,9 @@ void seedtool_display_keyboard(
     flush();
 }
 
-bool seedtool_display_qr(const char* text)
+bool seedtool_display_qr(const char* title, const char* text)
 {
-    const bool ok = seedtool_render_qr(text);
+    const bool ok = seedtool_render_qr(title, text);
     if (ok) {
         flush();
     }

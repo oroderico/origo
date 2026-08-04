@@ -6,8 +6,11 @@
 
 void seedtool_display_init(void);
 void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer);
+void seedtool_display_splash(void);
+void seedtool_display_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
+    const char* footer);
 void seedtool_display_keyboard(
     const char* title, const char* text, const char* layout, const bool* enabled, size_t selected);
-bool seedtool_display_qr(const char* text);
+bool seedtool_display_qr(const char* title, const char* text);
 
 #endif

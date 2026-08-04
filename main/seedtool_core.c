@@ -55,7 +55,7 @@ static seedtool_result_t append(char* dst, const size_t dst_len, size_t* used, c
     return SEEDTOOL_OK;
 }
 
-static seedtool_result_t make_transcript(const seedtool_source_t source, const uint8_t* values,
+seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint8_t* values,
     const size_t values_len, char* output, const size_t output_len)
 {
     static const char ranks[] = "A23456789TJQK";
@@ -117,7 +117,7 @@ seedtool_result_t seedtool_generate(const seedtool_source_t source, const size_t
         return SEEDTOOL_EINVAL;
     }
     memset(output, 0, sizeof(*output));
-    seedtool_result_t ret = make_transcript(source, values, values_len, output->transcript, sizeof(output->transcript));
+    seedtool_result_t ret = seedtool_transcript(source, values, values_len, output->transcript, sizeof(output->transcript));
     if (ret != SEEDTOOL_OK) {
         return ret;
     }

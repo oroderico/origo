@@ -37,6 +37,37 @@ def mnemonic_from_entropy(entropy):
     return " ".join(wl[(bits >> shift) & 2047] for shift in range(len(entropy) * 8 + cs - 11, -1, -11))
 
 
+def word_numbers(mnemonic):
+    """One-based positions in the printed wordlist, as the device shows them.
+
+    The encoding index is zero-based; a word number is one more than it. The
+    device offers entry by these numbers, so they need a second implementation
+    here like every other value it can display.
+    """
+    wl = words()
+    try:
+        return [wl.index(w) + 1 for w in mnemonic.split()]
+    except ValueError as exc:
+        raise ValueError("word is not in BIP39 English") from exc
+
+
+"""Version 6 at ECC low, which is what the device encoder is pinned to."""
+QR_CAPACITY = 134
+
+
+def account_qr_payload(fingerprint, purpose, xpub):
+    """Exactly the bytes the device puts in the account key QR.
+
+    Key origin then xpub with no separator, which is what a watch-only wallet
+    needs to import the account without being told the derivation path. A photo
+    of this code reveals every address of the account, past and future.
+    """
+    payload = f"[{fingerprint}/{purpose}'/0'/0']{xpub}"
+    if len(payload) > QR_CAPACITY:
+        raise ValueError(f"payload is {len(payload)} bytes, over the {QR_CAPACITY}-byte QR capacity")
+    return payload
+
+
 def mnemonic_entropy(mnemonic):
     wl = words()
     try:
@@ -236,9 +267,12 @@ def inspect(args):
     mnemonic_entropy(args.mnemonic)
     fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index)
     print("checksum:   valid")
+    print("word numbers:", " ".join(str(n) for n in word_numbers(args.mnemonic)))
     print("fingerprint:", fingerprint)
     for purpose in (84, 86):
         print(f"[{fingerprint}/{purpose}'/0'/0']: {accounts[purpose]}")
+    for purpose in (84, 86):
+        print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose])}")
     for purpose in (84, 86):
         print(f"m/{purpose}'/0'/0'/0/{args.index}: {addrs[purpose]}")
 
