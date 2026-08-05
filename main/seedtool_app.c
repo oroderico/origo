@@ -856,12 +856,22 @@ static void show_stackbit(const char* mnemonic)
         (void)acknowledge("Error", "Could not compute", "word numbers");
         return;
     }
+    const char* const layouts[] = { "Simple grid", "Physical layout", "Back" };
+    const int layout = choose("Stackbit 1248", layouts, 3);
+    if (layout < 0 || layout == 2) {
+        seedtool_zero(numbers, sizeof(numbers));
+        return;
+    }
     size_t selected = 0;
     for (;;) {
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
-        seedtool_display_stackbit_screen(
-            "Stackbit 1248", numbers[selected], seedtool_word(numbers[selected] - 1), footer);
+        const char* const word = seedtool_word(numbers[selected] - 1);
+        if (layout == 0) {
+            seedtool_display_stackbit_screen("Stackbit 1248", numbers[selected], word, footer);
+        } else {
+            seedtool_display_stackbit_physical_screen("Stackbit 1248", numbers[selected], word, footer);
+        }
         switch (wait_key()) {
         case KEY_PREV:
             selected = (selected + count - 1) % count;

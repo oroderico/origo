@@ -61,6 +61,7 @@ REQUIRED = {
     "seedtool_mnemonic_entropy",
     "seedtool_mnemonic_word_numbers",
     "seedtool_render_stackbit_screen",
+    "seedtool_render_stackbit_physical_screen",
     "seedtool_render_qr_bytes",
 }
 

@@ -247,7 +247,7 @@ static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit 
     "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "Create Seed", "Restore Seed",
     "Complete Checksum", "About / Safety", "Reboot", "11 words + 7 coins", "23 words + 3 coins", "No passphrase",
     "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words", "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers",
-    "Backup", "Stackbit 1248", "Compact SeedQR" };
+    "Backup", "Stackbit 1248", "Compact SeedQR", "Simple grid", "Physical layout" };
 #define MENU_LABEL_COUNT (sizeof(menu_labels) / sizeof(menu_labels[0]))
 
 static bool labels_fit_a_row(void)
@@ -444,6 +444,34 @@ static bool stackbit_grid_is_sound(void)
     return true;
 }
 
+/* Same proof as stackbit_grid_is_sound, for the layout that matches the
+ * physical Stackbit 1248 plate's own two-row arrangement instead of the
+ * simplified one: the total lit area is the same popcount-of-digits formula
+ * either way, since every digit still contributes 0-4 lit weight cells
+ * regardless of where on screen they are placed. */
+static bool stackbit_physical_grid_is_sound(void)
+{
+    seedtool_render_stackbit_physical_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    const size_t unit = count_pixel_color(0xfd20);
+    if (!unit) {
+        return false;
+    }
+    for (unsigned number = 1; number <= SEEDTOOL_WORDLIST_LEN; ++number) {
+        char digits[5];
+        (void)snprintf(digits, sizeof(digits), "%04u", number);
+        unsigned bits = 0;
+        for (int i = 0; i < 4; ++i) {
+            const unsigned v = (unsigned)(digits[i] - '0');
+            bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
+        }
+        seedtool_render_stackbit_physical_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        if (count_pixel_color(0xfd20) != bits * unit) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* The Compact SeedQR payload is exactly the mnemonic's raw entropy: the
  * all-zero 12- and 24-word vectors must decode to 16 and 32 zero bytes
  * respectively and still fit the pinned QR version, and a broken checksum
@@ -540,6 +568,10 @@ static int self_test(void)
     }
     if (!stackbit_grid_is_sound()) {
         fputs("Origo Stackbit grid self-test failed\n", stderr);
+        return 1;
+    }
+    if (!stackbit_physical_grid_is_sound()) {
+        fputs("Origo physical Stackbit grid self-test failed\n", stderr);
         return 1;
     }
     if (!compact_seedqr_is_sound()) {

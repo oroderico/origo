@@ -123,6 +123,13 @@ void seedtool_display_stackbit_screen(
     present();
 }
 
+void seedtool_display_stackbit_physical_screen(
+    const char* title, const unsigned word_number, const char* word, const char* footer)
+{
+    seedtool_render_stackbit_physical_screen(title, word_number, word, footer);
+    present();
+}
+
 void seedtool_platform_init(void)
 {
     seedtool_display_init();

@@ -60,8 +60,42 @@ only later would mean checking a string the device then rewrites.
 
 Card ranks are `A23456789TJQK`; suits are `CDHS`. The canonical deck order is
 `AC..KC`, `AD..KD`, `AH..KH`, `AS..KS`. Only the order of the first 25 distinct
-cards is used. SHA256 is applied to the ASCII transcript. A 12-word seed uses
-the first 16 hash bytes; a 24-word seed uses all 32 bytes.
+cards is used.
+
+Turning that transcript into words is three mechanical steps, always in this
+order, and nothing else touches them: no RNG, no timestamp, no per-device
+salt.
+
+1. SHA256 of the ASCII transcript bytes — the full 32-byte digest, every
+   time, regardless of source or word count.
+2. Truncate to the first 16 bytes for a 12-word mnemonic, or keep all 32 for a
+   24-word one.
+3. Hand those bytes to libwally as BIP39 entropy exactly as the standard
+   defines it: a checksum is computed from SHA256 of the entropy itself and
+   appended as its last few bits, and the combined bit string is split into
+   11-bit groups, each one a wordlist index.
+
+The same transcript always produces the same mnemonic. This is
+`bip39_mnemonic_from_bytes(NULL, hash, entropy_len, &mnemonic)` in
+`main/seedtool_core.c`, called once, on that hash and nothing else —
+`tools/origo_verify.py generate` reimplements the same three steps
+independently, in Python, so the whole pipeline can be checked without
+trusting the device that ran it.
+
+Checksum completion (11 or 23 already-known words, plus 7 or 3 coin flips)
+gets its entropy differently: the known words' own 11-bit wordlist positions
+are packed back-to-back to *become* the entropy bytes directly — not hashed,
+not derived from anything — and the coin flips fill in the low-order bits a
+full BIP39 checksum would otherwise occupy. That buffer is handed to the same
+`bip39_mnemonic_from_bytes` call, which computes the real checksum from it and
+picks whichever one final word makes it valid. The coin flips are the only
+literal randomness this path needs, and they must be exactly as many bits as
+are missing — one too few or too many and the call is rejected outright rather
+than guessing.
+
+Neither path ever reads the device RNG. The dice-roll quality bar described
+next grades what has already been typed; it cannot add or remove a single bit
+from what gets hashed.
 
 A D6 or D20 run opens on a screen naming how many rolls it needs and what the
 bar below is about, with that bar already in place but empty. While rolls are
@@ -225,6 +259,14 @@ a side effect of anything else the device shows.
 
 ## Backup export
 
+Removing a code path and warning before using one are both tools this project
+reaches for, chosen by what the risk actually is. The RNG-to-seed path above
+has no legitimate reason to exist at all, so it doesn't. Exporting a mnemonic
+has one — moving it to another wallet, or onto a metal plate — the same trade
+the account-key QR above already makes, so instead of removing it the device
+warns as sternly as the stakes call for and asks for a deliberate choice every
+time rather than trusting a warning read once.
+
 From the wallet viewer's `Backup` menu, a generated or restored mnemonic — the
 same screen both `Create Seed` and `Restore Seed` end on — can be shown two more
 ways, each read-only and each requiring its own acknowledgement before anything
@@ -232,16 +274,27 @@ is drawn.
 
 **Stackbit 1248** shows one word per screen as its one-based word number
 (`abandon`=1, `zoo`=2048, the same convention word-number restore already uses)
-split into four decimal digits, each digit a column of four punch cells for
-binary weights 1, 2, 4 and 8, lit where that digit's bits are set — what a
-Stackbit 1248 metal plate is punched to record. `L/R` step word to word, `BOTH`
-returns to the Backup menu. This is a display only: a plate already punched from
-a Stackbit-compatible device restores today with zero new code, by choosing
-"Enter word numbers" during Restore Seed and typing what is punched. Adapted from
-Krux's Stackbit 1248 export (github.com/selfcustody/krux,
-src/krux/pages/stack_1248.py) as one simple layout rather than its three.
-Stackbit 1248 is a third-party physical backup product; Origo has no affiliation
-with it.
+split into four decimal digits, punched as binary weights 1, 2, 4 and 8 — what
+a Stackbit 1248 metal plate is punched to record. Choosing it first asks which
+layout to draw:
+
+- **Simple grid**: four columns, one per digit, four rows, one per weight —
+  easier to read at arm's length and the one to use if nothing needs to match
+  the plate's own printed layout by eye.
+- **Physical layout**: the plate's own arrangement (github.com/selfcustody/krux,
+  src/krux/pages/stack_1248.py: `_draw_grid`/`_draw_punched`) — two rows, not
+  four. The thousands digit gets one column of two cells (weight 1 on top,
+  weight 2 below — the digit is never more than 2, so only one is ever lit);
+  the other three digits each get a 2x2 block, top-left=1, top-right=2,
+  bottom-left=4, bottom-right=8. For punching a plate side by side with the
+  screen.
+
+Both encode the same word the same way; only where each punch is drawn
+differs. `L/R` step word to word, `BOTH` returns to the Backup menu. This is a
+display only: a plate already punched from a Stackbit-compatible device
+restores today with zero new code, by choosing "Enter word numbers" during
+Restore Seed and typing what is punched. Stackbit 1248 is a third-party
+physical backup product; Origo has no affiliation with it.
 
 **Compact SeedQR** encodes the mnemonic's raw entropy directly as a byte-mode
 QR — 16 bytes for 12 words, 32 for 24 — with no checksum bits and no word text,
@@ -288,15 +341,16 @@ non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
 it verifies the published BIP84/BIP86 address and account xpub vectors, the
 published SLIP-132 zpub vector for the same BIP84 account and that BIP86
 rejects a zpub request outright, that every prefix of every BIP39 word and all
-2048 word numbers are reachable through their keyboards, that paged text
+2048 word numbers are reachable through their keyboards, that every one of
+those 2048 words round-trips back to the same one-based number, that paged text
 reassembles byte for byte, that a scrolling list always keeps the selection on
 screen and never pads its end with blank rows for lists as large as the
 hundred-row address browser, that the rearranged keyboards still hold every
 letter and every printable character, that an account key with its origin
 still fits a single QR code, that every one of the 2048 Stackbit 1248 punch
-grids lights exactly the cells its digits' bits call for, and that the Compact
-SeedQR payload for the published 12- and 24-word zero-entropy vectors is
-exactly their raw entropy.
+grids lights exactly the cells its digits' bits call for in both the simple and
+the physical layout, and that the Compact SeedQR payload for the published
+12- and 24-word zero-entropy vectors is exactly their raw entropy.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
@@ -351,7 +405,8 @@ compare the transcript, full hash, fingerprint, xpubs, and addresses.
 This tool protects against a compromised hardware RNG only when the human
 entropy source and recording process are sound. It cannot protect against a
 compromised display, malicious firmware, biased physical dice/cards/coins,
-shoulder surfing, or mistakes copying entropy. Reproduce the result on a second
-independent implementation before funding an address. The ten-minute inactivity
-timer gives a 60-second extend-or-erase warning; cancel, error, timeout, and
-restart paths wipe session buffers before returning or rebooting.
+shoulder surfing, mistakes copying entropy, or a Compact SeedQR photographed
+by anyone other than the person who asked to see it. Reproduce the result on a
+second independent implementation before funding an address. The ten-minute
+inactivity timer gives a 60-second extend-or-erase warning; cancel, error,
+timeout, and restart paths wipe session buffers before returning or rebooting.

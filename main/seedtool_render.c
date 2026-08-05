@@ -82,6 +82,29 @@ _Static_assert(QR_TITLE_WIDTH >= 80, "no room left beside the QR to name what it
 _Static_assert(STACKBIT_GRID_TOP + STACKBIT_GRID_HEIGHT <= STACKBIT_FOOTER_Y, "the punch grid runs into the footer");
 _Static_assert(STACKBIT_PANEL_WIDTH >= 60, "no room left beside the grid to name the word");
 
+/* The physical Stackbit 1248 plate's own arrangement (github.com/selfcustody/krux,
+ * src/krux/pages/stack_1248.py: _draw_grid/_draw_punched): two rows, not four.
+ * The thousands digit gets one column of two cells (weight 1 on top, weight 2
+ * below — the digit is never more than 2, so only one is ever lit); the other
+ * three digits each get a 2x2 block, top-left=1, top-right=2, bottom-left=4,
+ * bottom-right=8. Below the grid rather than beside it, since it is wide and
+ * short rather than tall and narrow. */
+#define STACKBIT_PHYS_CELL 22
+#define STACKBIT_PHYS_DOT 12
+#define STACKBIT_PHYS_GAP 6
+#define STACKBIT_PHYS_BLOCK_WIDTH (2 * STACKBIT_PHYS_CELL)
+#define STACKBIT_PHYS_GRID_WIDTH \
+    (STACKBIT_PHYS_CELL + STACKBIT_PHYS_GAP + 3 * STACKBIT_PHYS_BLOCK_WIDTH + 2 * STACKBIT_PHYS_GAP)
+#define STACKBIT_PHYS_GRID_HEIGHT (2 * STACKBIT_PHYS_CELL)
+#define STACKBIT_PHYS_GRID_X ((SEEDTOOL_DISPLAY_WIDTH - STACKBIT_PHYS_GRID_WIDTH) / 2)
+#define STACKBIT_PHYS_GRID_TOP 28
+#define STACKBIT_PHYS_NUMBER_Y 80
+#define STACKBIT_PHYS_WORD_Y 102
+#define STACKBIT_PHYS_FOOTER_Y 122
+_Static_assert(STACKBIT_PHYS_GRID_X >= 0, "the physical punch grid is wider than the display");
+_Static_assert(STACKBIT_PHYS_GRID_TOP + STACKBIT_PHYS_GRID_HEIGHT <= STACKBIT_PHYS_NUMBER_Y,
+    "the physical punch grid runs into the number line");
+
 extern const unsigned char tft_DefaultFont[];
 extern const unsigned char tft_Ubuntu16[];
 
@@ -613,6 +636,57 @@ void seedtool_render_stackbit_screen(
     draw_centered_in(tft_Ubuntu16, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
     draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_DIM);
     draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
+}
+
+void seedtool_render_stackbit_physical_screen(
+    const char* title, const unsigned word_number, const char* word, const char* footer)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+
+    char digits[STACKBIT_DIGITS + 1];
+    (void)snprintf(digits, sizeof(digits), "%04u", word_number);
+
+    int x = STACKBIT_PHYS_GRID_X;
+    const unsigned thousands = (unsigned)(digits[0] - '0');
+    for (int row = 0; row < 2; ++row) {
+        const int y = STACKBIT_PHYS_GRID_TOP + row * STACKBIT_PHYS_CELL;
+        const unsigned weight = row ? 2u : 1u;
+        draw_border(x, y, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
+        const char label[2] = { (char)('0' + weight), '\0' };
+        draw_line_at(tft_DefaultFont, label, 1, x + 2, y + 1, COLOR_DIM);
+        if (thousands & weight) {
+            fill_rect(x + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
+                y + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
+                COLOR_HIGHLIGHT);
+        }
+    }
+    x += STACKBIT_PHYS_CELL + STACKBIT_PHYS_GAP;
+
+    static const unsigned BLOCK_WEIGHTS[2][2] = { { 1, 2 }, { 4, 8 } };
+    for (int digit = 1; digit < STACKBIT_DIGITS; ++digit) {
+        const unsigned value = (unsigned)(digits[digit] - '0');
+        for (int row = 0; row < 2; ++row) {
+            for (int col = 0; col < 2; ++col) {
+                const int cx = x + col * STACKBIT_PHYS_CELL;
+                const int cy = STACKBIT_PHYS_GRID_TOP + row * STACKBIT_PHYS_CELL;
+                const unsigned weight = BLOCK_WEIGHTS[row][col];
+                draw_border(cx, cy, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
+                const char label[2] = { (char)('0' + weight), '\0' };
+                draw_line_at(tft_DefaultFont, label, 1, cx + 2, cy + 1, COLOR_DIM);
+                if (value & weight) {
+                    fill_rect(cx + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
+                        cy + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
+                        COLOR_HIGHLIGHT);
+                }
+            }
+        }
+        x += STACKBIT_PHYS_BLOCK_WIDTH + STACKBIT_PHYS_GAP;
+    }
+
+    draw_centered(tft_Ubuntu16, digits, STACKBIT_PHYS_NUMBER_Y);
+    draw_centered(tft_DefaultFont, word, STACKBIT_PHYS_WORD_Y);
+    draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
 }
 
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after

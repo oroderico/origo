@@ -199,3 +199,10 @@ void seedtool_display_stackbit_screen(
     seedtool_render_stackbit_screen(title, word_number, word, footer);
     flush();
 }
+
+void seedtool_display_stackbit_physical_screen(
+    const char* title, const unsigned word_number, const char* word, const char* footer)
+{
+    seedtool_render_stackbit_physical_screen(title, word_number, word, footer);
+    flush();
+}

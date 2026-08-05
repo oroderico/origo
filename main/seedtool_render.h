@@ -119,6 +119,14 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len
  * src/krux/pages/stack_1248.py) rather than its three alternates. */
 void seedtool_render_stackbit_screen(const char* title, unsigned word_number, const char* word, const char* footer);
 
+/* The same backup, laid out the way a physical Stackbit 1248 plate actually
+ * is: two rows, not four, with the thousands digit a single column of two
+ * cells and the other three digits each a 2x2 block. For anyone punching a
+ * plate side by side with the screen and matching its layout by eye rather
+ * than by the weight label alone. */
+void seedtool_render_stackbit_physical_screen(
+    const char* title, unsigned word_number, const char* word, const char* footer);
+
 const uint16_t* seedtool_render_pixels(void);
 
 /* Copies `rows` rows of the framebuffer into `out` in the order the panel reads
