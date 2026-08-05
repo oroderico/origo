@@ -12,10 +12,18 @@
 
 #define SESSION_TIMEOUT_MS (10 * 60 * 1000)
 #define WARNING_TIMEOUT_MS (60 * 1000)
+/* Minimum roll counts hardly ever land exactly on the bit minimum; this keeps
+ * that expected shortfall from popping the entropy warning on its own. Krux's
+ * ENTROPY_TOLERANCE. */
+#define DICE_ENTROPY_TOLERANCE 2
 #define SPLASH_MS 2500
 #define MAX_PAGE_LINES 24
 #define MAX_LINE_CHARS 48
 #define PASSPHRASE_TAIL 24
+
+/* The address list holds every index plus a trailing Back row. */
+#define ADDRESS_LIST_ROWS (SEEDTOOL_MAX_ADDRESS_INDEX + 1)
+#define ADDRESS_LABEL_LEN (8 + SEEDTOOL_MAX_ADDRESS_LEN)
 
 #define NAV_FOOTER "L/R move   BOTH select"
 #define ACK_FOOTER "BOTH continue   L/R back"
@@ -108,6 +116,20 @@ static bool acknowledge(const char* title, const char* one, const char* two)
     return confirm(title, one, two) == KEY_SELECT;
 }
 
+/* Same contract as acknowledge(), but for the dice-entry screen with its
+ * quality bar drawn in, rather than plain text — used before a D6/D20 run
+ * starts, showing the bar empty, and once more after it ends, showing it full. */
+static bool dice_confirm(const char* title, const char* one, const char* two, const seedtool_progress_t* progress)
+{
+    for (;;) {
+        seedtool_display_dice_screen(title, one, two, ACK_FOOTER, progress);
+        const seedtool_key_t key = wait_key();
+        if (key != KEY_REDRAW) {
+            return key == KEY_SELECT;
+        }
+    }
+}
+
 /* Every choice in the firmware is made here, on a list that shows five options
  * at once. Which rows are on screen follows from the count and the selection
  * alone, so a choice screen is reproducible from what the user has done. */
@@ -159,7 +181,8 @@ static unsigned step_value(
  * it a mistake on roll 29 of 50 could only be escaped by waiting out the session
  * timeout and starting the whole transcript again. */
 static int enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
-    const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history)
+    const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history,
+    const seedtool_progress_t* progress)
 {
     const unsigned first = allowed && !allowed[0] ? step_value(min, min, max, true, allowed) : min;
     /* One step back from the first value wraps to the last reachable one. */
@@ -183,7 +206,12 @@ static int enter_value(const char* title, const unsigned position, const unsigne
          * mis-keyed roll is caught against the paper now rather than at the end
          * of ninety-nine of them. Only its tail fits, which is the part that
          * just changed. */
-        screen_text(heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER);
+        if (progress) {
+            seedtool_display_dice_screen(
+                heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
+        } else {
+            screen_text(heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER);
+        }
         switch (wait_key()) {
         case KEY_SELECT:
             if (on_back) {
@@ -301,7 +329,7 @@ typedef struct {
     char value[sizeof("[00000000/84'/0'/0']") + SEEDTOOL_MAX_XPUB_LEN];
 } qr_item_t;
 
-#define QR_ITEMS 4
+#define QR_ITEMS 2
 
 /* The QR screen steps sideways through everything the wallet can be given, so an
  * account key and the address it belongs to are one press apart. */
@@ -662,48 +690,46 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
     return ok;
 }
 
-/* Derives all four exportable values up front so stepping between them is
- * instant rather than a fresh BIP32 derivation per press. */
-static bool build_qr_items(const char* mnemonic, const char* passphrase, const char* fphex, const uint32_t index,
+/* Derives both exportable values for one type up front so stepping between
+ * them is instant rather than a fresh BIP32 derivation per press. */
+static bool build_qr_items(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const seedtool_key_format_t format, const uint32_t index,
     qr_item_t items[QR_ITEMS])
 {
-    static const seedtool_address_type_t types[] = { SEEDTOOL_BIP84, SEEDTOOL_BIP86 };
-    bool ok = true;
-    for (size_t i = 0; ok && i < 2; ++i) {
-        char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
-        ok = seedtool_account_xpub(mnemonic, passphrase, types[i], xpub, sizeof(xpub)) == SEEDTOOL_OK;
-        if (ok) {
-            (void)snprintf(items[i].title, sizeof(items[i].title), "BIP%u account key", (unsigned)types[i]);
-            (void)snprintf(
-                items[i].value, sizeof(items[i].value), "[%s/%u'/0'/0']%s", fphex, (unsigned)types[i], xpub);
-        }
-        seedtool_zero(xpub, sizeof(xpub));
+    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    bool ok = seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK;
+    if (ok) {
+        (void)snprintf(items[0].title, sizeof(items[0].title), "BIP%u %s", (unsigned)type,
+            format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
+        (void)snprintf(items[0].value, sizeof(items[0].value), "[%s/%u'/0'/0']%s", fphex, (unsigned)type, xpub);
     }
-    for (size_t i = 0; ok && i < 2; ++i) {
+    seedtool_zero(xpub, sizeof(xpub));
+    if (ok) {
         char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        ok = seedtool_mainnet_address(mnemonic, passphrase, types[i], index, address, sizeof(address)) == SEEDTOOL_OK;
+        ok = seedtool_mainnet_address(mnemonic, passphrase, type, index, address, sizeof(address)) == SEEDTOOL_OK;
         if (ok) {
-            (void)snprintf(items[2 + i].title, sizeof(items[2 + i].title), "BIP%u address %u", (unsigned)types[i],
-                (unsigned)index);
-            (void)snprintf(items[2 + i].value, sizeof(items[2 + i].value), "%s", address);
+            (void)snprintf(
+                items[1].title, sizeof(items[1].title), "BIP%u address %u", (unsigned)type, (unsigned)index);
+            (void)snprintf(items[1].value, sizeof(items[1].value), "%s", address);
         }
         seedtool_zero(address, sizeof(address));
     }
     return ok;
 }
 
-/* Entering the QR screen from anywhere reaches the account keys, so the warning
- * is about them rather than about the value the reader started from. */
-static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex, const uint32_t index,
+/* Entering the QR screen from anywhere reaches the account key, so the warning
+ * is about it rather than about the value the reader started from. */
+static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const seedtool_key_format_t format, const uint32_t index,
     const size_t selected)
 {
     qr_item_t items[QR_ITEMS];
     memset(items, 0, sizeof(items));
-    if (!acknowledge("QR export", "Account keys included", "A photo reveals every address")) {
+    if (!acknowledge("QR export", "Account key included", "A photo reveals every address")) {
         seedtool_zero(items, sizeof(items));
         return;
     }
-    if (build_qr_items(mnemonic, passphrase, fphex, index, items)) {
+    if (build_qr_items(mnemonic, passphrase, fphex, type, format, index, items)) {
         show_qr(items, QR_ITEMS, selected);
     } else {
         (void)acknowledge("Error", "Could not derive", NULL);
@@ -711,14 +737,108 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
     seedtool_zero(items, sizeof(items));
 }
 
+/* Labels for the address list are derived once when the list is opened, so
+ * stepping through a hundred rows is instant rather than a fresh BIP32
+ * derivation per row, the same tactic build_qr_items uses. Static: this does
+ * not belong on the stack, and the list widget needs every row addressable up
+ * front, there is no windowed variant of it. */
+static char address_labels[ADDRESS_LIST_ROWS][ADDRESS_LABEL_LEN];
+static const char* address_items[ADDRESS_LIST_ROWS + 1]; /* + Back */
+
+/* What has been shown for one address type this session, so the QR carousel
+ * can step between the account key and "the" address without asking which
+ * one: the last one opened, index 0 until then. */
+typedef struct {
+    seedtool_key_format_t format; /* unused for BIP86, which is xpub only */
+    uint32_t last_index;
+} type_state_t;
+
+/* Builds the address list for one type and lets the reader browse it. Returns
+ * the chosen index, or -1 on Back, timeout or a derivation error. */
+static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type)
+{
+    for (uint32_t i = 0; i <= SEEDTOOL_MAX_ADDRESS_INDEX; ++i) {
+        char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+        if (seedtool_mainnet_address(mnemonic, passphrase, type, i, address, sizeof(address)) != SEEDTOOL_OK) {
+            seedtool_zero(address, sizeof(address));
+            seedtool_zero(address_labels, sizeof(address_labels));
+            (void)acknowledge("Error", "Could not derive addresses", NULL);
+            return -1;
+        }
+        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %s", (unsigned)i, address);
+        address_items[i] = address_labels[i];
+        seedtool_zero(address, sizeof(address));
+    }
+    address_items[ADDRESS_LIST_ROWS] = "Back";
+    const int selected = choose("Addresses", address_items, ADDRESS_LIST_ROWS + 1);
+    seedtool_zero(address_labels, sizeof(address_labels));
+    return selected < 0 || selected == (int)ADDRESS_LIST_ROWS ? -1 : selected;
+}
+
+/* One address type's worth of the wallet viewer: its account key, in whichever
+ * format was asked for, and its addresses. SLIP-132 defines no taproot version
+ * prefix, so BIP86 never offers a format choice, only BIP84 does. */
+static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, type_state_t* const state)
+{
+    const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+    for (;;) {
+        const char* items[] = { "Account key", "Addresses", "Back" };
+        const int selected = choose(title, items, 3);
+        if (selected < 0 || selected == 2) {
+            return;
+        }
+        if (selected == 0) {
+            seedtool_key_format_t format = SEEDTOOL_XPUB;
+            if (type == SEEDTOOL_BIP84) {
+                const char* const formats[] = { "xpub", "zpub", "Back" };
+                const int chosen = choose("Account key format", formats, 3);
+                if (chosen < 0 || chosen == 2) {
+                    continue;
+                }
+                format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
+            }
+            state->format = format;
+            char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+            char origin[32];
+            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/0']", fphex, (unsigned)type);
+            if (seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+                if (page_text(origin, xpub)) {
+                    export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 0);
+                }
+            } else {
+                (void)acknowledge("Error", "Could not derive account key", NULL);
+            }
+            seedtool_zero(xpub, sizeof(xpub));
+        } else {
+            const int index = browse_addresses(mnemonic, passphrase, type);
+            if (index < 0) {
+                continue;
+            }
+            state->last_index = (uint32_t)index;
+            char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+            char path[32];
+            (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
+            if (seedtool_mainnet_address(mnemonic, passphrase, type, (uint32_t)index, address, sizeof(address))
+                == SEEDTOOL_OK) {
+                if (page_text(path, address)) {
+                    export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 1);
+                }
+            } else {
+                (void)acknowledge("Error", "Could not derive address", NULL);
+            }
+            seedtool_zero(address, sizeof(address));
+        }
+    }
+}
+
 static void show_wallet_data(const char* mnemonic)
 {
     uint8_t fp[4] = { 0 };
     char fphex[9] = { 0 };
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
-    char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-    uint32_t index = 0;
+    type_state_t bip84 = { SEEDTOOL_XPUB, 0 };
+    type_state_t bip86 = { SEEDTOOL_XPUB, 0 }; /* format unused: BIP86 is xpub only */
 
     if (!get_session_passphrase(passphrase)) {
         goto done;
@@ -730,54 +850,22 @@ static void show_wallet_data(const char* mnemonic)
     hexstr(fp, sizeof(fp), fphex);
 
     for (;;) {
-        char position[32];
-        (void)snprintf(position, sizeof(position), "Address index: %u", (unsigned)index);
-        const char* menu[] = { "Master fingerprint", "Account xpub BIP84", "Account xpub BIP86", "Address BIP84 bc1q",
-            "Address BIP86 bc1p", position, "Done / erase" };
+        const char* menu[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)", "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]));
-        if (selected < 0 || selected == 6) {
+        if (selected < 0 || selected == 3) {
             break;
         }
         if (selected == 0) {
             (void)acknowledge(
                 "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
-        } else if (selected == 1 || selected == 2) {
-            const seedtool_address_type_t type = selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86;
-            char origin[32];
-            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/0']", fphex, (unsigned)type);
-            if (seedtool_account_xpub(mnemonic, passphrase, type, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
-                if (page_text(origin, xpub)) {
-                    export_qr(mnemonic, passphrase, fphex, index, selected == 1 ? 0 : 1);
-                }
-            } else {
-                (void)acknowledge("Error", "Could not derive xpub", NULL);
-            }
-            seedtool_zero(xpub, sizeof(xpub));
-        } else if (selected == 3 || selected == 4) {
-            const seedtool_address_type_t type = selected == 3 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86;
-            char path[32];
-            (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
-            if (seedtool_mainnet_address(mnemonic, passphrase, type, index, address, sizeof(address))
-                == SEEDTOOL_OK) {
-                if (page_text(path, address)) {
-                    export_qr(mnemonic, passphrase, fphex, index, selected == 3 ? 2 : 3);
-                }
-            } else {
-                (void)acknowledge("Error", "Could not derive address", NULL);
-            }
-            seedtool_zero(address, sizeof(address));
         } else {
-            unsigned chosen = 0;
-            if (enter_value("Address index", 0, 0, 0, 99, &chosen, NULL, NULL, NULL) == 1) {
-                index = chosen;
-            }
+            show_type_menu(mnemonic, passphrase, fphex, selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86,
+                selected == 1 ? &bip84 : &bip86);
         }
     }
 done:
     seedtool_zero(fp, sizeof(fp));
     seedtool_zero(fphex, sizeof(fphex));
-    seedtool_zero(xpub, sizeof(xpub));
-    seedtool_zero(address, sizeof(address));
     seedtool_zero(passphrase, sizeof(passphrase));
 }
 
@@ -792,6 +880,28 @@ static void show_generated(seedtool_generated_t* generated)
     seedtool_zero(hash, sizeof(hash));
 }
 
+/* Live quality readout for a D6/D20 run in progress: rolls collected and
+ * Shannon's entropy of them so far, each against its minimum. Adapted from
+ * Krux's dice-roll entropy screen (github.com/selfcustody/krux,
+ * src/krux/pages/new_mnemonic/dice_rolls.py) — a display of what has already
+ * been typed, not an input to what gets hashed. */
+static seedtool_progress_t dice_progress(const seedtool_source_t source, const uint8_t* values, const size_t count,
+    const size_t required, const size_t min_bits)
+{
+    int bits = 0;
+    bool pattern = false;
+    (void)seedtool_dice_entropy_bits(source, values, count, &bits);
+    (void)seedtool_dice_pattern_detected(source, values, count, &pattern);
+    const int capped_bits = (size_t)bits < min_bits ? bits : (int)min_bits;
+    const seedtool_progress_t progress = {
+        .rolls_pct = (int)(count * 100 / required),
+        .entropy_pct = (int)((size_t)capped_bits * 100 / min_bits),
+        .warn = pattern,
+        .complete = false, /* only called for count < required, so never yet */
+    };
+    return progress;
+}
+
 /* Collects the whole transcript and generates from it. Returns 1 when a seed was
  * produced, 0 when the user backed out of the first entry, -1 on timeout. */
 static int collect_entropy(const int source, const size_t words)
@@ -801,6 +911,8 @@ static int collect_entropy(const int source, const size_t words)
     const unsigned min = (source == SEEDTOOL_COIN || source == SEEDTOOL_CARDS) ? 0 : 1;
     const unsigned max = source == SEEDTOOL_D6 ? 6 : source == SEEDTOOL_D20 ? 20 : source == SEEDTOOL_COIN ? 1 : 51;
     const format_fn format = source == SEEDTOOL_CARDS ? format_card : source == SEEDTOOL_COIN ? format_coin : NULL;
+    const bool is_dice = source == SEEDTOOL_D6 || source == SEEDTOOL_D20;
+    const size_t min_bits = is_dice ? seedtool_min_entropy_bits(words) : 0;
 
     uint8_t values[256] = { 0 };
     bool available[52];
@@ -811,39 +923,84 @@ static int collect_entropy(const int source, const size_t words)
     memset(available, 1, sizeof(available));
     memset(&generated, 0, sizeof(generated));
 
-    while (i < required) {
-        unsigned value = 0;
-        /* Rebuilt from the values each time rather than appended to, so what is
-         * on screen is the transcript itself and cannot drift from it — going
-         * back a step has to unwrite the last entry too. */
-        if (seedtool_transcript((seedtool_source_t)source, values, i, history, sizeof(history)) != SEEDTOOL_OK) {
-            history[0] = '\0';
+    if (is_dice) {
+        /* Shown once, with the bar already in place but empty, so its shape and
+         * position are seen before they start moving. */
+        char rolls_needed[24];
+        (void)snprintf(rolls_needed, sizeof(rolls_needed), "%zu rolls needed", required);
+        const seedtool_progress_t empty = { 0 };
+        if (!dice_confirm(names[source], rolls_needed, "Red bar = non-random", &empty)) {
+            outcome = 0;
         }
-        const size_t shown = strlen(history) - seedtool_render_fit_tail(history);
-        const int result = enter_value(names[source], (unsigned)(i + 1), (unsigned)required, min, max, &value, format,
-            source == SEEDTOOL_CARDS ? available : NULL, history + shown);
-        if (result < 0) {
-            outcome = -1;
-            break;
-        }
-        if (result == 0) {
-            if (!i) {
-                outcome = 0;
+    }
+
+    for (; outcome == 1;) {
+        while (i < required) {
+            unsigned value = 0;
+            /* Rebuilt from the values each time rather than appended to, so what is
+             * on screen is the transcript itself and cannot drift from it — going
+             * back a step has to unwrite the last entry too. */
+            if (seedtool_transcript((seedtool_source_t)source, values, i, history, sizeof(history)) != SEEDTOOL_OK) {
+                history[0] = '\0';
+            }
+            const size_t shown = strlen(history) - seedtool_render_fit_tail(history);
+            const seedtool_progress_t progress
+                = is_dice ? dice_progress((seedtool_source_t)source, values, i, required, min_bits)
+                          : (seedtool_progress_t) { 0 };
+            const int result = enter_value(names[source], (unsigned)(i + 1), (unsigned)required, min, max, &value,
+                format, source == SEEDTOOL_CARDS ? available : NULL, history + shown, is_dice ? &progress : NULL);
+            if (result < 0) {
+                outcome = -1;
                 break;
             }
-            --i;
-            /* A card put back becomes drawable again, or correcting an entry
-             * would leave it permanently out of the deck. */
-            if (source == SEEDTOOL_CARDS) {
-                available[values[i]] = true;
+            if (result == 0) {
+                if (!i) {
+                    outcome = 0;
+                    break;
+                }
+                --i;
+                /* A card put back becomes drawable again, or correcting an entry
+                 * would leave it permanently out of the deck. */
+                if (source == SEEDTOOL_CARDS) {
+                    available[values[i]] = true;
+                }
+                continue;
             }
-            continue;
+            values[i] = (uint8_t)value;
+            if (source == SEEDTOOL_CARDS) {
+                available[value] = false;
+            }
+            ++i;
         }
-        values[i] = (uint8_t)value;
-        if (source == SEEDTOOL_CARDS) {
-            available[value] = false;
+        if (outcome != 1 || !is_dice) {
+            break;
         }
-        ++i;
+        /* The whole run is fixed-length, unlike Krux's open-ended rolling: there
+         * is no "keep going a bit more" here, only "go fix a roll" — declining
+         * below steps back into the entry loop at the last one, the same way a
+         * manual [back] already does. */
+        int bits = 0;
+        bool pattern = false;
+        (void)seedtool_dice_entropy_bits((seedtool_source_t)source, values, required, &bits);
+        (void)seedtool_dice_pattern_detected((seedtool_source_t)source, values, required, &pattern);
+        const bool poor = (size_t)bits + DICE_ENTROPY_TOLERANCE < min_bits;
+        bool proceed = true;
+        if (poor) {
+            proceed = acknowledge("Poor entropy!", "Proceed anyway?", NULL);
+        }
+        if (proceed && pattern) {
+            proceed = acknowledge("Pattern detected!", "Proceed anyway?", NULL);
+        }
+        if (proceed && !poor && !pattern) {
+            /* The positive case: the bar's outline goes green, the one point in
+             * the run where seedtool_progress_t.complete is ever true. */
+            const seedtool_progress_t complete = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
+            proceed = dice_confirm(names[source], "Entropy looks good", "Generate mnemonic?", &complete);
+        }
+        if (proceed) {
+            break;
+        }
+        --i;
     }
     if (outcome == 1) {
         if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) == SEEDTOOL_OK) {
@@ -912,7 +1069,7 @@ static void complete_checksum(void)
                 flips[f] = (char)('0' + bits[f]);
             }
             const int result = enter_value("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, 0, 1, &bit,
-                format_coin, NULL, flips);
+                format_coin, NULL, flips, NULL);
             if (result < 0) {
                 outcome = -1;
             } else if (result == 0) {
@@ -1007,7 +1164,9 @@ void seedtool_run(void)
         } else {
             (void)page_text("Safety",
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
-                "record entropy independently. Left and right move, both buttons together select.");
+                "record entropy independently. Left and right move, both buttons together select. Origo is derived "
+                "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
+                "Blockstream. The dice-roll entropy bar is adapted from Krux (github.com/selfcustody/krux).");
         }
         last_action = seedtool_platform_milliseconds();
     }

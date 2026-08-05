@@ -60,6 +60,28 @@ class SeedToolVerifierTests(unittest.TestCase):
             "unveil nice picture region tragic fault cream strike tourist control recipe tourist",
         )
 
+    def test_shannon_bits_of_a_uniform_and_a_constant_run(self):
+        # An all-one-face run carries no information: every roll was foretold by
+        # the last, so entropy is exactly zero regardless of how many there are.
+        self.assertEqual(verify.shannon_bits("d6", [3] * 50), 0)
+        # A perfectly even spread over all six faces is the maximum a D6 can
+        # carry per roll: log2(6) bits each, six rolls here.
+        self.assertEqual(verify.shannon_bits("d6", [1, 2, 3, 4, 5, 6]), int(6 * verify.math.log2(6)))
+        with self.assertRaisesRegex(ValueError, "1..6"):
+            verify.shannon_bits("d6", [7])
+
+    def test_pattern_detected_on_an_arithmetic_run(self):
+        # Repeating 1..6 in order is the lazy way to fake fifty rolls: every
+        # face appears equally often (high Shannon entropy by count alone) but
+        # the sequence is entirely predictable, which only the derivative check
+        # below catches.
+        run = [1, 2, 3, 4, 5, 6] * 8 + [1, 2]
+        self.assertEqual(len(run), 50)
+        self.assertTrue(verify.pattern_detected("d6", run))
+        self.assertGreaterEqual(verify.shannon_bits("d6", run), 128)
+        # Too few rolls to judge either way.
+        self.assertFalse(verify.pattern_detected("d6", [1, 2, 3, 4, 5, 6, 1, 2, 3]))
+
     def test_cards_domain_and_duplicates(self):
         cards = [rank + suit for suit in "CDHS" for rank in "A23456789TJQK"][:25]
         self.assertTrue(verify.transcript("cards", cards, 25).startswith("cards-v1:"))
@@ -227,6 +249,12 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(
             accounts[86],
             "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ",
+        )
+        # SLIP-132 zpub for the same BIP84 account: the identical key, xpub's
+        # version bytes swapped for zpub's.
+        self.assertEqual(
+            accounts["84z"],
+            "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
         )
 
     def test_base58check_handles_leading_zero_bytes(self):

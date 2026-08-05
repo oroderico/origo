@@ -141,6 +141,13 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     flush();
 }
 
+void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_progress_t* progress)
+{
+    seedtool_render_dice_screen(title, line1, line2, footer, progress);
+    flush();
+}
+
 void seedtool_display_splash(void)
 {
     seedtool_render_splash();

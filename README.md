@@ -38,6 +38,20 @@ Card ranks are `A23456789TJQK`; suits are `CDHS`. The canonical deck order is
 cards is used. SHA256 is applied to the ASCII transcript. A 12-word seed uses
 the first 16 hash bytes; a 24-word seed uses all 32 bytes.
 
+A D6 or D20 run opens on a screen naming how many rolls it needs and what the
+bar below is about, with that bar already in place but empty. While rolls are
+being keyed in, its two segments track rolls collected and Shannon's entropy
+of them, each against its minimum, and the entropy segment turns red if
+consecutive rolls look patterned — an arithmetic run such as
+`1,2,3,4,5,6,1,2,3,...` rather than a real roll. Once all the required rolls
+are in, poor entropy or a detected pattern is confirmed before the mnemonic is
+generated; declining any of these screens steps back to redo the last roll.
+With neither problem, the bar's outline turns green on one last "Entropy
+looks good" screen before generating. All of this is a pure function of the
+rolls already typed: a UI quality signal only, never an input to the
+transcript that gets hashed. Adapted from Krux's dice-roll entropy screen
+(github.com/selfcustody/krux).
+
 Checksum completion consumes 11 BIP39 words plus exactly 7 coin flips, or 23
 words plus exactly 3 flips. Those flips are the missing entropy bits and lead
 to one checksum-valid final word; the firmware never randomly selects from the
@@ -138,14 +152,24 @@ for that derivation session only.
 ## Restore and inspect
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
-address viewer entirely. For a valid mnemonic the viewer shows:
+address viewer entirely. For a valid mnemonic the viewer shows the master
+fingerprint, then one wallet type at a time — Native SegWit (BIP84) or Taproot
+(BIP86) — chosen up front, so the account key and its addresses are always read
+for the type just picked rather than interleaved with the other one's. Each
+type shows:
 
-- the master fingerprint;
-- the watch-only account key at `m/84'/0'/0'` and `m/86'/0'/0'`, in standard
-  BIP32 `xpub` serialisation, titled with its key origin such as
-  `[73c5da0a/84'/0'/0']`. No SLIP-132 `zpub` variants are produced;
-- mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i` and
-  `m/86'/0'/0'/0/i`.
+- its watch-only account key at `m/84'/0'/0'` or `m/86'/0'/0'`, titled with its
+  key origin such as `[73c5da0a/84'/0'/0']`. Native SegWit can be shown as
+  either standard BIP32 `xpub` or, on request, its SLIP-132 `zpub` — the same
+  78 bytes with the four version bytes swapped, since libwally itself
+  serialises only the plain BIP32 versions and has no notion of SLIP-132.
+  Taproot is `xpub` only: SLIP-132 defines no taproot version prefix, so there
+  is no `zpub`-equivalent to offer it as;
+- its mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i`
+  or `m/86'/0'/0'/0/i`, browsed as a scrollable list of a hundred rows rather
+  than stepped through one at a time. The whole list is derived when it is
+  opened, the same up-front derivation the QR carousel below already relies
+  on, so scrolling through it never re-runs BIP32.
 
 Long values are paged two lines at a time in the 16px face, split by what
 actually fits the display rather than by a character count, so a proportional
@@ -157,13 +181,15 @@ spelled with a word: `OK` at 16px is 24px wide in a 24px cell. Backspace is draw
 as an arrow instead of spelled, since the fonts are 95 printable ASCII characters
 and have no glyph for it.
 
-Both account keys and both addresses can be shown as QR codes. The QR screen
-steps sideways through all four, each one named in the margin beside it, so an
-account key and the address it belongs to are one press apart. An account key is
-encoded together with its key origin, as `[73c5da0a/84'/0'/0']xpub...`, which is
-what a watch-only wallet needs to import the account without being told the
-derivation path; 131 of the 134 bytes a version-6 code holds. There is nothing
-animated to scan: it is one image.
+The account key just shown — as `xpub` or `zpub`, whichever — and the address
+last opened from its list (index 0 until one has been) can be shown as QR
+codes. The QR screen steps sideways between the two, each one named in the
+margin beside it, so an account key and the address it belongs to are one press
+apart. An account key is encoded together with its key origin, as
+`[73c5da0a/84'/0'/0']xpub...`, which is what a watch-only wallet needs to
+import the account without being told the derivation path; 131 of the 134
+bytes a version-6 code holds. There is nothing animated to scan: it is one
+image.
 
 **Photographing an account key QR reveals every address of that account, past and
 future.** That is the whole point of the code and the whole cost of it, and the
@@ -199,12 +225,15 @@ Use `Left` or `A` for the left TTGO button and `Right` or `D` for the right one.
 Select with `Enter` or `Space`, or by holding one arrow and pressing the other
 as you would on the device. `Q` or `Escape` closes the simulator. Run the
 non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
-it verifies the published BIP84/BIP86 address and account xpub vectors, that
-every prefix of every BIP39 word and all 2048 word numbers are reachable through
-their keyboards, that paged text reassembles byte for byte, that a scrolling list
-always keeps the selection on screen and never pads its end with blank rows, that
-the rearranged keyboards still hold every letter and every printable character,
-and that an account key with its origin still fits a single QR code.
+it verifies the published BIP84/BIP86 address and account xpub vectors, the
+published SLIP-132 zpub vector for the same BIP84 account and that BIP86
+rejects a zpub request outright, that every prefix of every BIP39 word and all
+2048 word numbers are reachable through their keyboards, that paged text
+reassembles byte for byte, that a scrolling list always keeps the selection on
+screen and never pads its end with blank rows for lists as large as the
+hundred-row address browser, that the rearranged keyboards still hold every
+letter and every printable character, and that an account key with its origin
+still fits a single QR code.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.

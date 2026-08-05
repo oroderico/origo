@@ -16,6 +16,10 @@ static const char expected_xpub84[]
     = "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V";
 static const char expected_xpub86[]
     = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ";
+/* SLIP-132 zpub for the same account: the identical key, xpub's version bytes
+ * swapped for zpub's, published in the SLIP-132 test vectors. */
+static const char expected_zpub84[]
+    = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
 
 /* The word-entry keyboard is only usable if every reachable letter really does
  * lead to a word, and if narrowing always terminates in a listable candidate
@@ -211,8 +215,8 @@ static bool word_numbers_are_reachable(void)
 /* Every label the choice list can show. A label wider than a row is cut at the
  * last glyph that fits; nothing here is transcribed, but a silently shortened
  * label still misnames what the buttons are about to do. */
-static const char* const menu_labels[] = { "Master fingerprint", "Account xpub BIP84", "Account xpub BIP86",
-    "Address BIP84 bc1q", "Address BIP86 bc1p", "Address index: 99", "Done / erase", "Create Seed", "Restore Seed",
+static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
+    "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "Create Seed", "Restore Seed",
     "Complete Checksum", "About / Safety", "Reboot", "11 words + 7 coins", "23 words + 3 coins", "No passphrase",
     "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words", "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers" };
 #define MENU_LABEL_COUNT (sizeof(menu_labels) / sizeof(menu_labels[0]))
@@ -233,7 +237,8 @@ static bool labels_fit_a_row(void)
 static bool list_viewport_is_sound(void)
 {
     const int track = 99;
-    for (size_t count = 1; count <= 40; ++count) {
+    /* 101 is the largest list the firmware builds: 100 addresses plus Back. */
+    for (size_t count = 1; count <= 101; ++count) {
         for (size_t selected = 0; selected < count; ++selected) {
             for (size_t previous = 0; previous <= count; ++previous) {
                 const size_t top = seedtool_list_top(count, selected, previous);
@@ -324,6 +329,95 @@ static bool paging_is_lossless(const char* text)
     return strcmp(rebuilt, text) == 0;
 }
 
+/* Vectors for the live dice-roll quality readout, adapted from Krux's
+ * dice-roll entropy screen (github.com/selfcustody/krux). A UI signal only:
+ * these never touch what seedtool_generate hashes into the seed. */
+static bool dice_quality_is_sound(void)
+{
+    uint8_t all_same[50];
+    memset(all_same, 3, sizeof(all_same));
+    int bits = -1;
+    bool pattern = false;
+    /* No information at all: every roll was foretold by the last. */
+    if (seedtool_dice_entropy_bits(SEEDTOOL_D6, all_same, sizeof(all_same), &bits) != SEEDTOOL_OK || bits != 0) {
+        return false;
+    }
+    if (seedtool_dice_pattern_detected(SEEDTOOL_D6, all_same, sizeof(all_same), &pattern) != SEEDTOOL_OK || !pattern) {
+        return false;
+    }
+
+    /* A perfect round-robin: every face equally often, which alone would look
+     * like enough entropy, but entirely predictable, which only the
+     * derivative check below catches. */
+    uint8_t round_robin[50];
+    for (size_t i = 0; i < sizeof(round_robin); ++i) {
+        round_robin[i] = (uint8_t)((i % 6) + 1);
+    }
+    if (seedtool_dice_entropy_bits(SEEDTOOL_D6, round_robin, sizeof(round_robin), &bits) != SEEDTOOL_OK
+        || bits < (int)seedtool_min_entropy_bits(12)) {
+        return false;
+    }
+    if (seedtool_dice_pattern_detected(SEEDTOOL_D6, round_robin, sizeof(round_robin), &pattern) != SEEDTOOL_OK
+        || !pattern) {
+        return false;
+    }
+
+    /* Too few rolls to judge a pattern either way. */
+    const uint8_t short_run[9] = { 1, 2, 3, 4, 5, 6, 1, 2, 3 };
+    if (seedtool_dice_pattern_detected(SEEDTOOL_D6, short_run, sizeof(short_run), &pattern) != SEEDTOOL_OK
+        || pattern) {
+        return false;
+    }
+
+    /* Defined only for D6/D20. */
+    const uint8_t coin[2] = { 0, 1 };
+    return seedtool_dice_entropy_bits(SEEDTOOL_COIN, coin, sizeof(coin), &bits) == SEEDTOOL_EINVAL;
+}
+
+static size_t count_pixel_color(const uint16_t color)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    size_t count = 0;
+    for (size_t i = 0; i < SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT; ++i) {
+        if (pixels[i] == color) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+/* The bar's warn (red) and complete (green) colors appear nowhere else on a
+ * dice-entry screen, and its fill grows with the percentage passed in — so
+ * both are checked by counting matching pixels rather than by duplicating the
+ * renderer's private layout constants here. */
+static bool dice_progress_bar_is_bounded(void)
+{
+    const uint16_t warn_color = 0xf800, go_color = 0x07e0, fill_color = 0xfd20;
+    const char* const footer = "L/R move   BOTH select";
+    const seedtool_progress_t low = { .rolls_pct = 10, .entropy_pct = 10, .warn = false, .complete = false };
+    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &low);
+    if (count_pixel_color(warn_color) != 0 || count_pixel_color(go_color) != 0) {
+        return false;
+    }
+    const size_t low_fill = count_pixel_color(fill_color);
+
+    const seedtool_progress_t high = { .rolls_pct = 90, .entropy_pct = 90, .warn = false, .complete = false };
+    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &high);
+    if (count_pixel_color(fill_color) <= low_fill) {
+        return false;
+    }
+
+    const seedtool_progress_t warned = { .rolls_pct = 50, .entropy_pct = 50, .warn = true, .complete = false };
+    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &warned);
+    if (count_pixel_color(warn_color) == 0) {
+        return false;
+    }
+
+    const seedtool_progress_t done = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
+    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &done);
+    return count_pixel_color(go_color) != 0;
+}
+
 static int self_test(void)
 {
     char address[SEEDTOOL_MAX_ADDRESS_LEN];
@@ -331,10 +425,13 @@ static int self_test(void)
     if (wally_init(0) != WALLY_OK || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
         || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, address, sizeof(address)) != SEEDTOOL_OK
         || strcmp(address, expected_address) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
         || strcmp(xpub, expected_xpub84) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, xpub, sizeof(xpub)) != SEEDTOOL_OK
-        || strcmp(xpub, expected_xpub86) != 0) {
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || strcmp(xpub, expected_xpub86) != 0
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || strcmp(xpub, expected_zpub84) != 0
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) != SEEDTOOL_EINVAL) {
         fputs("Origo host self-test failed\n", stderr);
         return 1;
     }
@@ -360,6 +457,14 @@ static int self_test(void)
     }
     if (!partial_transcripts_are_prefixes()) {
         fputs("Origo running transcript self-test failed\n", stderr);
+        return 1;
+    }
+    if (!dice_quality_is_sound()) {
+        fputs("Origo dice entropy quality self-test failed\n", stderr);
+        return 1;
+    }
+    if (!dice_progress_bar_is_bounded()) {
+        fputs("Origo dice progress bar self-test failed\n", stderr);
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key

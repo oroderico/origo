@@ -11,6 +11,17 @@
 #define COLOR_WHITE UINT16_C(0xffff)
 #define COLOR_DIM UINT16_C(0x39e7)
 #define COLOR_HIGHLIGHT UINT16_C(0xfd20)
+#define COLOR_WARN UINT16_C(0xf800)
+#define COLOR_GO UINT16_C(0x07e0)
+
+/* Sits in the gap between the transcript line (ends y=81) and the footer
+ * (starts y=111) that seedtool_render_screen leaves empty on a dice-entry
+ * screen. */
+#define DICE_BAR_MARGIN 20
+#define DICE_BAR_X DICE_BAR_MARGIN
+#define DICE_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * DICE_BAR_MARGIN)
+#define DICE_BAR_Y 90
+#define DICE_BAR_HEIGHT 14
 
 #define KEYBOARD_COLUMNS 10
 #define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
@@ -304,8 +315,14 @@ seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const
     }
     /* Spread the remaining travel over the scrollable range, so the thumb sits
      * against the top at the first row and flush with the bottom at the last:
-     * the end of a list has to look like the end of it here too. */
+     * the end of a list has to look like the end of it here too. On a long
+     * enough list the division below can floor a small top back down to 0,
+     * which would show row 1 as if it were row 0; nudge it to the nearest
+     * pixel off the top instead, the one case the floor can get wrong. */
     thumb.offset = (int)((size_t)(track - thumb.height) * top / (count - SEEDTOOL_LIST_ROWS));
+    if (top && !thumb.offset) {
+        thumb.offset = 1;
+    }
     return thumb;
 }
 
@@ -459,6 +476,30 @@ static void draw_border(const int x, const int y, const int width, const int hei
     fill_rect(x, y + height - 1, width, 1, color);
     fill_rect(x, y, 1, height, color);
     fill_rect(x + width - 1, y, 1, height, color);
+}
+
+static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
+
+void seedtool_render_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_progress_t* progress)
+{
+    seedtool_render_screen(title, line1, line2, footer);
+    if (!progress) {
+        return;
+    }
+    const int inner_x = DICE_BAR_X + 2;
+    const int inner_width = DICE_BAR_WIDTH - 4;
+    const int segment_height = (DICE_BAR_HEIGHT - 4) / 2;
+    const int rolls_width = clamp_pct(progress->rolls_pct) * inner_width / 100;
+    const int entropy_width = clamp_pct(progress->entropy_pct) * inner_width / 100;
+    if (rolls_width > 0) {
+        fill_rect(inner_x, DICE_BAR_Y + 2, rolls_width, segment_height, COLOR_HIGHLIGHT);
+    }
+    if (entropy_width > 0) {
+        fill_rect(inner_x, DICE_BAR_Y + 2 + segment_height + 1, entropy_width, segment_height,
+            progress->warn ? COLOR_WARN : COLOR_HIGHLIGHT);
+    }
+    draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
 }
 
 void seedtool_render_keyboard(

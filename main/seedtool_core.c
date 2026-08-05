@@ -1,5 +1,6 @@
 #include "seedtool_core.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -11,6 +12,11 @@
 #include <wally_script.h>
 
 #define HARDENED BIP32_INITIAL_HARDENED_CHILD
+
+/* SLIP-132 zpub version bytes. libwally has no notion of SLIP-132: it only
+ * serialises the four plain BIP32 versions, so a zpub is built by serialising
+ * the standard way and then patching these four bytes into the output. */
+static const uint8_t ZPUB_VERSION[4] = { 0x04, 0xb2, 0x47, 0x46 };
 
 static bool valid_words(const size_t words)
 {
@@ -41,6 +47,104 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
     default:
         return 0;
     }
+}
+
+size_t seedtool_min_entropy_bits(const size_t words) { return valid_words(words) ? (words == 12 ? 128 : 256) : 0; }
+
+static bool dice_source(const seedtool_source_t source, size_t* sides)
+{
+    if (source == SEEDTOOL_D6) {
+        *sides = 6;
+        return true;
+    }
+    if (source == SEEDTOOL_D20) {
+        *sides = 20;
+        return true;
+    }
+    return false;
+}
+
+/* -Sum p*log2(p) over a distribution of `total` samples spread across
+ * `counts[0..buckets)`, in bits per symbol. Krux's shannon_sum. */
+static double shannon_bits_per_symbol(const unsigned* counts, const size_t buckets, const size_t total)
+{
+    double bits = 0.0;
+    for (size_t i = 0; i < buckets; ++i) {
+        if (counts[i]) {
+            const double probability = (double)counts[i] / (double)total;
+            bits -= probability * log2(probability);
+        }
+    }
+    return bits;
+}
+
+seedtool_result_t seedtool_dice_entropy_bits(
+    const seedtool_source_t source, const uint8_t* values, const size_t values_len, int* bits_out)
+{
+    size_t sides = 0;
+    if (!dice_source(source, &sides) || !bits_out) {
+        return SEEDTOOL_EINVAL;
+    }
+    if (!values_len) {
+        *bits_out = 0;
+        return SEEDTOOL_OK;
+    }
+    if (!values) {
+        return SEEDTOOL_EINVAL;
+    }
+    unsigned counts[20] = { 0 };
+    for (size_t i = 0; i < values_len; ++i) {
+        if (values[i] < 1 || values[i] > sides) {
+            return SEEDTOOL_ERANGE;
+        }
+        ++counts[values[i] - 1];
+    }
+    *bits_out = (int)(shannon_bits_per_symbol(counts, sides, values_len) * (double)values_len);
+    return SEEDTOOL_OK;
+}
+
+/* Below this many rolls, the derivative-entropy estimate below is too noisy to
+ * judge: a handful of rolls can look "patterned" by chance alone. */
+#define PATTERN_MIN_ROLLS 10
+/* How far derivative entropy must fall below its maximum, as a percentage of
+ * that maximum, to call the run patterned. Krux's PATTERN_DETECT_TOLERANCE. */
+#define PATTERN_DETECT_TOLERANCE 30.0
+
+seedtool_result_t seedtool_dice_pattern_detected(
+    const seedtool_source_t source, const uint8_t* values, const size_t values_len, bool* detected_out)
+{
+    size_t sides = 0;
+    if (!dice_source(source, &sides) || !detected_out) {
+        return SEEDTOOL_EINVAL;
+    }
+    *detected_out = false;
+    if (values_len < PATTERN_MIN_ROLLS) {
+        return SEEDTOOL_OK;
+    }
+    if (!values) {
+        return SEEDTOOL_EINVAL;
+    }
+    for (size_t i = 0; i < values_len; ++i) {
+        if (values[i] < 1 || values[i] > sides) {
+            return SEEDTOOL_ERANGE;
+        }
+    }
+    /* Consecutive differences range over -(sides-1)..(sides-1): an operator
+     * lazily counting up (or down) the die's faces leaves a run of derivatives
+     * that all land on the same value or two, which collapses this
+     * distribution's entropy far below its maximum. */
+    const size_t derivative_range = 2 * sides - 1;
+    const size_t derivatives = values_len - 1;
+    unsigned counts[2 * 20 - 1] = { 0 };
+    for (size_t i = 1; i < values_len; ++i) {
+        const int derivative = (int)values[i] - (int)values[i - 1];
+        ++counts[(size_t)(derivative + (int)sides - 1)];
+    }
+    const double entropy = shannon_bits_per_symbol(counts, derivative_range, derivatives);
+    const double max_entropy = log2((double)derivative_range);
+    const double normalized = max_entropy > 0.0 ? (max_entropy - entropy) / max_entropy * 100.0 : 0.0;
+    *detected_out = normalized > PATTERN_DETECT_TOLERANCE;
+    return SEEDTOOL_OK;
 }
 
 static seedtool_result_t append(char* dst, const size_t dst_len, size_t* used, const char* src)
@@ -281,20 +385,30 @@ seedtool_result_t seedtool_master_fingerprint(
 }
 
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, char* output, const size_t output_len)
+    const seedtool_address_type_t type, const seedtool_key_format_t format, char* output, const size_t output_len)
 {
-    if (!output || !output_len || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
+    if (!output || !output_len || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)
+        || (format != SEEDTOOL_XPUB && format != SEEDTOOL_ZPUB)
+        || (format == SEEDTOOL_ZPUB && type != SEEDTOOL_BIP84)) {
         return SEEDTOOL_EINVAL;
     }
     uint8_t seed[64];
     struct ext_key root, account;
+    unsigned char bytes[BIP32_SERIALIZED_LEN];
     char* base58 = NULL;
     const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, 0 | HARDENED };
     seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
     if (ret != SEEDTOOL_OK
         || bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &account)
             != WALLY_OK
-        || bip32_key_to_base58(&account, BIP32_FLAG_KEY_PUBLIC, &base58) != WALLY_OK || !base58) {
+        || bip32_key_serialize(&account, BIP32_FLAG_KEY_PUBLIC, bytes, sizeof(bytes)) != WALLY_OK) {
+        ret = SEEDTOOL_ECRYPTO;
+        goto done;
+    }
+    if (format == SEEDTOOL_ZPUB) {
+        memcpy(bytes, ZPUB_VERSION, sizeof(ZPUB_VERSION));
+    }
+    if (wally_base58_from_bytes(bytes, sizeof(bytes), BASE58_FLAG_CHECKSUM, &base58) != WALLY_OK || !base58) {
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
@@ -311,13 +425,15 @@ done:
     seedtool_zero(seed, sizeof(seed));
     seedtool_zero(&root, sizeof(root));
     seedtool_zero(&account, sizeof(account));
+    seedtool_zero(bytes, sizeof(bytes));
     return ret;
 }
 
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase,
     const seedtool_address_type_t type, const uint32_t index, char* output, const size_t output_len)
 {
-    if (!output || !output_len || index > 99 || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
+    if (!output || !output_len || index > SEEDTOOL_MAX_ADDRESS_INDEX
+        || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
         return SEEDTOOL_EINVAL;
     }
     uint8_t seed[64];

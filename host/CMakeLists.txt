@@ -48,7 +48,7 @@ add_executable(origo-simulator
 target_include_directories(origo-simulator PRIVATE "${ORIGO_ROOT}/main")
 target_compile_definitions(origo-simulator PRIVATE LOCK_VERSION=6)
 target_compile_options(origo-simulator PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
-target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2)
+target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
 
 enable_testing()
 add_test(NAME origo-host-self-test COMMAND origo-simulator --self-test)

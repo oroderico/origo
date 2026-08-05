@@ -23,6 +23,24 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
+/* The dice-roll quality bar drawn under a D6/D20 entry screen: a top segment
+ * for rolls collected against the minimum, a bottom segment for Shannon's
+ * entropy of those rolls against the minimum bits needed. `warn` colors the
+ * entropy segment as a pattern warning; `complete` colors the outline once
+ * both minimums are met. Adapted from Krux's dice-roll entropy screen
+ * (github.com/selfcustody/krux, src/krux/pages/new_mnemonic/dice_rolls.py). */
+typedef struct {
+    int rolls_pct; /* 0-100 */
+    int entropy_pct; /* 0-100 */
+    bool warn;
+    bool complete;
+} seedtool_progress_t;
+
+/* Draws the same screen as seedtool_render_screen, then the bar on top of it
+ * in the gap between line2 and the footer, when `progress` is not NULL. */
+void seedtool_render_dice_screen(
+    const char* title, const char* line1, const char* line2, const char* footer, const seedtool_progress_t* progress);
+
 /* The opening screen: the logo, centred, and nothing else. */
 void seedtool_render_splash(void);
 

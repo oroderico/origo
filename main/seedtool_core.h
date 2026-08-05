@@ -12,6 +12,10 @@
 #define SEEDTOOL_MAX_ADDRESS_LEN 96
 #define SEEDTOOL_MAX_XPUB_LEN 112
 
+/* Highest address index the viewer will derive. A calculation, not a stored
+ * limit: raising it costs nothing but a bigger on-screen list. */
+#define SEEDTOOL_MAX_ADDRESS_INDEX 99
+
 typedef enum {
     SEEDTOOL_OK = 0,
     SEEDTOOL_EINVAL = -1,
@@ -32,6 +36,14 @@ typedef enum {
     SEEDTOOL_BIP86 = 86,
 } seedtool_address_type_t;
 
+/* SLIP-132 defines a zpub version prefix for native segwit (BIP84) accounts
+ * and none for taproot: SEEDTOOL_BIP86 with SEEDTOOL_ZPUB is SEEDTOOL_EINVAL
+ * rather than a silent fall-back to xpub. */
+typedef enum {
+    SEEDTOOL_XPUB,
+    SEEDTOOL_ZPUB,
+} seedtool_key_format_t;
+
 typedef struct {
     char transcript[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
     uint8_t hash[SEEDTOOL_HASH_LEN];
@@ -40,6 +52,24 @@ typedef struct {
 } seedtool_generated_t;
 
 size_t seedtool_required_events(seedtool_source_t source, size_t words);
+
+/* Bits of entropy a 12- or 24-word mnemonic needs (128/256, the same 16/32
+ * bytes seedtool_generate hashes down to). Used to grade Shannon's entropy of
+ * a dice roll run against, not to gate the hash itself. */
+size_t seedtool_min_entropy_bits(size_t words);
+
+/* Shannon's entropy, in bits, of the D6/D20 face distribution in
+ * `values[0..values_len)`, and whether consecutive rolls look patterned (an
+ * arithmetic run such as 1,2,3,4,5,6,1,2,3,...) rather than random. Both are
+ * pure functions of the values already entered: they are a UI quality signal
+ * only and never reach seedtool_generate, which remains a function of the
+ * transcript alone. EINVAL for any source other than SEEDTOOL_D6/SEEDTOOL_D20.
+ * Adapted from Krux's dice-roll entropy screen
+ * (github.com/selfcustody/krux, src/krux/pages/new_mnemonic/dice_rolls.py). */
+seedtool_result_t seedtool_dice_entropy_bits(
+    seedtool_source_t source, const uint8_t* values, size_t values_len, int* bits_out);
+seedtool_result_t seedtool_dice_pattern_detected(
+    seedtool_source_t source, const uint8_t* values, size_t values_len, bool* detected_out);
 
 /* The canonical transcript of the first `values_len` events. Callable with a
  * prefix of a run: what it writes is byte for byte the start of what the whole
@@ -64,10 +94,13 @@ seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 seedtool_result_t seedtool_master_fingerprint(
     const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
 
-/* Watch-only account key at m/type'/0'/0' in standard BIP32 serialisation. The
- * caller shows it with its derivation path; no SLIP-132 variants are produced. */
-seedtool_result_t seedtool_account_xpub(
-    const char* mnemonic, const char* passphrase, seedtool_address_type_t type, char* output, size_t output_len);
+/* Watch-only account key at m/type'/0'/0'. `format` is the standard BIP32 xpub
+ * or, for BIP84 only, its SLIP-132 zpub: the same 78 bytes with the four
+ * version bytes swapped, since libwally itself knows only the plain BIP32
+ * versions and has no notion of SLIP-132. The caller shows it with its
+ * derivation path. */
+seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
+    seedtool_key_format_t format, char* output, size_t output_len);
 
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t index, char* output, size_t output_len);

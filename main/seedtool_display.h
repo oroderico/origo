@@ -4,8 +4,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "seedtool_render.h"
+
 void seedtool_display_init(void);
 void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer);
+void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_progress_t* progress);
 void seedtool_display_splash(void);
 void seedtool_display_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
     const char* footer);

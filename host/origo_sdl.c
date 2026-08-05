@@ -64,6 +64,13 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     present();
 }
 
+void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_progress_t* progress)
+{
+    seedtool_render_dice_screen(title, line1, line2, footer, progress);
+    present();
+}
+
 void seedtool_display_splash(void)
 {
     seedtool_render_splash();
@@ -96,8 +103,8 @@ bool seedtool_display_qr(const char* title, const char* text)
 void seedtool_platform_init(void)
 {
     seedtool_display_init();
-    puts("Controls: Left/A = previous; Right/D = next; Enter/Space, or Left+Right "
-         "together as on the device = select; Q/Esc = quit");
+    puts("Controls: Left/A or Up = previous; Right/D or Down = next; Enter/Space, or "
+         "Left+Right together as on the device = select; Q/Esc = quit");
 }
 
 uint64_t seedtool_platform_milliseconds(void) { return SDL_GetTicks64(); }
@@ -139,6 +146,13 @@ seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
         case SDLK_RIGHT:
         case SDLK_d:
             return other_button_down(key) ? KEY_SELECT : KEY_NEXT;
+        case SDLK_UP:
+            /* Plain navigation aliases: unlike Left/Right, pressing both
+             * together is not wired to a chord, since the device itself has no
+             * up/down buttons for this to stand in for. */
+            return KEY_PREV;
+        case SDLK_DOWN:
+            return KEY_NEXT;
         case SDLK_RETURN:
         case SDLK_SPACE:
             if (!event.key.repeat) {

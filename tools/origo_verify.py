@@ -8,6 +8,7 @@ Run this script from a trusted, offline environment.
 import argparse
 import hashlib
 import hmac
+import math
 from pathlib import Path
 import sys
 
@@ -19,6 +20,7 @@ G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
 CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 XPUB_VERSION = b"\x04\x88\xb2\x1e"
+ZPUB_VERSION = b"\x04\xb2\x47\x46"  # SLIP-132, native segwit (BIP84) only
 WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/data/wordlists/english.txt"
 
 
@@ -112,6 +114,56 @@ def transcript(kind, entries, count):
     return "cards-v1:" + "".join(vals)
 
 
+def shannon_bits(kind, values):
+    """Shannon's entropy, in bits, of a D6/D20 roll sequence.
+
+    A UI quality signal, not a cryptographic one: the mnemonic is generated
+    from the transcript's SHA256 regardless of this value. Mirrors
+    seedtool_dice_entropy_bits, adapted from Krux's dice-roll entropy screen
+    (github.com/selfcustody/krux, src/krux/pages/new_mnemonic/dice_rolls.py).
+    """
+    sides = {"d6": 6, "d20": 20}[kind]
+    if any(v < 1 or v > sides for v in values):
+        raise ValueError(f"{kind} values must be 1..{sides}")
+    if not values:
+        return 0
+    counts = [0] * sides
+    for v in values:
+        counts[v - 1] += 1
+    bits = 0.0
+    for count in counts:
+        if count:
+            p = count / len(values)
+            bits -= p * math.log2(p)
+    return int(bits * len(values))
+
+
+def pattern_detected(kind, values):
+    """Whether consecutive rolls look like an arithmetic run rather than random.
+
+    Mirrors seedtool_dice_pattern_detected: below 10 rolls this always reports
+    False, since a handful of rolls can look patterned by chance alone.
+    """
+    sides = {"d6": 6, "d20": 20}[kind]
+    if any(v < 1 or v > sides for v in values):
+        raise ValueError(f"{kind} values must be 1..{sides}")
+    if len(values) < 10:
+        return False
+    derivative_range = 2 * sides - 1
+    counts = [0] * derivative_range
+    for a, b in zip(values, values[1:]):
+        counts[b - a + sides - 1] += 1
+    derivatives = len(values) - 1
+    entropy = 0.0
+    for count in counts:
+        if count:
+            p = count / derivatives
+            entropy -= p * math.log2(p)
+    max_entropy = math.log2(derivative_range)
+    normalized = (max_entropy - entropy) / max_entropy * 100 if max_entropy > 0 else 0
+    return normalized > 30
+
+
 def inv(x):
     return pow(x, P - 2, P)
 
@@ -187,11 +239,19 @@ def base58check(payload):
     return "1" * (len(data) - len(data.lstrip(b"\0"))) + encoded
 
 
-def xpub(node):
+def xpub(node, version=XPUB_VERSION):
     secret, chain, depth, parent, index = node
-    return base58check(
-        XPUB_VERSION + bytes([depth]) + parent + index.to_bytes(4, "big") + chain + pubkey(secret)
-    )
+    return base58check(version + bytes([depth]) + parent + index.to_bytes(4, "big") + chain + pubkey(secret))
+
+
+def zpub(node):
+    """The same account key as xpub(), with SLIP-132's native-segwit version bytes.
+
+    libwally has no notion of SLIP-132: this is the whole 78-byte payload
+    unchanged except for the four leading version bytes, which is also how the
+    device itself builds a zpub.
+    """
+    return xpub(node, ZPUB_VERSION)
 
 
 def polymod(values):
@@ -238,6 +298,8 @@ def addresses(mnemonic, passphrase, index):
     for purpose in (84, 86):
         account = derive(root, (purpose | H, 0 | H, 0 | H))
         accounts[purpose] = xpub(account)
+        if purpose == 84:
+            accounts["84z"] = zpub(account)
         node = derive(account, (0, index))
         if purpose == 84:
             result[purpose] = segwit(hash160(pubkey(node[0])), 0)
@@ -261,6 +323,13 @@ def generate(args):
     print("transcript:", text)
     print("sha256:    ", digest.hex())
     print("mnemonic:  ", mnemonic)
+    if args.stats:
+        if args.source not in ("d6", "d20"):
+            raise ValueError("--stats only applies to d6/d20")
+        values = [int(x) for x in args.entries]
+        min_bits = 128 if args.words == 12 else 256
+        print(f"shannon:    {shannon_bits(args.source, values)} bits (min {min_bits})")
+        print("pattern:   ", "detected" if pattern_detected(args.source, values) else "not detected")
 
 
 def inspect(args):
@@ -271,6 +340,7 @@ def inspect(args):
     print("fingerprint:", fingerprint)
     for purpose in (84, 86):
         print(f"[{fingerprint}/{purpose}'/0'/0']: {accounts[purpose]}")
+    print(f"[{fingerprint}/84'/0'/0'] (zpub): {accounts['84z']}")
     for purpose in (84, 86):
         print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose])}")
     for purpose in (84, 86):
@@ -300,6 +370,7 @@ def main():
     gen.add_argument("source", choices=("d6", "d20", "coin", "cards"))
     gen.add_argument("entries", nargs="+")
     gen.add_argument("--words", type=int, choices=(12, 24), default=12)
+    gen.add_argument("--stats", action="store_true", help="print Shannon's entropy and pattern check (d6/d20 only)")
     gen.set_defaults(func=generate)
     check = sub.add_parser("inspect")
     check.add_argument("mnemonic")
