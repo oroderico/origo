@@ -141,6 +141,13 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     flush();
 }
 
+void seedtool_display_screen3(
+    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
+{
+    seedtool_render_screen3(title, line1, line2, line3, footer);
+    flush();
+}
+
 void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
     const seedtool_progress_t* progress)
 {
@@ -175,4 +182,20 @@ bool seedtool_display_qr(const char* title, const char* text)
         flush();
     }
     return ok;
+}
+
+bool seedtool_display_qr_bytes(const char* title, const uint8_t* data, const size_t len)
+{
+    const bool ok = seedtool_render_qr_bytes(title, data, len);
+    if (ok) {
+        flush();
+    }
+    return ok;
+}
+
+void seedtool_display_stackbit_screen(
+    const char* title, const unsigned word_number, const char* word, const char* footer)
+{
+    seedtool_render_stackbit_screen(title, word_number, word, footer);
+    flush();
 }

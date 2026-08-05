@@ -70,6 +70,12 @@ static void screen_text(const char* title, const char* line1, const char* line2,
     seedtool_display_screen(title, line1, line2, footer);
 }
 
+static void screen_text3(
+    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
+{
+    seedtool_display_screen3(title, line1, line2, line3, footer);
+}
+
 static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
 {
     const seedtool_key_t key = seedtool_platform_wait_key(timeout_ms);
@@ -269,9 +275,11 @@ static void hexstr(const uint8_t* bytes, const size_t len, char* output)
     output[len * 2] = '\0';
 }
 
-/* Two body lines per page, split by what actually fits on the display rather
- * than by a character count. Returns true when the reader advanced past the
- * last page or accepted, false when they backed out. */
+/* Three body lines per page, split by what actually fits on the display
+ * rather than by a character count. Three rather than two costs nothing but
+ * the tighter line pitch seedtool_render_screen3 uses: a third fewer pages to
+ * review the same value. Returns true when the reader advanced past the last
+ * page or accepted, false when they backed out. */
 static bool page_text(const char* title, const char* text)
 {
     size_t start[MAX_PAGE_LINES], length[MAX_PAGE_LINES];
@@ -285,20 +293,25 @@ static bool page_text(const char* title, const char* text)
         offset += fit ? fit : 1;
         ++lines;
     }
-    const size_t pages = (lines + 1) / 2;
+    const size_t pages = (lines + 2) / 3;
     size_t page = 0;
     for (;;) {
-        char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], footer[48];
-        const size_t first = page * 2;
+        char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1], footer[48];
+        const size_t first = page * 3;
         memcpy(line1, text + start[first], length[first]);
         line1[length[first]] = '\0';
         line2[0] = '\0';
+        line3[0] = '\0';
         if (first + 1 < lines) {
             memcpy(line2, text + start[first + 1], length[first + 1]);
             line2[length[first + 1]] = '\0';
         }
+        if (first + 2 < lines) {
+            memcpy(line3, text + start[first + 2], length[first + 2]);
+            line3[length[first + 2]] = '\0';
+        }
         (void)snprintf(footer, sizeof(footer), "%u/%u%s", (unsigned)(page + 1), (unsigned)pages, nav_hint());
-        screen_text(title, line1, line2, footer);
+        screen_text3(title, line1, line2, line3, footer);
         switch (wait_key()) {
         case KEY_SELECT:
             return true;
@@ -832,6 +845,83 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
     }
 }
 
+/* One word per screen, stepped the same way show_qr steps between values:
+ * L/R moves, anything else (BOTH, timeout) leaves. A plate punched from this
+ * already restores today with zero new code, via "Enter word numbers". */
+static void show_stackbit(const char* mnemonic)
+{
+    uint16_t numbers[24];
+    size_t count = 0;
+    if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
+        (void)acknowledge("Error", "Could not compute", "word numbers");
+        return;
+    }
+    size_t selected = 0;
+    for (;;) {
+        char footer[16];
+        (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
+        seedtool_display_stackbit_screen(
+            "Stackbit 1248", numbers[selected], seedtool_word(numbers[selected] - 1), footer);
+        switch (wait_key()) {
+        case KEY_PREV:
+            selected = (selected + count - 1) % count;
+            break;
+        case KEY_NEXT:
+            selected = (selected + 1) % count;
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            seedtool_zero(numbers, sizeof(numbers));
+            return;
+        }
+    }
+}
+
+/* Entering this screen reaches the whole seed, so the warning is far starker
+ * than the account-key QR's: that one only ever exposes future addresses,
+ * this one is every key the mnemonic can ever derive. There is no camera to
+ * scan the result back with, so tools/origo_verify.py inspect prints the same
+ * payload for an independent check instead. */
+static void export_seed_qr(const char* mnemonic)
+{
+    if (!acknowledge("Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds")) {
+        return;
+    }
+    uint8_t entropy[SEEDTOOL_HASH_LEN] = { 0 };
+    size_t len = 0;
+    if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) == SEEDTOOL_OK) {
+        for (;;) {
+            if (!seedtool_display_qr_bytes("Compact SeedQR", entropy, len)) {
+                (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
+                break;
+            }
+            if (wait_key() != KEY_REDRAW) {
+                break;
+            }
+        }
+    } else {
+        (void)acknowledge("Error", "Could not derive entropy", NULL);
+    }
+    seedtool_zero(entropy, sizeof(entropy));
+}
+
+static void show_backup_menu(const char* mnemonic)
+{
+    for (;;) {
+        const char* items[] = { "Stackbit 1248", "Compact SeedQR", "Back" };
+        const int selected = choose("Backup", items, 3);
+        if (selected < 0 || selected == 2) {
+            return;
+        }
+        if (selected == 0) {
+            show_stackbit(mnemonic);
+        } else {
+            export_seed_qr(mnemonic);
+        }
+    }
+}
+
 static void show_wallet_data(const char* mnemonic)
 {
     uint8_t fp[4] = { 0 };
@@ -850,14 +940,17 @@ static void show_wallet_data(const char* mnemonic)
     hexstr(fp, sizeof(fp), fphex);
 
     for (;;) {
-        const char* menu[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)", "Done / erase" };
+        const char* menu[]
+            = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)", "Backup", "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]));
-        if (selected < 0 || selected == 3) {
+        if (selected < 0 || selected == 4) {
             break;
         }
         if (selected == 0) {
             (void)acknowledge(
                 "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
+        } else if (selected == 3) {
+            show_backup_menu(mnemonic);
         } else {
             show_type_menu(mnemonic, passphrase, fphex, selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86,
                 selected == 1 ? &bip84 : &bip86);

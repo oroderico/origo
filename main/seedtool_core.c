@@ -344,6 +344,42 @@ seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words
     return SEEDTOOL_OK;
 }
 
+seedtool_result_t seedtool_mnemonic_word_numbers(
+    const char* mnemonic, uint16_t* numbers, const size_t capacity, size_t* count_out)
+{
+    const seedtool_result_t ret = mnemonic_indices(mnemonic, numbers, capacity, count_out);
+    if (ret != SEEDTOOL_OK) {
+        return ret;
+    }
+    for (size_t i = 0; i < *count_out; ++i) {
+        numbers[i] = (uint16_t)(numbers[i] + 1);
+    }
+    return SEEDTOOL_OK;
+}
+
+seedtool_result_t seedtool_mnemonic_entropy(
+    const char* mnemonic, uint8_t* entropy, const size_t capacity, size_t* len_out)
+{
+    if (!entropy || !len_out || capacity < SEEDTOOL_HASH_LEN) {
+        return SEEDTOOL_EINVAL;
+    }
+    size_t words = 0;
+    if (seedtool_validate_mnemonic(mnemonic, &words) != SEEDTOOL_OK) {
+        return SEEDTOOL_EINVAL;
+    }
+    size_t written = 0;
+    seedtool_result_t ret = SEEDTOOL_ECRYPTO;
+    if (bip39_mnemonic_to_bytes(NULL, mnemonic, entropy, capacity, &written) == WALLY_OK
+        && written == (words == 12 ? 16u : 32u)) {
+        *len_out = written;
+        ret = SEEDTOOL_OK;
+    }
+    if (ret != SEEDTOOL_OK) {
+        seedtool_zero(entropy, capacity);
+    }
+    return ret;
+}
+
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase)
 {
     if (!passphrase || strlen(passphrase) > SEEDTOOL_MAX_PASSPHRASE_LEN) {

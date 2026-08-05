@@ -58,6 +58,10 @@ REQUIRED = {
     "seedtool_display_init",
     "wally_secp_randomize",
     "esp_fill_random",
+    "seedtool_mnemonic_entropy",
+    "seedtool_mnemonic_word_numbers",
+    "seedtool_render_stackbit_screen",
+    "seedtool_render_qr_bytes",
 }
 
 

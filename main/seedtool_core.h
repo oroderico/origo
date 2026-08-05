@@ -91,6 +91,27 @@ seedtool_result_t seedtool_complete_checksum(
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 
+/* One-based word numbers for a Stackbit-1248-style backup: the position of
+ * each word in the printed BIP39 English wordlist, `abandon`=1, `zoo`=2048 —
+ * the same convention enter_word_number() already restores a plate by. Does
+ * not itself check the checksum; pair with seedtool_validate_mnemonic first
+ * when that matters. `numbers` must hold at least `capacity` entries; 24 is
+ * enough for any mnemonic this firmware generates or restores. */
+seedtool_result_t seedtool_mnemonic_word_numbers(
+    const char* mnemonic, uint16_t* numbers, size_t capacity, size_t* count_out);
+
+/* The raw entropy a mnemonic encodes: the exact BIP39 inverse of
+ * seedtool_generate's bip39_mnemonic_from_bytes call, byte for byte what
+ * seedtool_generate's own hash field held (its leading 16 or 32 bytes),
+ * whether the mnemonic just came from that generation or was typed in during
+ * restore. `entropy` must hold at least SEEDTOOL_HASH_LEN bytes; `len_out` is
+ * 16 for a 12-word mnemonic, 32 for a 24-word one. This is the exact payload
+ * of a Compact SeedQR: total, irreversible compromise of the wallet if it is
+ * ever photographed. Rejects a bad checksum exactly as
+ * seedtool_validate_mnemonic does. */
+seedtool_result_t seedtool_mnemonic_entropy(
+    const char* mnemonic, uint8_t* entropy, size_t capacity, size_t* len_out);
+
 seedtool_result_t seedtool_master_fingerprint(
     const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
 

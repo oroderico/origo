@@ -20,6 +20,13 @@ static const char expected_xpub86[]
  * swapped for zpub's, published in the SLIP-132 test vectors. */
 static const char expected_zpub84[]
     = "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
+/* Published BIP39 vector for the all-zero 256-bit entropy. */
+static const char mnemonic24[]
+    = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon "
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
+/* Same words as `mnemonic`, checksum deliberately broken. */
+static const char bad_checksum_mnemonic[]
+    = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
 
 /* The word-entry keyboard is only usable if every reachable letter really does
  * lead to a word, and if narrowing always terminates in a listable candidate
@@ -212,13 +219,35 @@ static bool word_numbers_are_reachable(void)
     return true;
 }
 
+/* The other direction of the same convention: every word maps back to the
+ * exact one-based number a Stackbit 1248 plate would be punched with. */
+static bool word_numbers_round_trip_is_sound(void)
+{
+    for (unsigned index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        uint16_t numbers[1];
+        size_t count = 0;
+        if (seedtool_mnemonic_word_numbers(seedtool_word(index), numbers, 1, &count) != SEEDTOOL_OK || count != 1
+            || numbers[0] != index + 1) {
+            return false;
+        }
+    }
+    uint16_t numbers[2];
+    size_t count = 0;
+    if (seedtool_mnemonic_word_numbers("abandon zoo", numbers, 2, &count) != SEEDTOOL_OK || count != 2
+        || numbers[0] != 1 || numbers[1] != SEEDTOOL_WORDLIST_LEN) {
+        return false;
+    }
+    return seedtool_mnemonic_word_numbers("abandon notaword", numbers, 2, &count) != SEEDTOOL_OK;
+}
+
 /* Every label the choice list can show. A label wider than a row is cut at the
  * last glyph that fits; nothing here is transcribed, but a silently shortened
  * label still misnames what the buttons are about to do. */
 static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
     "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "Create Seed", "Restore Seed",
     "Complete Checksum", "About / Safety", "Reboot", "11 words + 7 coins", "23 words + 3 coins", "No passphrase",
-    "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words", "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers" };
+    "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words", "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers",
+    "Backup", "Stackbit 1248", "Compact SeedQR" };
 #define MENU_LABEL_COUNT (sizeof(menu_labels) / sizeof(menu_labels[0]))
 
 static bool labels_fit_a_row(void)
@@ -386,6 +415,68 @@ static size_t count_pixel_color(const uint16_t color)
     return count;
 }
 
+/* Every one of the 2048 word numbers, drawn as a Stackbit 1248 grid, lights
+ * exactly the punch cells its digits' bits call for — checked by counting
+ * highlighted pixels rather than by duplicating the renderer's private
+ * geometry, the same tactic dice_progress_bar_is_bounded uses. */
+static bool stackbit_grid_is_sound(void)
+{
+    /* "0001" lights exactly one cell; its pixel count is the discovered
+     * per-dot area rather than a hard-coded one. */
+    seedtool_render_stackbit_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    const size_t unit = count_pixel_color(0xfd20);
+    if (!unit) {
+        return false;
+    }
+    for (unsigned number = 1; number <= SEEDTOOL_WORDLIST_LEN; ++number) {
+        char digits[5];
+        (void)snprintf(digits, sizeof(digits), "%04u", number);
+        unsigned bits = 0;
+        for (int i = 0; i < 4; ++i) {
+            const unsigned v = (unsigned)(digits[i] - '0');
+            bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
+        }
+        seedtool_render_stackbit_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        if (count_pixel_color(0xfd20) != bits * unit) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The Compact SeedQR payload is exactly the mnemonic's raw entropy: the
+ * all-zero 12- and 24-word vectors must decode to 16 and 32 zero bytes
+ * respectively and still fit the pinned QR version, and a broken checksum
+ * must be rejected rather than silently encoded. */
+static bool compact_seedqr_is_sound(void)
+{
+    uint8_t entropy[32];
+    size_t len = 0;
+    if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK || len != 16) {
+        return false;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        if (entropy[i] != 0) {
+            return false;
+        }
+    }
+    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
+        return false;
+    }
+    if (seedtool_mnemonic_entropy(mnemonic24, entropy, sizeof(entropy), &len) != SEEDTOOL_OK || len != 32) {
+        return false;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        if (entropy[i] != 0) {
+            return false;
+        }
+    }
+    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
+        return false;
+    }
+    return seedtool_mnemonic_entropy(bad_checksum_mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK;
+}
+
 /* The bar's warn (red) and complete (green) colors appear nowhere else on a
  * dice-entry screen, and its fill grows with the percentage passed in — so
  * both are checked by counting matching pixels rather than by duplicating the
@@ -441,6 +532,18 @@ static int self_test(void)
     }
     if (!word_numbers_are_reachable()) {
         fputs("Origo word number self-test failed\n", stderr);
+        return 1;
+    }
+    if (!word_numbers_round_trip_is_sound()) {
+        fputs("Origo word number round-trip self-test failed\n", stderr);
+        return 1;
+    }
+    if (!stackbit_grid_is_sound()) {
+        fputs("Origo Stackbit grid self-test failed\n", stderr);
+        return 1;
+    }
+    if (!compact_seedqr_is_sound()) {
+        fputs("Origo Compact SeedQR self-test failed\n", stderr);
         return 1;
     }
     if (!list_viewport_is_sound() || !labels_fit_a_row()) {

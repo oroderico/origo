@@ -88,6 +88,16 @@ def mnemonic_entropy(mnemonic):
     return entropy
 
 
+def compact_seedqr_payload(mnemonic):
+    """Exactly the bytes the device puts in a Compact SeedQR: the mnemonic's
+    raw entropy, with no checksum bits and no word text. A photo of this code
+    is total, irreversible compromise of every key the mnemonic can ever
+    derive — unlike the account key QR, there is no narrower blast radius to
+    warn about.
+    """
+    return mnemonic_entropy(mnemonic)
+
+
 def transcript(kind, entries, count):
     if len(entries) != count:
         raise ValueError(f"expected exactly {count} entries, got {len(entries)}")
@@ -337,6 +347,7 @@ def inspect(args):
     fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index)
     print("checksum:   valid")
     print("word numbers:", " ".join(str(n) for n in word_numbers(args.mnemonic)))
+    print("compact seedqr (hex):", compact_seedqr_payload(args.mnemonic).hex())
     print("fingerprint:", fingerprint)
     for purpose in (84, 86):
         print(f"[{fingerprint}/{purpose}'/0'/0']: {accounts[purpose]}")

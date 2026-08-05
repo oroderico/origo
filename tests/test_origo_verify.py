@@ -12,6 +12,7 @@ SPEC.loader.exec_module(verify)
 
 class SeedToolVerifierTests(unittest.TestCase):
     MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    MNEMONIC_24 = " ".join(["abandon"] * 23 + ["art"])
 
     def test_bip39_zero_vector(self):
         self.assertEqual(verify.mnemonic_from_entropy(bytes(16)), self.MNEMONIC)
@@ -20,6 +21,17 @@ class SeedToolVerifierTests(unittest.TestCase):
     def test_bad_checksum_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "checksum"):
             verify.mnemonic_entropy(self.MNEMONIC.replace("about", "abandon"))
+
+    def test_compact_seedqr_zero_vector(self):
+        self.assertEqual(verify.compact_seedqr_payload(self.MNEMONIC), bytes(16))
+
+    def test_compact_seedqr_24_word_zero_vector(self):
+        self.assertEqual(verify.mnemonic_from_entropy(bytes(32)), self.MNEMONIC_24)
+        self.assertEqual(verify.compact_seedqr_payload(self.MNEMONIC_24), bytes(32))
+
+    def test_compact_seedqr_rejects_bad_checksum(self):
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            verify.compact_seedqr_payload(self.MNEMONIC.replace("about", "abandon"))
 
     def test_word_numbers_are_one_based(self):
         self.assertEqual(verify.word_numbers(self.MNEMONIC), [1] * 11 + [4])

@@ -13,6 +13,31 @@ only once to blind libsecp256k1's context against side-channel analysis. The
 seed-generation functions have no RNG input and produce the same result if the
 device RNG is stubbed.
 
+## Why
+
+On 30 July 2026, attackers began draining Coldcard wallets: an initial wave
+took 1,196 addresses (about $70.2M) in 41 minutes, with further waves
+bringing the publicly reported total to roughly $88.6M across some 4,585
+addresses. The root cause, per Coinkite's disclosure and public reporting,
+was a firmware regression dating to March 2021: a misconfigured build flag
+had silently routed seed generation on Mk3, Mk4, Q and early Mk5 units to
+MicroPython's Yasmarang fallback PRNG — seeded only from the chip's unique ID
+and timer state — instead of the STM32's hardware RNG, producing roughly 72
+bits of real entropy where 128 were assumed. It went unnoticed for over five
+years. Coinkite's fix, shipped the next day, cannot repair a seed already
+generated on the flawed firmware: every affected owner has to generate a new
+one and move their funds.
+
+Origo exists to make that class of bug structurally impossible rather than
+merely unlikely. There is no RNG-to-seed code path for a misconfigured build
+flag to misroute in the first place: a mnemonic is a pure function of a
+canonical transcript the human recorded by hand — dice, coins or cards —
+reduced with SHA256, and, as stated just above, the device RNG plays no part
+in it. A firmware regression that silently swapped the entropy source behind
+a device owner's back, the same shape of bug that cost Coldcard users tens of
+millions of dollars, has nothing to act on here: stub the RNG out entirely
+and Origo generates the identical mnemonic.
+
 ## Entropy transcripts
 
 The transcript is shown before its full SHA256 and mnemonic. Record it so the
@@ -171,11 +196,11 @@ type shows:
   opened, the same up-front derivation the QR carousel below already relies
   on, so scrolling through it never re-runs BIP32.
 
-Long values are paged two lines at a time in the 16px face, split by what
+Long values are paged three lines at a time in the 16px face, split by what
 actually fits the display rather than by a character count, so a proportional
 font can never drop a character from a value that is about to be transcribed.
-The larger face costs four characters a line and no extra page: it is 45% taller
-than the small one but only 18% wider on base58. Footers keep the small face,
+The larger face costs four characters a line and a third fewer pages: it is 45%
+taller than the small one but only 18% wider on base58. Footers keep the small face,
 where 16px would run off the bottom of the display, and so do the keys still
 spelled with a word: `OK` at 16px is 24px wide in a 24px cell. Backspace is drawn
 as an arrow instead of spelled, since the fonts are 95 printable ASCII characters
@@ -193,8 +218,43 @@ image.
 
 **Photographing an account key QR reveals every address of that account, past and
 future.** That is the whole point of the code and the whole cost of it, and the
-device says so before showing one. Mnemonics and passphrases are never encoded as
-QR under any circumstance.
+device says so before showing one. A passphrase is never encoded as QR under any
+circumstance. A mnemonic can be, but only as a deliberate, separately-warned
+opt-in from the wallet viewer's Backup menu — see Backup export below — never as
+a side effect of anything else the device shows.
+
+## Backup export
+
+From the wallet viewer's `Backup` menu, a generated or restored mnemonic — the
+same screen both `Create Seed` and `Restore Seed` end on — can be shown two more
+ways, each read-only and each requiring its own acknowledgement before anything
+is drawn.
+
+**Stackbit 1248** shows one word per screen as its one-based word number
+(`abandon`=1, `zoo`=2048, the same convention word-number restore already uses)
+split into four decimal digits, each digit a column of four punch cells for
+binary weights 1, 2, 4 and 8, lit where that digit's bits are set — what a
+Stackbit 1248 metal plate is punched to record. `L/R` step word to word, `BOTH`
+returns to the Backup menu. This is a display only: a plate already punched from
+a Stackbit-compatible device restores today with zero new code, by choosing
+"Enter word numbers" during Restore Seed and typing what is punched. Adapted from
+Krux's Stackbit 1248 export (github.com/selfcustody/krux,
+src/krux/pages/stack_1248.py) as one simple layout rather than its three.
+Stackbit 1248 is a third-party physical backup product; Origo has no affiliation
+with it.
+
+**Compact SeedQR** encodes the mnemonic's raw entropy directly as a byte-mode
+QR — 16 bytes for 12 words, 32 for 24 — with no checksum bits and no word text,
+the SeedSigner/Krux "Compact SeedQR" convention. Before anything is drawn, the
+device warns that this single code is the entire seed and that a photograph of
+it is total, irreversible loss of every fund it can ever control — a materially
+different warning from the account-key QR's, which only ever exposes addresses.
+The device has no camera, so unlike Jade — which gates mnemonic QR export behind
+camera-equipped hardware specifically so it can scan the result back and check
+it — Origo cannot verify its own render; independently confirm the payload
+instead with `tools/origo_verify.py inspect`, which prints the same entropy
+bytes this code encodes. Origo implements only this compact/binary form: not
+Standard (numeric) SeedQR, Plaintext QR or Encrypted QR.
 
 ## Run on a PC
 
@@ -232,8 +292,11 @@ rejects a zpub request outright, that every prefix of every BIP39 word and all
 reassembles byte for byte, that a scrolling list always keeps the selection on
 screen and never pads its end with blank rows for lists as large as the
 hundred-row address browser, that the rearranged keyboards still hold every
-letter and every printable character, and that an account key with its origin
-still fits a single QR code.
+letter and every printable character, that an account key with its origin
+still fits a single QR code, that every one of the 2048 Stackbit 1248 punch
+grids lights exactly the cells its digits' bits call for, and that the Compact
+SeedQR payload for the published 12- and 24-word zero-entropy vectors is
+exactly their raw entropy.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
@@ -257,7 +320,7 @@ idf.py -B "$PWD/build" -p /dev/ttyUSB0 flash
 ```
 
 The application component contains only the deterministic core, TTGO display
-driver, two fonts and a version-5 QR encoder. Its libwally component is built
+driver, two fonts and a version-6 QR encoder. Its libwally component is built
 without Elements. The audit rejects linked wallet, radio, persistence, OTA update,
 battery, generic graphics, transaction, PSBT and Elements symbols and enforces
 a 285 KiB image limit. The partition table contains only the factory
@@ -274,10 +337,10 @@ python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 ```
 
-`inspect` prints the checksum verdict, one-based word numbers, master
-fingerprint, both account xpubs, the exact payload of both account key QR codes
-and both addresses, so every value the device can display has an independent
-second implementation to be compared against.
+`inspect` prints the checksum verdict, one-based word numbers, the Compact
+SeedQR payload, master fingerprint, both account xpubs, the exact payload of
+both account key QR codes and both addresses, so every value the device can
+display has an independent second implementation to be compared against.
 
 Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and

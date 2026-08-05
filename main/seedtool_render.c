@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #define COLOR_BLACK UINT16_C(0x0000)
@@ -58,6 +59,28 @@
 #define QR_TITLE_Y 50
 _Static_assert(QR_EXTENT <= SEEDTOOL_DISPLAY_HEIGHT, "the QR no longer fits the display");
 _Static_assert(QR_TITLE_WIDTH >= 80, "no room left beside the QR to name what it holds");
+
+/* Stackbit 1248 punch grid: four digit columns (thousands..units, left to
+ * right) times four weight rows (1,2,4,8 top to bottom), with the word
+ * number and word text in a panel to its right. A simplified layout rather
+ * than a pixel-faithful copy of the physical plate's own 2-row arrangement:
+ * read by weight label, not by matching screen geometry to the plate. */
+#define STACKBIT_GRID_X 10
+#define STACKBIT_LABEL_WIDTH 12
+#define STACKBIT_CELL 20
+#define STACKBIT_DOT 12
+#define STACKBIT_DIGITS 4
+#define STACKBIT_ROWS 4
+#define STACKBIT_GRID_TOP 26
+#define STACKBIT_GRID_WIDTH (STACKBIT_LABEL_WIDTH + STACKBIT_DIGITS * STACKBIT_CELL)
+#define STACKBIT_GRID_HEIGHT (STACKBIT_ROWS * STACKBIT_CELL)
+#define STACKBIT_PANEL_X (STACKBIT_GRID_X + STACKBIT_GRID_WIDTH + 14)
+#define STACKBIT_PANEL_WIDTH (SEEDTOOL_DISPLAY_WIDTH - STACKBIT_PANEL_X - 6)
+#define STACKBIT_NUMBER_Y 40
+#define STACKBIT_WORD_Y 68
+#define STACKBIT_FOOTER_Y 122
+_Static_assert(STACKBIT_GRID_TOP + STACKBIT_GRID_HEIGHT <= STACKBIT_FOOTER_Y, "the punch grid runs into the footer");
+_Static_assert(STACKBIT_PANEL_WIDTH >= 60, "no room left beside the grid to name the word");
 
 extern const unsigned char tft_DefaultFont[];
 extern const unsigned char tft_Ubuntu16[];
@@ -303,6 +326,21 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
     draw_centered(tft_DefaultFont, footer, 111);
 }
 
+/* Same face and footer as seedtool_render_screen, but a third body line
+ * pitched tighter (25px apart rather than 26, and starting closer to the
+ * title) so it still clears the footer: a long value paged three lines at a
+ * time needs a third of fewer pages to review, at the same 16px face. */
+void seedtool_render_screen3(
+    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, 5);
+    draw_centered(tft_Ubuntu16, line1, 33);
+    draw_centered(tft_Ubuntu16, line2, 58);
+    draw_centered(tft_Ubuntu16, line3, 83);
+    draw_centered(tft_DefaultFont, footer, 111);
+}
+
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
 {
     seedtool_thumb_t thumb = { 0, track };
@@ -545,6 +583,63 @@ void seedtool_render_keyboard(
     }
 }
 
+void seedtool_render_stackbit_screen(
+    const char* title, const unsigned word_number, const char* word, const char* footer)
+{
+    static const uint8_t WEIGHTS[STACKBIT_ROWS] = { 1, 2, 4, 8 };
+    static const char WEIGHT_LABELS[] = "1248";
+
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+
+    char digits[STACKBIT_DIGITS + 1];
+    (void)snprintf(digits, sizeof(digits), "%04u", word_number);
+    for (int col = 0; col < STACKBIT_DIGITS; ++col) {
+        const unsigned value = (unsigned)(digits[col] - '0');
+        for (int row = 0; row < STACKBIT_ROWS; ++row) {
+            const int x = STACKBIT_GRID_X + STACKBIT_LABEL_WIDTH + col * STACKBIT_CELL;
+            const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL;
+            draw_border(x, y, STACKBIT_CELL, STACKBIT_CELL, COLOR_DIM);
+            if (value & WEIGHTS[row]) {
+                fill_rect(x + (STACKBIT_CELL - STACKBIT_DOT) / 2, y + (STACKBIT_CELL - STACKBIT_DOT) / 2,
+                    STACKBIT_DOT, STACKBIT_DOT, COLOR_HIGHLIGHT);
+            }
+        }
+    }
+    for (int row = 0; row < STACKBIT_ROWS; ++row) {
+        const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL + (STACKBIT_CELL - tft_DefaultFont[1]) / 2;
+        draw_line_at(tft_DefaultFont, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
+    }
+    draw_centered_in(tft_Ubuntu16, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
+    draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_DIM);
+    draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
+}
+
+/* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
+ * `qr`'s modules are populated, whichever encoder filled them. `modules` is
+ * only needed back to zero it once drawn — it held whatever the mnemonic or
+ * key material was encoded as. */
+static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
+{
+    /* The code sits left with its quiet zone intact and the title goes in the
+     * margin beside it: on a screen that steps through several codes, one that
+     * does not say what it holds is one that gets scanned into the wrong place. */
+    const int extent = (qr->size + 2) * QR_SCALE;
+    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
+    seedtool_render_clear();
+    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
+    for (uint8_t y = 0; y < qr->size; ++y) {
+        for (uint8_t x = 0; x < qr->size; ++x) {
+            if (qrcode_getModule(qr, x, y)) {
+                fill_rect(QR_LEFT + (x + 1) * QR_SCALE, top + (y + 1) * QR_SCALE, QR_SCALE, QR_SCALE, COLOR_BLACK);
+            }
+        }
+    }
+    draw_centered_box(tft_DefaultFont, title, QR_TITLE_X, QR_TITLE_WIDTH, QR_TITLE_Y);
+    memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
+    return true;
+}
+
 bool seedtool_render_qr(const char* title, const char* text)
 {
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
@@ -552,23 +647,22 @@ bool seedtool_render_qr(const char* title, const char* text)
     if (qrcode_initText(&qr, modules, QR_VERSION, ECC_LOW, text) != 0) {
         return false;
     }
-    /* The code sits left with its quiet zone intact and the title goes in the
-     * margin beside it: on a screen that steps through several codes, one that
-     * does not say what it holds is one that gets scanned into the wrong place. */
-    const int extent = (qr.size + 2) * QR_SCALE;
-    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
-    seedtool_render_clear();
-    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
-    for (uint8_t y = 0; y < qr.size; ++y) {
-        for (uint8_t x = 0; x < qr.size; ++x) {
-            if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(QR_LEFT + (x + 1) * QR_SCALE, top + (y + 1) * QR_SCALE, QR_SCALE, QR_SCALE, COLOR_BLACK);
-            }
-        }
+    return draw_qr(&qr, modules, title);
+}
+
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len)
+{
+    if (len > UINT16_MAX) {
+        return false;
     }
-    draw_centered_box(tft_DefaultFont, title, QR_TITLE_X, QR_TITLE_WIDTH, QR_TITLE_Y);
-    memset(modules, 0, sizeof(modules));
-    return true;
+    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
+    QRCode qr;
+    /* qrcode_initBytes only reads through `data` into its own codeword
+     * buffer; this cast does not let it write through it. */
+    if (qrcode_initBytes(&qr, modules, QR_VERSION, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        return false;
+    }
+    return draw_qr(&qr, modules, title);
 }
 
 const uint16_t* seedtool_render_pixels(void) { return framebuffer; }

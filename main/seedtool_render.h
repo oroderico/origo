@@ -23,6 +23,11 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
+/* Same as seedtool_render_screen, but with a third body line: for a long
+ * value paged three lines at a time instead of two. */
+void seedtool_render_screen3(
+    const char* title, const char* line1, const char* line2, const char* line3, const char* footer);
+
 /* The dice-roll quality bar drawn under a D6/D20 entry screen: a top segment
  * for rolls collected against the minimum, a bottom segment for Shannon's
  * entropy of those rolls against the minimum bits needed. `warn` colors the
@@ -97,6 +102,23 @@ char seedtool_layout_key(const char* layout, size_t index);
 size_t seedtool_layout_center(const char* layout);
 
 bool seedtool_render_qr(const char* title, const char* text);
+
+/* Same as seedtool_render_qr, but for raw bytes rather than a null-terminated
+ * string: entropy can contain embedded 0x00 bytes, which qrcode_initText's
+ * strlen() would silently truncate at. `len` is passed straight through to
+ * the byte-mode encoder instead. */
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len);
+
+/* The Stackbit 1248 punch-grid backup display: one word's one-based word
+ * number (1-2048, the convention enter_word_number() restores by) shown as
+ * four decimal digits, each digit a column of four punch cells for binary
+ * weights 1, 2, 4 and 8 read top to bottom, lit where that digit's bits are
+ * set. `word` is shown beside the grid so the number can be checked against
+ * the word it means before it is punched. One simple layout, adapted from
+ * Krux's Stackbit 1248 export (github.com/selfcustody/krux,
+ * src/krux/pages/stack_1248.py) rather than its three alternates. */
+void seedtool_render_stackbit_screen(const char* title, unsigned word_number, const char* word, const char* footer);
+
 const uint16_t* seedtool_render_pixels(void);
 
 /* Copies `rows` rows of the framebuffer into `out` in the order the panel reads
