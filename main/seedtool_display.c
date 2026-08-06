@@ -3,6 +3,7 @@
 #include "seedtool_render.h"
 
 #include <driver/gpio.h>
+#include <driver/ledc.h>
 #include <driver/spi_master.h>
 #include <esp_check.h>
 #include <freertos/FreeRTOS.h>
@@ -20,6 +21,17 @@
 #define LCD_CLOCK_HZ 32000000
 #define LCD_GAP_X 40
 #define LCD_GAP_Y 53
+
+/* Backlight dimming: real PWM through LEDC rather than the plain GPIO on/off
+ * this pin used to be. Timer/channel/resolution/frequency match Jade's TTGO
+ * T-Display driver (jade/main/power/tdisplay.inc), which this board's pin
+ * assignment (GPIO4) was already taken from. */
+#define LCD_BL_LEDC_TIMER LEDC_TIMER_0
+#define LCD_BL_LEDC_MODE LEDC_LOW_SPEED_MODE
+#define LCD_BL_LEDC_CHANNEL LEDC_CHANNEL_0
+#define LCD_BL_LEDC_DUTY_RES LEDC_TIMER_10_BIT
+#define LCD_BL_LEDC_DUTY_MAX ((1 << LCD_BL_LEDC_DUTY_RES) - 1)
+#define LCD_BL_LEDC_FREQUENCY_HZ 10000
 
 #define LCD_CMD_SLPOUT 0x11
 #define LCD_CMD_INVON 0x21
@@ -89,14 +101,50 @@ static void flush(void)
     transmit_pixels();
 }
 
+static void backlight_init(void)
+{
+    const ledc_timer_config_t timer_config = {
+        .speed_mode = LCD_BL_LEDC_MODE,
+        .timer_num = LCD_BL_LEDC_TIMER,
+        .duty_resolution = LCD_BL_LEDC_DUTY_RES,
+        .freq_hz = LCD_BL_LEDC_FREQUENCY_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_config));
+    const ledc_channel_config_t channel_config = {
+        .gpio_num = LCD_PIN_BACKLIGHT,
+        .speed_mode = LCD_BL_LEDC_MODE,
+        .channel = LCD_BL_LEDC_CHANNEL,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = LCD_BL_LEDC_TIMER,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel_config));
+}
+
+void seedtool_display_set_orientation(const bool flipped)
+{
+    const uint8_t madctl = flipped ? 0xa0 : 0x60;
+    lcd_command(LCD_CMD_MADCTL, &madctl, sizeof(madctl));
+}
+
+void seedtool_display_set_brightness(const unsigned level)
+{
+    const unsigned clamped = seedtool_display_clamp_brightness(level);
+    const uint32_t duty = clamped * LCD_BL_LEDC_DUTY_MAX / SEEDTOOL_DISPLAY_BRIGHTNESS_MAX;
+    ESP_ERROR_CHECK(ledc_set_duty(LCD_BL_LEDC_MODE, LCD_BL_LEDC_CHANNEL, duty));
+    ESP_ERROR_CHECK(ledc_update_duty(LCD_BL_LEDC_MODE, LCD_BL_LEDC_CHANNEL));
+}
+
 void seedtool_display_init(void)
 {
     const gpio_config_t control_pins = {
-        .pin_bit_mask = (UINT64_C(1) << LCD_PIN_DC) | (UINT64_C(1) << LCD_PIN_RST) | (UINT64_C(1) << LCD_PIN_BACKLIGHT),
+        .pin_bit_mask = (UINT64_C(1) << LCD_PIN_DC) | (UINT64_C(1) << LCD_PIN_RST),
         .mode = GPIO_MODE_OUTPUT,
     };
     ESP_ERROR_CHECK(gpio_config(&control_pins));
-    ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_BACKLIGHT, 0));
+    backlight_init();
     const spi_bus_config_t bus_config = {
         .sclk_io_num = LCD_PIN_CLK,
         .mosi_io_num = LCD_PIN_MOSI,
@@ -122,15 +170,14 @@ void seedtool_display_init(void)
     vTaskDelay(pdMS_TO_TICKS(10));
     lcd_command(LCD_CMD_SLPOUT, NULL, 0);
     vTaskDelay(pdMS_TO_TICKS(100));
-    const uint8_t orientation = 0x60;
     const uint8_t color_mode = 0x55;
     const uint8_t ram_control[] = { 0x00, 0xf0 };
-    lcd_command(LCD_CMD_MADCTL, &orientation, sizeof(orientation));
+    seedtool_display_set_orientation(false);
     lcd_command(LCD_CMD_COLMOD, &color_mode, sizeof(color_mode));
     lcd_command(LCD_CMD_RAMCTRL, ram_control, sizeof(ram_control));
     lcd_command(LCD_CMD_INVON, NULL, 0);
     lcd_command(LCD_CMD_DISPON, NULL, 0);
-    ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_BACKLIGHT, 1));
+    seedtool_display_set_brightness(SEEDTOOL_DISPLAY_BRIGHTNESS_MAX);
     seedtool_render_clear();
     flush();
 }

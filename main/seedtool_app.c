@@ -61,6 +61,12 @@ static uint64_t last_action;
  * every screen after that is the counter alone. */
 static bool chord_learned;
 
+/* Session-only display settings: like chord_learned, these live only in RAM
+ * and reset to their defaults (unflipped, full brightness) every boot -
+ * Origo has no persistence to save them to. */
+static bool orientation_flipped;
+static unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_MAX;
+
 static const char* nav_hint(void) { return chord_learned ? "" : "   " NAV_FOOTER; }
 
 static void seedtool_require(const bool condition)
@@ -81,14 +87,26 @@ static void screen_text3(
     seedtool_display_screen3(title, line1, line2, line3, footer);
 }
 
+/* A flipped orientation means the case, and the buttons wired to it, are
+ * physically rotated 180 degrees too - so what used to read as the left
+ * button is now on the user's right. Swapping PREV/NEXT here, the one place
+ * every raw key passes through, keeps "left" and "right" matching what is
+ * shown on screen everywhere: menus, numeric entry, the keyboard. */
 static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
 {
-    const seedtool_key_t key = seedtool_platform_wait_key(timeout_ms);
+    seedtool_key_t key = seedtool_platform_wait_key(timeout_ms);
     if (key != KEY_TIMEOUT) {
         last_action = seedtool_platform_milliseconds();
     }
     if (key == KEY_SELECT) {
         chord_learned = true;
+    }
+    if (orientation_flipped) {
+        if (key == KEY_PREV) {
+            key = KEY_NEXT;
+        } else if (key == KEY_NEXT) {
+            key = KEY_PREV;
+        }
     }
     return key;
 }
@@ -1380,6 +1398,68 @@ static void restore_seed(void)
     }
 }
 
+static void format_brightness(char* const buf, const size_t buf_len)
+{
+    (void)snprintf(buf, buf_len, "%u/%u", backlight_level, SEEDTOOL_DISPLAY_BRIGHTNESS_MAX);
+}
+
+/* Applied live, one step per press, same as the coin flip / dice value
+ * convention: KEY_PREV raises, KEY_NEXT lowers. There is nothing to confirm -
+ * the level already shown on screen is the level in effect - so KEY_SELECT
+ * and a timeout both just leave. */
+static void show_brightness(void)
+{
+    for (;;) {
+        char shown[8];
+        format_brightness(shown, sizeof(shown));
+        screen_text("Brightness", shown, "", chord_learned ? NULL : NAV_FOOTER);
+        switch (wait_key()) {
+        case KEY_PREV:
+            if (backlight_level < SEEDTOOL_DISPLAY_BRIGHTNESS_MAX) {
+                seedtool_display_set_brightness(++backlight_level);
+            }
+            break;
+        case KEY_NEXT:
+            if (backlight_level > SEEDTOOL_DISPLAY_BRIGHTNESS_MIN) {
+                seedtool_display_set_brightness(--backlight_level);
+            }
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            return;
+        }
+    }
+}
+
+static void show_settings_menu(void)
+{
+    for (;;) {
+        char orientation_item[32], brightness_fraction[8], brightness_item[24];
+        (void)snprintf(orientation_item, sizeof(orientation_item), "Flip Orientation: %s",
+            orientation_flipped ? "On" : "Off");
+        format_brightness(brightness_fraction, sizeof(brightness_fraction));
+        (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
+        const char* items[] = { orientation_item, brightness_item, "About", "Back" };
+        const int selected = choose("Settings", items, 4, true);
+        if (selected < 0 || selected == 3) {
+            return;
+        }
+        if (selected == 0) {
+            orientation_flipped = !orientation_flipped;
+            seedtool_display_set_orientation(orientation_flipped);
+        } else if (selected == 1) {
+            show_brightness();
+        } else {
+            (void)page_text("Safety",
+                "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
+                "record entropy independently. Left and right move, both buttons together select. Origo is derived "
+                "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
+                "Blockstream. The dice-roll entropy bar is adapted from Krux (github.com/selfcustody/krux).");
+        }
+    }
+}
+
 void seedtool_run(void)
 {
     seedtool_platform_init();
@@ -1407,7 +1487,7 @@ void seedtool_run(void)
     last_action = seedtool_platform_milliseconds();
 
     for (;;) {
-        const char* menu[] = { "Create Seed", "Restore Seed", "Complete Checksum", "About / Safety", "Reboot" };
+        const char* menu[] = { "Create Seed", "Restore Seed", "Complete Checksum", "Settings", "Reboot" };
         const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
         if (selected < 0 || selected == 4) {
             seedtool_platform_restart();
@@ -1418,11 +1498,7 @@ void seedtool_run(void)
         } else if (selected == 2) {
             complete_checksum();
         } else {
-            (void)page_text("Safety",
-                "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
-                "record entropy independently. Left and right move, both buttons together select. Origo is derived "
-                "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
-                "Blockstream. The dice-roll entropy bar is adapted from Krux (github.com/selfcustody/krux).");
+            show_settings_menu();
         }
         last_action = seedtool_platform_milliseconds();
     }

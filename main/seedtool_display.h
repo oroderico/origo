@@ -6,7 +6,20 @@
 
 #include "seedtool_render.h"
 
+#define SEEDTOOL_DISPLAY_BRIGHTNESS_MIN 1
+#define SEEDTOOL_DISPLAY_BRIGHTNESS_MAX 5
+
+/* Shared by every seedtool_display_set_brightness backend, so each platform
+ * does not carry its own copy of the same bounds check. */
+static inline unsigned seedtool_display_clamp_brightness(const unsigned level)
+{
+    return level < SEEDTOOL_DISPLAY_BRIGHTNESS_MIN ? SEEDTOOL_DISPLAY_BRIGHTNESS_MIN
+        : level > SEEDTOOL_DISPLAY_BRIGHTNESS_MAX ? SEEDTOOL_DISPLAY_BRIGHTNESS_MAX : level;
+}
+
 void seedtool_display_init(void);
+void seedtool_display_set_orientation(bool flipped);
+void seedtool_display_set_brightness(unsigned level);
 void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer);
 void seedtool_display_screen3(
     const char* title, const char* line1, const char* line2, const char* line3, const char* footer);

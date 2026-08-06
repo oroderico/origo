@@ -173,6 +173,13 @@ exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
 of a screen position, since a direct choice has nothing left to confirm.
 
+The main menu's `Settings` entry carries `About` (the safety disclaimer),
+`Flip Orientation`, which toggles the panel 180 degrees in place, and
+`Brightness`, which steps the backlight through five PWM levels, applied live
+as it is adjusted. The display settings are session-only - like every other
+piece of UI state, they reset to their defaults (unflipped, full brightness)
+on the next boot, since Origo has nothing to save them to.
+
 Every choice is a list showing three options at once with the selection
 highlighted, so an option is always read alongside its neighbours. Three rather
 than five, because three rows leave room for the 16px face instead of the 11px
@@ -398,7 +405,9 @@ The application component contains only the deterministic core, TTGO display
 driver, two fonts and a version-6 QR encoder. Its libwally component is built
 without Elements. The audit rejects linked wallet, radio, persistence, OTA update,
 battery, generic graphics, transaction, PSBT and Elements symbols and enforces
-a 285 KiB image limit. The partition table contains only the factory
+a 295 KiB image limit. LEDC is the one peripheral driver let through that list,
+solely for the backlight's brightness PWM - it carries no wallet, radio or
+persistence surface of its own. The partition table contains only the factory
 application: there is no NVS, PHY-data or OTA slot.
 
 ## Independent verification

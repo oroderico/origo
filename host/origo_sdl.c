@@ -15,10 +15,28 @@ static SDL_Window* window;
 static SDL_Renderer* renderer;
 static SDL_Texture* texture;
 
+/* Mirror the hardware driver's session-only settings so the simulator gives
+ * the same live feedback: a 180-degree flip is horizontal+vertical mirroring,
+ * and brightness is approximated by scaling the texture's color channels. */
+static SDL_RendererFlip orientation_flip = SDL_FLIP_NONE;
+static uint8_t brightness_mod = 255;
+
 static _Noreturn void sdl_fail(const char* operation)
 {
     fprintf(stderr, "%s: %s\n", operation, SDL_GetError());
     exit(EXIT_FAILURE);
+}
+
+/* Redraws the last-uploaded frame with the current flip/color-mod state, with
+ * no texture reupload - for the flip and brightness setters below, where the
+ * pixel content hasn't changed, only how it's presented. */
+static void redraw(void)
+{
+    SDL_SetTextureColorMod(texture, brightness_mod, brightness_mod, brightness_mod);
+    SDL_SetRenderDrawColor(renderer, 24, 24, 24, 255);
+    SDL_RenderClear(renderer);
+    SDL_RenderCopyEx(renderer, texture, NULL, NULL, 0.0, NULL, orientation_flip);
+    SDL_RenderPresent(renderer);
 }
 
 static void present(void)
@@ -26,10 +44,20 @@ static void present(void)
     if (SDL_UpdateTexture(texture, NULL, seedtool_render_pixels(), SEEDTOOL_DISPLAY_WIDTH * sizeof(uint16_t)) != 0) {
         sdl_fail("SDL_UpdateTexture");
     }
-    SDL_SetRenderDrawColor(renderer, 24, 24, 24, 255);
-    SDL_RenderClear(renderer);
-    SDL_RenderCopy(renderer, texture, NULL, NULL);
-    SDL_RenderPresent(renderer);
+    redraw();
+}
+
+void seedtool_display_set_orientation(const bool flipped)
+{
+    orientation_flip = flipped ? (SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL) : SDL_FLIP_NONE;
+    redraw();
+}
+
+void seedtool_display_set_brightness(const unsigned level)
+{
+    const unsigned clamped = seedtool_display_clamp_brightness(level);
+    brightness_mod = (uint8_t)(clamped * 255 / SEEDTOOL_DISPLAY_BRIGHTNESS_MAX);
+    redraw();
 }
 
 void seedtool_display_init(void)

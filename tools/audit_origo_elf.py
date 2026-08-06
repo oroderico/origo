@@ -19,7 +19,6 @@ FORBIDDEN_SYMBOLS = {
     "keychain_get",
     "wallet_get",
     "adc_oneshot_new_unit",
-    "ledc_timer_config",
     "deflate_init_write_compressed",
     "wally_ecdh",
 }
@@ -38,7 +37,6 @@ FORBIDDEN_MAP_TEXT = (
     "/jade/main/",
     "libesp32_deflate.a",
     "libesp_adc.a",
-    "libesp_driver_ledc.a",
     "libesp_wifi.a",
     "libbt.a",
     "libnvs_flash.a",
@@ -50,7 +48,7 @@ REQUIRED = {
     "app_main",
     "seedtool_generate",
     "seedtool_complete_checksum",
-    "seedtool_mainnet_address",
+    "seedtool_mainnet_addresses",
     "seedtool_account_xpub",
     "seedtool_words_with_prefix",
     "seedtool_next_letters",
@@ -71,7 +69,7 @@ def main():
     parser.add_argument("elf", type=Path)
     parser.add_argument("--map", dest="map_file", type=Path)
     parser.add_argument("--bin", dest="bin_file", type=Path)
-    parser.add_argument("--max-bin-size", type=int, default=285 * 1024)
+    parser.add_argument("--max-bin-size", type=int, default=295 * 1024)
     parser.add_argument("--nm", default="xtensa-esp32-elf-nm")
     args = parser.parse_args()
 
