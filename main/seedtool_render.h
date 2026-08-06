@@ -113,11 +113,39 @@ size_t seedtool_layout_center(const char* layout);
 
 bool seedtool_render_qr(const char* title, const char* text);
 
+/* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
+ * fit in one frame at this file's QR_VERSION and ECC_LOW -- the same version
+ * and error-correction level every other QR this firmware draws already
+ * commits to. What a multi-part QR protocol such as BBQr needs to know to
+ * decide how many frames a payload needs. */
+size_t seedtool_render_qr_alphanumeric_capacity(void);
+
 /* Same as seedtool_render_qr, but for raw bytes rather than a null-terminated
  * string: entropy can contain embedded 0x00 bytes, which qrcode_initText's
  * strlen() would silently truncate at. `len` is passed straight through to
  * the byte-mode encoder instead. */
 bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len);
+
+/* How many "Zoomed Region" tiles seedtool_render_qr_bytes_region below can
+ * step through for a byte-mode payload of `len` bytes: the QR is split into
+ * 7x7-module blocks if it is the smallest (version 1, 21x21) QR, 5x5 blocks
+ * otherwise (Krux's own thresholds, github.com/selfcustody/krux,
+ * src/krux/pages/qr_view.py), covering it exactly since Compact SeedQR's two
+ * possible sizes (21, 25) both divide evenly by their block size. Returns 0
+ * on the same failure seedtool_render_qr_bytes_region would have. A pure
+ * function of `len` alone, like seedtool_render_fit and friends: it does not
+ * touch the framebuffer, so callers reach it directly rather than through
+ * seedtool_display. */
+size_t seedtool_render_qr_bytes_regions(size_t len);
+
+/* Draws one zoomed-in region tile of a byte-mode payload's QR code, in raster
+ * order (region_index 0 is the top-left block, stepping right then down),
+ * enlarged to nearly fill the display with a grid overlay and a "Region: A1"
+ * legend, so it can be hand-copied onto a paper template too small to fit the
+ * whole code drawn small enough to trace by eye. Krux's "Zoomed Regions Mode"
+ * ported to this display's layout. `region_index` must be less than what
+ * seedtool_render_qr_bytes_regions(len) returns. */
+bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, size_t len, size_t region_index);
 
 /* The Stackbit 1248 punch-grid backup display: one word's one-based word
  * number (1-2048, the convention enter_word_number() restores by) shown as

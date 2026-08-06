@@ -744,6 +744,15 @@ bool seedtool_render_qr(const char* title, const char* text)
     return draw_qr(&qr, modules, title);
 }
 
+size_t seedtool_render_qr_alphanumeric_capacity(void)
+{
+    size_t chars = 0;
+    while (qrcode_versionForAlphanumeric(ECC_LOW, (uint16_t)(chars + 1), QR_VERSION)) {
+        ++chars;
+    }
+    return chars;
+}
+
 bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len)
 {
     if (len > UINT16_MAX) {
@@ -768,6 +777,85 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size
         return false;
     }
     return draw_qr(&qr, modules, title);
+}
+
+/* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own
+ * thresholds (src/krux/pages/qr_view.py, SeedQRView.__init__). */
+static size_t qr_region_size(const uint8_t qr_size) { return qr_size == 21 ? 7 : 5; }
+
+size_t seedtool_render_qr_bytes_regions(const size_t len)
+{
+    if (len > UINT16_MAX) {
+        return 0;
+    }
+    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
+    if (!version) {
+        return 0;
+    }
+    const uint8_t qr_size = (uint8_t)(4 * version + 17);
+    const size_t region_size = qr_region_size(qr_size);
+    const size_t columns = ((size_t)qr_size + region_size - 1) / region_size;
+    return columns * columns;
+}
+
+/* Same layout draw_qr uses (a square bound by the display's height, with a
+ * label in the margin to its right), just at the block's own scale instead of
+ * the whole code's: with only 5-7 cells to fill instead of 21-25, each cell
+ * comes out much larger, which is the entire point of "zoomed". No quiet zone
+ * is drawn around it, unlike draw_qr's full code: a block is meant to be
+ * hand-copied, never scanned on its own. */
+static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, const size_t region_size,
+    const size_t columns, const size_t region_index)
+{
+    const size_t row = region_index / columns;
+    const size_t column = region_index % columns;
+    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (int)region_size;
+    const int extent = (int)region_size * scale;
+    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
+    const int title_x = QR_LEFT + extent + 5;
+    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
+    seedtool_render_clear();
+    for (size_t y = 0; y < region_size; ++y) {
+        for (size_t x = 0; x < region_size; ++x) {
+            const size_t qx = column * region_size + x;
+            const size_t qy = row * region_size + y;
+            const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
+            fill_rect(QR_LEFT + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : COLOR_WHITE);
+        }
+    }
+    for (size_t i = 0; i <= region_size; ++i) {
+        fill_rect(QR_LEFT, top + (int)i * scale, extent, 1, COLOR_DIM);
+        fill_rect(QR_LEFT + (int)i * scale, top, 1, extent, COLOR_DIM);
+    }
+    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    char label[24];
+    (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
+    draw_centered_box(tft_DefaultFont, label, title_x, title_width, QR_TITLE_Y + tft_DefaultFont[1] + 4);
+    memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
+}
+
+bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, const size_t len, const size_t region_index)
+{
+    if (len > UINT16_MAX) {
+        return false;
+    }
+    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
+    if (!version) {
+        return false;
+    }
+    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
+    QRCode qr;
+    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        return false;
+    }
+    const size_t region_size = qr_region_size(qr.size);
+    const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
+    if (region_index >= columns * columns) {
+        memset(modules, 0, sizeof(modules));
+        return false;
+    }
+    draw_qr_region(&qr, modules, title, region_size, columns, region_index);
+    return true;
 }
 
 const uint16_t* seedtool_render_pixels(void) { return framebuffer; }

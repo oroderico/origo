@@ -77,6 +77,13 @@ uint16_t qrcode_getBufferSize(uint8_t version);
 // `length` bytes, or 0 if none does.
 uint8_t qrcode_versionForBytes(uint8_t ecc, uint16_t length, uint8_t maxVersion);
 
+// Smallest version in 1..maxVersion whose alphanumeric-mode capacity at `ecc`
+// fits `length` characters, or 0 if none does. `length` characters must all be
+// in the alphanumeric mode charset (see getAlphanumeric) for a QR actually
+// initialised at the returned version with qrcode_initText to land in
+// alphanumeric mode rather than fall back to byte mode.
+uint8_t qrcode_versionForAlphanumeric(uint8_t ecc, uint16_t length, uint8_t maxVersion);
+
 int8_t qrcode_initText(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, const char* data);
 int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, uint8_t* data, uint16_t length);
 

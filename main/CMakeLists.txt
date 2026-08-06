@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "seedtool_app.c"
+         "seedtool_bbqr.c"
          "seedtool_core.c"
          "seedtool_display.c"
          "seedtool_render.c"

@@ -71,6 +71,18 @@ seedtool_result_t seedtool_dice_entropy_bits(
 seedtool_result_t seedtool_dice_pattern_detected(
     seedtool_source_t source, const uint8_t* values, size_t values_len, bool* detected_out);
 
+/* seedtool_dice_entropy_bits is a plug-in (maximum-likelihood) Shannon-entropy
+ * estimator, which is a textbook downward-biased estimate of the true entropy
+ * for small per-face sample counts: with `sides` possible faces, its expected
+ * shortfall in *total* reported bits is the Miller-Madow correction term
+ * (sides-1)/(2 ln 2), independent of how many rolls were made. Callers that
+ * grade seedtool_dice_entropy_bits' output against seedtool_min_entropy_bits
+ * should add this back first, or a genuinely random run will read as "poor"
+ * far more often than the roll counts in seedtool_required_events intend
+ * (worst case, D20, is otherwise flagged on almost every random run). Returns
+ * 0.0 for a non-dice source. */
+double seedtool_dice_entropy_bias_bits(seedtool_source_t source);
+
 /* The canonical transcript of the first `values_len` events. Callable with a
  * prefix of a run: what it writes is byte for byte the start of what the whole
  * run will write, which is what lets the screen show a running history that the

@@ -38,6 +38,7 @@ add_executable(origo-simulator
     origo_simulator.c
     origo_sdl.c
     "${ORIGO_ROOT}/main/seedtool_app.c"
+    "${ORIGO_ROOT}/main/seedtool_bbqr.c"
     "${ORIGO_ROOT}/main/seedtool_core.c"
     "${ORIGO_ROOT}/main/seedtool_render.c"
     "${ORIGO_ROOT}/main/seedtool_wordlist.c"

@@ -881,6 +881,37 @@ uint8_t qrcode_versionForBytes(uint8_t ecc, uint16_t length, uint8_t maxVersion)
     return 0;
 }
 
+uint8_t qrcode_versionForAlphanumeric(uint8_t ecc, uint16_t length, uint8_t maxVersion)
+{
+    const uint8_t eccFormatBits = (ECC_FORMAT_BITS >> (2 * ecc)) & 0x03;
+    for (uint8_t version = 1; version <= maxVersion; ++version) {
+#if LOCK_VERSION != 0
+        if (version != LOCK_VERSION) {
+            continue;
+        }
+#endif
+#if LOCK_VERSION == 0
+        const uint16_t moduleCount = NUM_RAW_DATA_MODULES[version - 1];
+        const uint16_t dataCapacity = moduleCount / 8 - NUM_ERROR_CORRECTION_CODEWORDS[eccFormatBits][version - 1];
+#else
+        const uint16_t moduleCount = NUM_RAW_DATA_MODULES;
+        const uint16_t dataCapacity = moduleCount / 8 - NUM_ERROR_CORRECTION_CODEWORDS[eccFormatBits];
+#endif
+        /* Mode indicator (4 bits) plus the alphanumeric-mode length field is the
+         * header every alphanumeric payload pays for, the same accounting
+         * qrcode_versionForBytes does for byte mode. encodeDataCodewords packs
+         * alphanumeric data two characters to 11 bits, with a trailing odd
+         * character taking 6 bits on its own. */
+        const uint32_t header_bits = 4u + (uint32_t)getModeBits(version, MODE_ALPHANUMERIC);
+        const uint32_t payload_bits = 11u * ((uint32_t)length / 2) + (length % 2 ? 6u : 0u);
+        const uint32_t capacity_bits = (uint32_t)dataCapacity * 8u;
+        if (capacity_bits > header_bits && (capacity_bits - header_bits) >= payload_bits) {
+            return version;
+        }
+    }
+    return 0;
+}
+
 // @TODO: Return error if data is too big.
 int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, uint8_t* data, uint16_t length)
 {

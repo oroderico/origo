@@ -39,7 +39,12 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
     case SEEDTOOL_D6:
         return words == 12 ? 50 : 99;
     case SEEDTOOL_D20:
-        return words == 12 ? 30 : 60;
+        /* Padded well past the 128/256-bit theoretical minimum (30/60 rolls
+         * would only just clear it): the empirical Shannon estimate the
+         * quality gate grades against is a biased estimator (see
+         * seedtool_dice_entropy_bias_bits) with the least sampling margin of
+         * any source here, so D20 gets the largest cushion. */
+        return words == 12 ? 36 : 68;
     case SEEDTOOL_COIN:
         return words == 12 ? 128 : 256;
     case SEEDTOOL_CARDS:
@@ -101,6 +106,15 @@ seedtool_result_t seedtool_dice_entropy_bits(
     }
     *bits_out = (int)(shannon_bits_per_symbol(counts, sides, values_len) * (double)values_len);
     return SEEDTOOL_OK;
+}
+
+double seedtool_dice_entropy_bias_bits(const seedtool_source_t source)
+{
+    size_t sides = 0;
+    if (!dice_source(source, &sides)) {
+        return 0.0;
+    }
+    return ((double)sides - 1.0) / (2.0 * log(2.0));
 }
 
 /* Below this many rolls, the derivative-entropy estimate below is too noisy to

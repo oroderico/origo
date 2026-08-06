@@ -1,12 +1,16 @@
 #include "seedtool_app.h"
+#include "seedtool_bbqr.h"
 #include "seedtool_core.h"
 #include "seedtool_render.h"
 #include "seedtool_wordlist.h"
 
 #include "qrcode.h"
 
+#include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wally_core.h>
 
@@ -405,6 +409,66 @@ static bool dice_quality_is_sound(void)
     return seedtool_dice_entropy_bits(SEEDTOOL_COIN, coin, sizeof(coin), &bits) == SEEDTOOL_EINVAL;
 }
 
+/* xorshift32: a tiny, deterministic, portable PRNG (not libc rand(), which is
+ * platform-specific) used only to drive the Monte-Carlo check below. */
+static uint32_t xorshift32(uint32_t* state)
+{
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    *state = x;
+    return x;
+}
+
+/* seedtool_dice_entropy_bits is a small-sample-biased estimator (see
+ * seedtool_dice_entropy_bias_bits' doc comment); the "poor entropy" gate in
+ * collect_entropy (main/seedtool_app.c) corrects for that bias before
+ * comparing against seedtool_min_entropy_bits. This proves the correction
+ * actually keeps genuinely random rolls, at the exact roll counts
+ * seedtool_required_events hands out, from being flagged "poor" more than an
+ * acceptable fraction of the time -- the false positive this whole mechanism
+ * exists to fix (D20 was previously flagged on essentially every random
+ * run). DICE_ENTROPY_TOLERANCE is duplicated here rather than exposed from
+ * seedtool_app.c, since it is UI-gate policy, not core behaviour. */
+static bool dice_entropy_false_positive_rate_is_bounded(void)
+{
+    const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20 };
+    const size_t sides[] = { 6, 20 };
+    const size_t words[] = { 12, 24 };
+    const int dice_entropy_tolerance = 4; /* DICE_ENTROPY_TOLERANCE in main/seedtool_app.c */
+    const size_t trials = 500;
+    const double max_false_positive_rate = 0.10;
+
+    uint32_t state = 1;
+    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
+        const double bias = seedtool_dice_entropy_bias_bits(sources[s]);
+        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w) {
+            const size_t required = seedtool_required_events(sources[s], words[w]);
+            const size_t min_bits = seedtool_min_entropy_bits(words[w]);
+            size_t flagged = 0;
+            for (size_t t = 0; t < trials; ++t) {
+                uint8_t values[128];
+                for (size_t i = 0; i < required; ++i) {
+                    values[i] = (uint8_t)(xorshift32(&state) % sides[s]) + 1;
+                }
+                int bits = 0;
+                if (seedtool_dice_entropy_bits(sources[s], values, required, &bits) != SEEDTOOL_OK) {
+                    return false;
+                }
+                const int corrected = bits + (int)lround(bias);
+                if ((size_t)corrected + dice_entropy_tolerance < min_bits) {
+                    ++flagged;
+                }
+            }
+            if ((double)flagged / (double)trials > max_false_positive_rate) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static size_t count_pixel_color(const uint16_t color)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -517,6 +581,48 @@ static bool compact_seedqr_is_sound(void)
     return seedtool_mnemonic_entropy(bad_checksum_mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK;
 }
 
+/* seedtool_render_qr_bytes_regions must tile the exact QR sizes Compact
+ * SeedQR ever produces (per compact_seedqr_is_sound above: version 1, 21x21
+ * for 12 words; version 2, 25x25 for 24 words) with no gap or partial-region
+ * edge case: 21 = 3*7 and 25 = 5*5 divide evenly by Krux's own region-size
+ * thresholds. Every region index below that count must render, and the first
+ * one at or past it must not -- the same "prove the count is exact, not
+ * approximate" property compact_seedqr_is_sound already checks for QR
+ * versions, applied to region tiling instead. */
+static bool zoomed_qr_regions_are_sound(void)
+{
+    uint8_t entropy[32];
+    size_t len = 0;
+
+    if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK || len != 16) {
+        return false;
+    }
+    if (seedtool_render_qr_bytes_regions(len) != 9) { /* 21x21 in 7x7 blocks: 3x3 */
+        return false;
+    }
+    for (size_t i = 0; i < 9; ++i) {
+        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i)) {
+            return false;
+        }
+    }
+    if (seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 9)) {
+        return false;
+    }
+
+    if (seedtool_mnemonic_entropy(mnemonic24, entropy, sizeof(entropy), &len) != SEEDTOOL_OK || len != 32) {
+        return false;
+    }
+    if (seedtool_render_qr_bytes_regions(len) != 25) { /* 25x25 in 5x5 blocks: 5x5 */
+        return false;
+    }
+    for (size_t i = 0; i < 25; ++i) {
+        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i)) {
+            return false;
+        }
+    }
+    return !seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 25);
+}
+
 /* The bar's warn (red) and complete (green) colors appear nowhere else on a
  * dice-entry screen, and its fill grows with the percentage passed in — so
  * both are checked by counting matching pixels rather than by duplicating the
@@ -547,6 +653,129 @@ static bool dice_progress_bar_is_bounded(void)
     const seedtool_progress_t done = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
     seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &done);
     return count_pixel_color(go_color) != 0;
+}
+
+/* Known-good vectors straight from Krux's own base32 test suite
+ * (tests/test_bbqr.py, B32_TEST_BYTES/B32_ENCODED_STRINGS, unpadded form):
+ * proof this encoder produces byte-for-byte the same output a BBQr-reading
+ * wallet already interoperates with, not just an internally self-consistent
+ * one. */
+static bool bbqr_base32_is_sound(void)
+{
+    static const struct {
+        const uint8_t* data;
+        size_t len;
+        const char* encoded;
+    } vectors[] = {
+        { (const uint8_t*)"Hello World", 11, "JBSWY3DPEBLW64TMMQ" },
+        { (const uint8_t*)"Hello World.", 12, "JBSWY3DPEBLW64TMMQXA" },
+        { (const uint8_t*)"1234567890", 10, "GEZDGNBVGY3TQOJQ" },
+        { (const uint8_t*)"\x00", 1, "AA" },
+        { (const uint8_t*)"f", 1, "MY" },
+        { (const uint8_t*)"\x01\x02\x03\x04", 4, "AEBAGBA" },
+        { (const uint8_t*)"\x00\xff\xfe\xfd\xfc\xfb", 6, "AD7757P47M" },
+        { (const uint8_t*)"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 10, "AAAAAAAAAAAAAAAA" },
+        { (const uint8_t*)"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff", 10, "7777777777777777" },
+        { (const uint8_t*)"Hello, World!", 13, "JBSWY3DPFQQFO33SNRSCC" },
+    };
+    for (size_t i = 0; i < sizeof(vectors) / sizeof(vectors[0]); ++i) {
+        char out[32];
+        const size_t expected_len = strlen(vectors[i].encoded);
+        if (seedtool_bbqr_base32_len(vectors[i].len) != expected_len) {
+            return false;
+        }
+        if (!seedtool_bbqr_base32_encode(vectors[i].data, vectors[i].len, out, sizeof(out))) {
+            return false;
+        }
+        if (memcmp(out, vectors[i].encoded, expected_len) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Inverse of seedtool_bbqr_base32_encode, for the round-trip check below only
+ * -- not part of the firmware, which only ever needs to encode (a QR reader
+ * does the decoding). */
+static bool base32_decode(const char* text, const size_t len, uint8_t* out, const size_t out_cap, size_t* out_len)
+{
+    static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    uint32_t buffer = 0;
+    unsigned bits = 0;
+    size_t written = 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (!text[i]) {
+            return false;
+        }
+        const char* const found = strchr(alphabet, text[i]);
+        if (!found) {
+            return false;
+        }
+        buffer = (buffer << 5) | (uint32_t)(found - alphabet);
+        bits += 5;
+        if (bits >= 8) {
+            bits -= 8;
+            if (written >= out_cap) {
+                return false;
+            }
+            out[written++] = (uint8_t)((buffer >> bits) & 0xff);
+        }
+    }
+    *out_len = written;
+    return true;
+}
+
+/* An account key's worth of payload, split into whatever
+ * seedtool_render_qr_alphanumeric_capacity() says fits one frame, must
+ * reassemble byte for byte: every part's header must carry the right
+ * "B$2U" + total + index, every part's base32 payload must decode cleanly,
+ * and concatenating them in index order must reproduce the original bytes --
+ * the same property a real BBQr-reading wallet depends on, checked here
+ * without needing one. */
+static bool bbqr_parts_are_sound(void)
+{
+    const char payload[] = "[65fb43fe/84'/0'/0']"
+                            "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4"
+                            "ZeZXYVUhLv1VMrjPC7PW6V";
+    const size_t len = strlen(payload);
+    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity();
+    const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
+    if (!parts) {
+        return false;
+    }
+
+    uint8_t reassembled[sizeof(payload)];
+    size_t reassembled_len = 0;
+    for (size_t i = 0; i < parts; ++i) {
+        char frame[512];
+        if (!seedtool_bbqr_part((const uint8_t*)payload, len, '2', 'U', i, parts, frame, sizeof(frame))) {
+            return false;
+        }
+        const size_t frame_len = strlen(frame);
+        if (frame_len > frame_chars || frame_len < SEEDTOOL_BBQR_HEADER_LEN) {
+            return false;
+        }
+        if (frame[0] != 'B' || frame[1] != '$' || frame[2] != '2' || frame[3] != 'U') {
+            return false;
+        }
+        char total_digits[3] = { frame[4], frame[5], '\0' };
+        char index_digits[3] = { frame[6], frame[7], '\0' };
+        if ((size_t)strtol(total_digits, NULL, 36) != parts || (size_t)strtol(index_digits, NULL, 36) != i) {
+            return false;
+        }
+        uint8_t chunk[256];
+        size_t chunk_len = 0;
+        if (!base32_decode(frame + SEEDTOOL_BBQR_HEADER_LEN, frame_len - SEEDTOOL_BBQR_HEADER_LEN, chunk,
+                sizeof(chunk), &chunk_len)) {
+            return false;
+        }
+        if (reassembled_len + chunk_len > sizeof(reassembled)) {
+            return false;
+        }
+        memcpy(reassembled + reassembled_len, chunk, chunk_len);
+        reassembled_len += chunk_len;
+    }
+    return reassembled_len == len && memcmp(reassembled, payload, len) == 0;
 }
 
 static int self_test(void)
@@ -590,6 +819,18 @@ static int self_test(void)
         fputs("Origo Compact SeedQR self-test failed\n", stderr);
         return 1;
     }
+    if (!zoomed_qr_regions_are_sound()) {
+        fputs("Origo zoomed QR regions self-test failed\n", stderr);
+        return 1;
+    }
+    if (!bbqr_base32_is_sound()) {
+        fputs("Origo BBQr base32 self-test failed\n", stderr);
+        return 1;
+    }
+    if (!bbqr_parts_are_sound()) {
+        fputs("Origo BBQr parts self-test failed\n", stderr);
+        return 1;
+    }
     if (!list_viewport_is_sound() || !labels_fit_a_row()) {
         fputs("Origo choice list self-test failed\n", stderr);
         return 1;
@@ -608,6 +849,10 @@ static int self_test(void)
     }
     if (!dice_quality_is_sound()) {
         fputs("Origo dice entropy quality self-test failed\n", stderr);
+        return 1;
+    }
+    if (!dice_entropy_false_positive_rate_is_bounded()) {
+        fputs("Origo dice entropy false-positive-rate self-test failed\n", stderr);
         return 1;
     }
     if (!dice_progress_bar_is_bounded()) {

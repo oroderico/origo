@@ -1,10 +1,12 @@
 #include "seedtool_core.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <wally_core.h>
 
 #include "seedtool_app.h"
+#include "seedtool_bbqr.h"
 #include "seedtool_display.h"
 #include "seedtool_platform.h"
 #include "seedtool_render.h"
@@ -15,7 +17,10 @@
 /* Minimum roll counts hardly ever land exactly on the bit minimum; this keeps
  * that expected shortfall from popping the entropy warning on its own. Krux's
  * ENTROPY_TOLERANCE. */
-#define DICE_ENTROPY_TOLERANCE 2
+/* Cushion added on top of the Miller-Madow bias correction (see
+ * seedtool_dice_entropy_bias_bits), which does most of the work of keeping a
+ * genuinely random run from reading as "poor". */
+#define DICE_ENTROPY_TOLERANCE 4
 #define SPLASH_MS 2500
 #define MAX_PAGE_LINES 24
 #define MAX_LINE_CHARS 48
@@ -101,6 +106,31 @@ static seedtool_key_t wait_key(void)
     screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   L/R erase");
     /* The warning has replaced the caller's screen, so an extended session must
      * repaint it rather than let the next press act on what is no longer shown. */
+    return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
+}
+
+/* Same idle/session-timeout accounting as wait_key, but for a screen that
+ * redraws itself on a timer rather than only on a press: returns KEY_TIMEOUT
+ * (with *ticked set) every frame_ms with no key down, instead of only after
+ * the whole session-timeout warning dance. *ticked is left false for every
+ * other return, including the genuine KEY_TIMEOUT the warning screen itself
+ * produces when its extension offer is declined -- that one still means
+ * leave, exactly as it does for wait_key's callers. */
+static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const ticked)
+{
+    *ticked = false;
+    const uint64_t elapsed = seedtool_platform_milliseconds() - last_action;
+    const uint32_t idle_ms = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
+    if (idle_ms < SESSION_TIMEOUT_MS) {
+        const uint32_t remaining = SESSION_TIMEOUT_MS - idle_ms;
+        const uint32_t wait_ms = frame_ms < remaining ? frame_ms : remaining;
+        const seedtool_key_t key = wait_key_raw(wait_ms);
+        if (key == KEY_TIMEOUT && wait_ms == frame_ms) {
+            *ticked = true;
+        }
+        return key;
+    }
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   L/R erase");
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
@@ -400,16 +430,89 @@ typedef struct {
 
 #define QR_ITEMS 2
 
+/* Every part of any value show_qr can carry fits in one qr_item_t.value; used
+ * as the upper bound on a single BBQr part's byte length too, since a part is
+ * never longer than the whole value it is cut from. */
+#define BBQR_MAX_VALUE_LEN (sizeof(((qr_item_t*)0)->value) - 1)
+#define BBQR_FRAME_LEN (SEEDTOOL_BBQR_HEADER_LEN + (BBQR_MAX_VALUE_LEN * 8 + 4) / 5 + 1)
+
+/* Frames auto-advance with no press needed; L/R still switch to the other QR
+ * item immediately, same as a static one would, and BOTH/timeout still leave
+ * the screen, so show_qr can delegate the account key's frame to this in
+ * place of a single seedtool_display_qr call and keep the rest of its own
+ * loop unchanged. */
+#define BBQR_FRAME_INTERVAL_MS 700
+
+/* Steps an account key too big for one QR (see seedtool_render.c's QR_VERSION
+ * comment) through BBQr (github.com/coinkite/BBQr) parts, the same animated
+ * multi-part convention other hardware wallets read with a camera. Krux's own
+ * BBQr support (src/krux/bbqr.py, src/krux/qr.py FORMAT_BBQR) is the
+ * reference this follows for the wire format; there is no deflate library
+ * here to use its "Z" compressed encoding, so this always sends "2" (plain
+ * base32). Returns the key that ended the animation -- KEY_PREV/KEY_NEXT so
+ * the caller can switch items, anything else so it can leave, exactly the
+ * set of keys a single seedtool_display_qr call would have handed back. */
+static seedtool_key_t show_bbqr(const char* title, const char* value)
+{
+    const size_t len = strlen(value);
+    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity();
+    const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
+    if (!parts) {
+        (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+        return KEY_SELECT;
+    }
+    size_t part = 0;
+    for (;;) {
+        char frame[BBQR_FRAME_LEN];
+        /* items[].title (qr_item_t) is 24 bytes; %.20s plus the widest
+         * plausible "N/N" part counter still fits with room to spare, so
+         * this never truncates in practice -- sized generously rather than
+         * exactly so it stays provably within bounds regardless of what a
+         * caller ever passes, which is what silences -Wformat-truncation. */
+        char frame_title[48];
+        if (parts > 1) {
+            (void)snprintf(
+                frame_title, sizeof(frame_title), "%.20s %u/%u", title, (unsigned)(part + 1), (unsigned)parts);
+        } else {
+            (void)snprintf(frame_title, sizeof(frame_title), "%.20s", title);
+        }
+        const bool ok = seedtool_bbqr_part((const uint8_t*)value, len, '2', 'U', part, parts, frame, sizeof(frame))
+            && seedtool_display_qr(frame_title, frame);
+        seedtool_zero(frame, sizeof(frame));
+        if (!ok) {
+            (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+            return KEY_SELECT;
+        }
+        bool ticked = false;
+        const seedtool_key_t key = wait_key_or_tick(BBQR_FRAME_INTERVAL_MS, &ticked);
+        if (ticked) {
+            part = (part + 1) % parts;
+            continue;
+        }
+        if (key == KEY_REDRAW) {
+            continue;
+        }
+        return key;
+    }
+}
+
 /* The QR screen steps sideways through everything the wallet can be given, so an
- * account key and the address it belongs to are one press apart. */
+ * account key and the address it belongs to are one press apart. Item 0, the
+ * account key, is the one value long enough to need show_bbqr's animation;
+ * item 1, a single address, always fits one static frame. */
 static void show_qr(const qr_item_t* items, const size_t count, size_t selected)
 {
     while (count) {
-        if (!seedtool_display_qr(items[selected].title, items[selected].value)) {
+        seedtool_key_t key;
+        if (selected == 0) {
+            key = show_bbqr(items[selected].title, items[selected].value);
+        } else if (seedtool_display_qr(items[selected].title, items[selected].value)) {
+            key = wait_key();
+        } else {
             (void)acknowledge("Too long for a QR", items[selected].title, "Read it as text instead");
-            return;
+            key = KEY_SELECT;
         }
-        switch (wait_key()) {
+        switch (key) {
         case KEY_PREV:
             selected = (selected + count - 1) % count;
             break;
@@ -823,10 +926,14 @@ typedef struct {
 } type_state_t;
 
 /* Builds the address list for one type and lets the reader browse it. Returns
- * the chosen index, or -1 on Back, timeout or a derivation error. */
-static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type)
+ * the chosen index, or -1 on Back, timeout or a derivation error. On a
+ * selection, the chosen address is copied into address_out before the working
+ * array is zeroed, so the caller does not have to derive it a second time. */
+static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
+    char* address_out, const size_t address_out_len)
 {
     static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+    screen_text("Addresses", "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, ADDRESS_LIST_ROWS, addresses) != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         seedtool_zero(address_labels, sizeof(address_labels));
@@ -837,9 +944,12 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
         (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %s", (unsigned)i, addresses[i]);
         address_items[i] = address_labels[i];
     }
-    seedtool_zero(addresses, sizeof(addresses));
     address_items[ADDRESS_LIST_ROWS] = "Back";
     const int selected = choose("Addresses", address_items, ADDRESS_LIST_ROWS + 1, true);
+    if (selected >= 0 && selected < (int)ADDRESS_LIST_ROWS) {
+        (void)snprintf(address_out, address_out_len, "%s", addresses[selected]);
+    }
+    seedtool_zero(addresses, sizeof(addresses));
     seedtool_zero(address_labels, sizeof(address_labels));
     return selected < 0 || selected == (int)ADDRESS_LIST_ROWS ? -1 : selected;
 }
@@ -880,21 +990,17 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
             }
             seedtool_zero(xpub, sizeof(xpub));
         } else {
-            const int index = browse_addresses(mnemonic, passphrase, type);
+            char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+            const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address));
             if (index < 0) {
+                seedtool_zero(address, sizeof(address));
                 continue;
             }
             state->last_index = (uint32_t)index;
-            char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
             char path[32];
             (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
-            if (seedtool_mainnet_address(mnemonic, passphrase, type, (uint32_t)index, address, sizeof(address))
-                == SEEDTOOL_OK) {
-                if (page_text(path, address)) {
-                    export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 1);
-                }
-            } else {
-                (void)acknowledge("Error", "Could not derive address", NULL);
+            if (page_text(path, address)) {
+                export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 1);
             }
             seedtool_zero(address, sizeof(address));
         }
@@ -949,6 +1055,9 @@ static void show_stackbit(const char* mnemonic)
  * this one is every key the mnemonic can ever derive. There is no camera to
  * scan the result back with, so tools/origo_verify.py inspect prints the same
  * payload for an independent check instead. */
+/* Index 0 is the full code; 1..regions are Krux-style "Zoomed Region" tiles of
+ * it, stepped sideways the same way show_qr steps between values, so the
+ * carousel convention stays one shape everywhere a QR is shown. */
 static void export_seed_qr(const char* mnemonic)
 {
     if (!acknowledge("Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds")) {
@@ -957,12 +1066,25 @@ static void export_seed_qr(const char* mnemonic)
     uint8_t entropy[SEEDTOOL_HASH_LEN] = { 0 };
     size_t len = 0;
     if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) == SEEDTOOL_OK) {
+        const size_t regions = seedtool_render_qr_bytes_regions(len);
+        size_t selected = 0;
         for (;;) {
-            if (!seedtool_display_qr_bytes("Compact SeedQR", entropy, len)) {
+            const bool ok = selected == 0
+                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
+                : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 1);
+            if (!ok) {
                 (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
             }
-            if (wait_key() != KEY_REDRAW) {
+            const seedtool_key_t key = wait_key();
+            if (key == KEY_REDRAW) {
+                continue;
+            }
+            if (key == KEY_PREV) {
+                selected = selected == 0 ? regions : selected - 1;
+            } else if (key == KEY_NEXT) {
+                selected = selected == regions ? 0 : selected + 1;
+            } else {
                 break;
             }
         }
@@ -1051,6 +1173,12 @@ static seedtool_progress_t dice_progress(const seedtool_source_t source, const u
     bool pattern = false;
     (void)seedtool_dice_entropy_bits(source, values, count, &bits);
     (void)seedtool_dice_pattern_detected(source, values, count, &pattern);
+    /* Same bias correction the final gate in collect_entropy applies, so the
+     * live bar does not read as more pessimistic than the verdict it leads up
+     * to. Skipped at zero rolls: there is no distribution yet to be biased. */
+    if (count) {
+        bits += (int)lround(seedtool_dice_entropy_bias_bits(source));
+    }
     const int capped_bits = (size_t)bits < min_bits ? bits : (int)min_bits;
     const seedtool_progress_t progress = {
         .rolls_pct = (int)(count * 100 / required),
@@ -1148,7 +1276,9 @@ static int collect_entropy(const int source, const size_t words)
         bool pattern = false;
         (void)seedtool_dice_entropy_bits((seedtool_source_t)source, values, required, &bits);
         (void)seedtool_dice_pattern_detected((seedtool_source_t)source, values, required, &pattern);
-        const bool poor = (size_t)bits + DICE_ENTROPY_TOLERANCE < min_bits;
+        const int corrected_bits
+            = bits + (int)lround(seedtool_dice_entropy_bias_bits((seedtool_source_t)source));
+        const bool poor = (size_t)corrected_bits + DICE_ENTROPY_TOLERANCE < min_bits;
         bool proceed = true;
         if (poor) {
             proceed = acknowledge("Poor entropy!", "Proceed anyway?", NULL);
