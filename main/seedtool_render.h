@@ -65,6 +65,16 @@ size_t seedtool_render_fit_row(const char* text);
  * transcript is read from its end, where what was just entered is. */
 size_t seedtool_render_fit_tail(const char* text);
 
+/* Same idea as seedtool_render_fit_tail, spread over two body lines instead of
+ * one: whichever trailing run of `text` wraps into exactly two lines rather
+ * than one or three. `split_out`, if not NULL, is set to how many of those
+ * characters belong on the first of the two lines — the rest go on the
+ * second. Used where a caller wants passively more of a running transcript's
+ * tail on screen than one line holds, without the interactive paging
+ * seedtool_render_fit's callers use for a value that has already stopped
+ * growing. */
+size_t seedtool_render_fit_tail2(const char* text, size_t* split_out);
+
 /* First visible row so that `selected` is on screen, scrolling as little as
  * possible away from `previous_top`. A pure function of its arguments: the
  * entry path is exactly where the device RNG must not reach, and where the list

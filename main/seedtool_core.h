@@ -126,6 +126,14 @@ seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passph
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t index, char* output, size_t output_len);
 
+/* Same addresses seedtool_mainnet_address would compute at each index
+ * 0..count-1, but the mnemonic-to-seed PBKDF2 and the account-level derivation
+ * run once instead of once per address: repeating them a hundred times, as
+ * browsing the address list does, is slow enough on hardware with no EC
+ * acceleration to look like a hang. `addresses` must hold at least `count` rows. */
+seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
+    seedtool_address_type_t type, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+
 void seedtool_zero(void* ptr, size_t len);
 
 #endif

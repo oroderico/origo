@@ -63,7 +63,7 @@ _Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest
 #define STACKBIT_GRID_X 10
 #define STACKBIT_LABEL_WIDTH 12
 #define STACKBIT_CELL 20
-#define STACKBIT_DOT 12
+#define STACKBIT_DOT 6
 #define STACKBIT_DIGITS 4
 #define STACKBIT_ROWS 4
 #define STACKBIT_GRID_TOP 26
@@ -85,7 +85,7 @@ _Static_assert(STACKBIT_PANEL_WIDTH >= 60, "no room left beside the grid to name
  * bottom-right=8. Below the grid rather than beside it, since it is wide and
  * short rather than tall and narrow. */
 #define STACKBIT_PHYS_CELL 22
-#define STACKBIT_PHYS_DOT 12
+#define STACKBIT_PHYS_DOT 6
 #define STACKBIT_PHYS_GAP 6
 #define STACKBIT_PHYS_BLOCK_WIDTH (2 * STACKBIT_PHYS_CELL)
 #define STACKBIT_PHYS_GRID_WIDTH \
@@ -299,6 +299,23 @@ size_t seedtool_render_fit_tail(const char* text)
         ++start;
     }
     return length - start;
+}
+
+size_t seedtool_render_fit_tail2(const char* text, size_t* split_out)
+{
+    const size_t length = strlen(text);
+    size_t start = 0;
+    for (;;) {
+        const size_t first_line = fit_in(tft_Ubuntu16, text + start, SIZE_MAX, SEEDTOOL_DISPLAY_WIDTH - 4);
+        const size_t rest = length - start - first_line;
+        if (!rest || text_width(tft_Ubuntu16, text + start + first_line, rest) <= SEEDTOOL_DISPLAY_WIDTH - 4) {
+            if (split_out) {
+                *split_out = first_line;
+            }
+            return length - start;
+        }
+        ++start;
+    }
 }
 
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }

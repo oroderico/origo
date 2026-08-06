@@ -465,23 +465,22 @@ done:
     return ret;
 }
 
-seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase,
+/* The script and address for one index under an already-derived account node
+ * (m/type'/0'/0'). Both seedtool_mainnet_address and seedtool_mainnet_addresses
+ * share this: only the account derivation above it differs in cost, this part
+ * — two non-hardened steps from a public key, no seed or private key involved
+ * — is cheap enough to repeat per address either way. */
+static seedtool_result_t address_from_account(const struct ext_key* account,
     const seedtool_address_type_t type, const uint32_t index, char* output, const size_t output_len)
 {
-    if (!output || !output_len || index > SEEDTOOL_MAX_ADDRESS_INDEX
-        || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
-        return SEEDTOOL_EINVAL;
-    }
-    uint8_t seed[64];
     uint8_t script[WALLY_SCRIPTPUBKEY_P2TR_LEN];
-    struct ext_key root, child;
+    struct ext_key child;
     char* address = NULL;
     size_t script_len = 0;
-    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, 0 | HARDENED, 0, index };
-    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
-    if (ret != SEEDTOOL_OK
-        || bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &child)
-            != WALLY_OK) {
+    const uint32_t path[] = { 0, index };
+    seedtool_result_t ret = SEEDTOOL_OK;
+    if (bip32_key_from_parent_path(account, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &child)
+        != WALLY_OK) {
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
@@ -504,15 +503,61 @@ seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* pas
         ret = SEEDTOOL_ENOSPACE;
     } else {
         strcpy(output, address);
-        ret = SEEDTOOL_OK;
     }
 done:
     if (address) {
         wally_free_string(address);
     }
-    seedtool_zero(seed, sizeof(seed));
     seedtool_zero(script, sizeof(script));
-    seedtool_zero(&root, sizeof(root));
     seedtool_zero(&child, sizeof(child));
+    return ret;
+}
+
+static seedtool_result_t account_from_mnemonic(const char* mnemonic, const char* passphrase,
+    const seedtool_address_type_t type, struct ext_key* account)
+{
+    uint8_t seed[64];
+    struct ext_key root;
+    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, 0 | HARDENED };
+    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
+    if (ret == SEEDTOOL_OK
+        && bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, account)
+            != WALLY_OK) {
+        ret = SEEDTOOL_ECRYPTO;
+    }
+    seedtool_zero(seed, sizeof(seed));
+    seedtool_zero(&root, sizeof(root));
+    return ret;
+}
+
+seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase,
+    const seedtool_address_type_t type, const uint32_t index, char* output, const size_t output_len)
+{
+    if (!output || !output_len || index > SEEDTOOL_MAX_ADDRESS_INDEX
+        || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
+        return SEEDTOOL_EINVAL;
+    }
+    struct ext_key account;
+    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, &account);
+    if (ret == SEEDTOOL_OK) {
+        ret = address_from_account(&account, type, index, output, output_len);
+    }
+    seedtool_zero(&account, sizeof(account));
+    return ret;
+}
+
+seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
+    const seedtool_address_type_t type, const uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN])
+{
+    if (!addresses || !count || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1
+        || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)) {
+        return SEEDTOOL_EINVAL;
+    }
+    struct ext_key account;
+    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, &account);
+    for (uint32_t i = 0; ret == SEEDTOOL_OK && i < count; ++i) {
+        ret = address_from_account(&account, type, i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
+    }
+    seedtool_zero(&account, sizeof(account));
     return ret;
 }
