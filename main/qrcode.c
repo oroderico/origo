@@ -912,6 +912,26 @@ uint8_t qrcode_versionForAlphanumeric(uint8_t ecc, uint16_t length, uint8_t maxV
     return 0;
 }
 
+uint8_t qrcode_versionForText(uint8_t ecc, const char* text, uint8_t maxVersion)
+{
+    const size_t length = strlen(text);
+    if (length > UINT16_MAX) {
+        return 0;
+    }
+    /* The exact same charset check encodeDataCodewords itself uses to choose
+     * a mode, so the version picked here always matches the mode that will
+     * actually be encoded. Numeric strings are also alphanumeric-safe (digits
+     * are a subset of the alphanumeric charset), so they take this branch
+     * too: numeric mode packs slightly tighter, but sizing off the less
+     * efficient alphanumeric estimate only ever costs a little headroom, not
+     * correctness, and this app never draws a QR of a long digit-only string
+     * anyway. */
+    if (isAlphanumeric(text, (uint16_t)length)) {
+        return qrcode_versionForAlphanumeric(ecc, (uint16_t)length, maxVersion);
+    }
+    return qrcode_versionForBytes(ecc, (uint16_t)length, maxVersion);
+}
+
 // @TODO: Return error if data is too big.
 int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, uint8_t* data, uint16_t length)
 {

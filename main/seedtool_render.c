@@ -736,9 +736,18 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
 
 bool seedtool_render_qr(const char* title, const char* text)
 {
+    /* Drawn at the smallest version that actually holds `text` -- like
+     * seedtool_render_qr_bytes already does for Compact SeedQR -- rather than
+     * always QR_VERSION, so a short value (an address, a single BBQr part)
+     * fills the display with far coarser, easier-to-scan modules instead of
+     * sitting at the same fine grid a full account key needs. */
+    const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
+    if (!version) {
+        return false;
+    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initText(&qr, modules, QR_VERSION, ECC_LOW, text) != 0) {
+    if (qrcode_initText(&qr, modules, version, ECC_LOW, text) != 0) {
         /* A failed encode may already have written part of `text` into
          * `modules` before the encoder gave up. */
         memset(modules, 0, sizeof(modules));

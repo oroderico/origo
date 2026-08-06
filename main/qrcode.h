@@ -84,6 +84,18 @@ uint8_t qrcode_versionForBytes(uint8_t ecc, uint16_t length, uint8_t maxVersion)
 // alphanumeric mode rather than fall back to byte mode.
 uint8_t qrcode_versionForAlphanumeric(uint8_t ecc, uint16_t length, uint8_t maxVersion);
 
+// Smallest version in 1..maxVersion that actually holds `text` once
+// qrcode_initText encodes it, whichever mode (numeric, alphanumeric or byte)
+// that ends up being -- unlike qrcode_versionForBytes/ForAlphanumeric, which
+// assume one mode up front, this checks `text`'s own charset first so the
+// version returned is always safe to pass to qrcode_initText. Returns 0 if
+// nothing in range fits. IMPORTANT: qrcode_initText/initBytes do not
+// themselves check that `text`/`data` fits the `version` passed in -- calling
+// them with a version too small for the content overruns their internal
+// codeword buffer. Always size the version with one of these three functions
+// first; never guess or shrink a version and try it directly.
+uint8_t qrcode_versionForText(uint8_t ecc, const char* text, uint8_t maxVersion);
+
 int8_t qrcode_initText(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, const char* data);
 int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, uint8_t* data, uint16_t length);
 

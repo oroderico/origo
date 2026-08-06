@@ -909,6 +909,22 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
     seedtool_zero(items, sizeof(items));
 }
 
+/* A single address's own QR, opened from the address list: no account key in
+ * this view to warn about or to carousel over to, since a photo of one
+ * address on its own reveals nothing the address itself did not already. */
+static void show_address_qr(const char* title, const char* address)
+{
+    for (;;) {
+        if (!seedtool_display_qr(title, address)) {
+            (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+            return;
+        }
+        if (wait_key() != KEY_REDRAW) {
+            return;
+        }
+    }
+}
+
 /* Labels for the address list are derived once when the list is opened, so
  * stepping through a hundred rows is instant rather than a fresh BIP32
  * derivation per row, the same tactic build_qr_items uses. Static: this does
@@ -990,19 +1006,25 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
             }
             seedtool_zero(xpub, sizeof(xpub));
         } else {
-            char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-            const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address));
-            if (index < 0) {
+            /* Loops back to the address list itself after each address's QR,
+             * rather than out to this menu: picking another address is the
+             * common next step, not re-choosing "Addresses" again. Only
+             * backing out of the list (or a timeout) reaches the outer loop. */
+            for (;;) {
+                char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+                const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address));
+                if (index < 0) {
+                    seedtool_zero(address, sizeof(address));
+                    break;
+                }
+                state->last_index = (uint32_t)index;
+                char path[32];
+                (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
+                if (page_text(path, address)) {
+                    show_address_qr(path, address);
+                }
                 seedtool_zero(address, sizeof(address));
-                continue;
             }
-            state->last_index = (uint32_t)index;
-            char path[32];
-            (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
-            if (page_text(path, address)) {
-                export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 1);
-            }
-            seedtool_zero(address, sizeof(address));
         }
     }
 }
