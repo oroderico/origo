@@ -276,7 +276,13 @@ static int enter_value(const char* title, const unsigned position, const unsigne
  * The prompt no longer needs a whole body line for a value the reader picks
  * directly, so that line goes to a second line of transcript tail instead —
  * with no carousel to spend a keypress paging through it, showing passively
- * more of what was just flipped is pure upside. */
+ * more of what was just flipped is pure upside.
+ *
+ * No footer hint: NAV_FOOTER's "L/R move BOTH select" would be wrong here —
+ * L/R commit a choice rather than moving one, and BOTH undoes rather than
+ * selects — and every path that reaches this screen already went through at
+ * least one chord-gated menu first, so chord_learned is always true by then
+ * anyway. */
 static int enter_coin_flip(
     const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history)
 {
@@ -290,7 +296,7 @@ static int enter_coin_flip(
     tail1[split] = '\0';
     (void)snprintf(tail2, sizeof(tail2), "%s", shown + split);
     for (;;) {
-        screen_text3(heading, "Heads (up)   Tails (down)", tail1, tail2, chord_learned ? NULL : NAV_FOOTER);
+        screen_text3(heading, "Heads (up)   Tails (down)", tail1, tail2, NULL);
         switch (wait_key()) {
         case KEY_SELECT:
             return 0;
