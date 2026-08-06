@@ -298,7 +298,12 @@ physical backup product; Origo has no affiliation with it.
 
 **Compact SeedQR** encodes the mnemonic's raw entropy directly as a byte-mode
 QR — 16 bytes for 12 words, 32 for 24 — with no checksum bits and no word text,
-the SeedSigner/Krux "Compact SeedQR" convention. Before anything is drawn, the
+the SeedSigner/Krux "Compact SeedQR" convention. Unlike the account-key and
+address QR codes above, which are always drawn at the fixed version that holds
+a key origin and an xpub, this code is drawn at the smallest QR version that
+holds its entropy — version 1 for 16 bytes, version 2 for 32 — matching the
+"compact" of the convention's name rather than padding it out with meaningless
+filler modules. Before anything is drawn, the
 device warns that this single code is the entire seed and that a photograph of
 it is total, irreversible loss of every fund it can ever control — a materially
 different warning from the account-key QR's, which only ever exposes addresses.
@@ -350,7 +355,9 @@ letter and every printable character, that an account key with its origin
 still fits a single QR code, that every one of the 2048 Stackbit 1248 punch
 grids lights exactly the cells its digits' bits call for in both the simple and
 the physical layout, and that the Compact SeedQR payload for the published
-12- and 24-word zero-entropy vectors is exactly their raw entropy.
+12- and 24-word zero-entropy vectors is exactly their raw entropy, drawn at
+QR version 1 and 2 respectively rather than the larger fixed version the
+account-key and address QR codes use.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.

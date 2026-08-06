@@ -1030,7 +1030,7 @@ static int collect_entropy(const int source, const size_t words)
         /* Shown once, with the bar already in place but empty, so its shape and
          * position are seen before they start moving. */
         char rolls_needed[24];
-        (void)snprintf(rolls_needed, sizeof(rolls_needed), "%zu rolls needed", required);
+        (void)snprintf(rolls_needed, sizeof(rolls_needed), "%u rolls needed", (unsigned)required);
         const seedtool_progress_t empty = { 0 };
         if (!dice_confirm(names[source], rolls_needed, "Red bar = non-random", &empty)) {
             outcome = 0;

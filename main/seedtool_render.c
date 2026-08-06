@@ -50,15 +50,10 @@
  * xpub in one image. Raising it again is a compile error rather than a code
  * quietly clipped by the bottom of the display. */
 #define QR_VERSION 6
-#define QR_SCALE 3
-#define QR_MODULES (17 + 4 * QR_VERSION)
-#define QR_EXTENT ((QR_MODULES + 2) * QR_SCALE)
+#define QR_MAX_MODULES (17 + 4 * QR_VERSION)
 #define QR_LEFT 3
-#define QR_TITLE_X (QR_LEFT + QR_EXTENT + 5)
-#define QR_TITLE_WIDTH (SEEDTOOL_DISPLAY_WIDTH - QR_TITLE_X - 3)
 #define QR_TITLE_Y 50
-_Static_assert(QR_EXTENT <= SEEDTOOL_DISPLAY_HEIGHT, "the QR no longer fits the display");
-_Static_assert(QR_TITLE_WIDTH >= 80, "no room left beside the QR to name what it holds");
+_Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest QR no longer fits the display");
 
 /* Stackbit 1248 punch grid: four digit columns (thousands..units, left to
  * right) times four weight rows (1,2,4,8 top to bottom), with the word
@@ -697,19 +692,27 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
 {
     /* The code sits left with its quiet zone intact and the title goes in the
      * margin beside it: on a screen that steps through several codes, one that
-     * does not say what it holds is one that gets scanned into the wrong place. */
-    const int extent = (qr->size + 2) * QR_SCALE;
+     * does not say what it holds is one that gets scanned into the wrong place.
+     * The scale is the largest integer that still fits the display's height —
+     * the binding dimension, since every version here is square and narrower
+     * than the display is wide — so a smaller QR (Compact SeedQR's version 1
+     * or 2) fills as much of the screen as it can rather than sitting at the
+     * scale version 6 happens to need. */
+    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (qr->size + 2);
+    const int extent = (qr->size + 2) * scale;
     const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
+    const int title_x = QR_LEFT + extent + 5;
+    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
     seedtool_render_clear();
     fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr->size; ++y) {
         for (uint8_t x = 0; x < qr->size; ++x) {
             if (qrcode_getModule(qr, x, y)) {
-                fill_rect(QR_LEFT + (x + 1) * QR_SCALE, top + (y + 1) * QR_SCALE, QR_SCALE, QR_SCALE, COLOR_BLACK);
+                fill_rect(QR_LEFT + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
             }
         }
     }
-    draw_centered_box(tft_DefaultFont, title, QR_TITLE_X, QR_TITLE_WIDTH, QR_TITLE_Y);
+    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
@@ -729,11 +732,22 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size
     if (len > UINT16_MAX) {
         return false;
     }
+    /* Unlike the xpub/address QR above, a byte-mode payload (Compact SeedQR's
+     * raw entropy) is drawn at the smallest version that holds it rather than
+     * always QR_VERSION: that is the entire point of "compact" in the
+     * SeedSigner/Krux convention this follows, and a fixed large version would
+     * needlessly pad it with meaningless filler modules. `modules` stays sized
+     * for QR_VERSION since qrcode_getBufferSize grows monotonically with
+     * version, so it is a safe upper bound for the smaller version drawn here. */
+    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
+    if (!version) {
+        return false;
+    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
     /* qrcode_initBytes only reads through `data` into its own codeword
      * buffer; this cast does not let it write through it. */
-    if (qrcode_initBytes(&qr, modules, QR_VERSION, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
         return false;
     }
     return draw_qr(&qr, modules, title);

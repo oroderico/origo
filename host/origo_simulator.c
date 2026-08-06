@@ -3,6 +3,8 @@
 #include "seedtool_render.h"
 #include "seedtool_wordlist.h"
 
+#include "qrcode.h"
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -474,8 +476,12 @@ static bool stackbit_physical_grid_is_sound(void)
 
 /* The Compact SeedQR payload is exactly the mnemonic's raw entropy: the
  * all-zero 12- and 24-word vectors must decode to 16 and 32 zero bytes
- * respectively and still fit the pinned QR version, and a broken checksum
- * must be rejected rather than silently encoded. */
+ * respectively and still fit within the QR version main/seedtool_render.c
+ * caps byte-mode codes at (QR_VERSION, 6 there), and a broken checksum must be
+ * rejected rather than silently encoded. Byte mode is drawn at the smallest
+ * version that holds the payload, not always that cap — the whole point of
+ * "compact" in the SeedSigner/Krux convention this follows — so 16 and 32
+ * raw bytes must land on versions 1 and 2 respectively, not the cap itself. */
 static bool compact_seedqr_is_sound(void)
 {
     uint8_t entropy[32];
@@ -488,6 +494,9 @@ static bool compact_seedqr_is_sound(void)
             return false;
         }
     }
+    if (qrcode_versionForBytes(ECC_LOW, (uint16_t)len, 6) != 1) {
+        return false;
+    }
     if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
         return false;
     }
@@ -498,6 +507,9 @@ static bool compact_seedqr_is_sound(void)
         if (entropy[i] != 0) {
             return false;
         }
+    }
+    if (qrcode_versionForBytes(ECC_LOW, (uint16_t)len, 6) != 2) {
+        return false;
     }
     if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
         return false;

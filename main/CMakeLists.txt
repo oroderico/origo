@@ -13,7 +13,6 @@ idf_component_register(
     INCLUDE_DIRS "."
     PRIV_REQUIRES libwally-seed esp_driver_gpio esp_driver_spi esp_hw_support)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE LOCK_VERSION=6)
 target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=unused-result)
 
 idf_build_get_property(link_options LINK_OPTIONS)

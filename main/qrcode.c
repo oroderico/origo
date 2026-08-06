@@ -854,6 +854,33 @@ static const uint8_t ECC_FORMAT_BITS = (0x02 << 6) | (0x03 << 4) | (0x00 << 2) |
 
 uint16_t qrcode_getBufferSize(uint8_t version) { return bb_getGridSizeBytes(4 * version + 17); }
 
+uint8_t qrcode_versionForBytes(uint8_t ecc, uint16_t length, uint8_t maxVersion)
+{
+    const uint8_t eccFormatBits = (ECC_FORMAT_BITS >> (2 * ecc)) & 0x03;
+    for (uint8_t version = 1; version <= maxVersion; ++version) {
+#if LOCK_VERSION != 0
+        if (version != LOCK_VERSION) {
+            continue;
+        }
+#endif
+#if LOCK_VERSION == 0
+        const uint16_t moduleCount = NUM_RAW_DATA_MODULES[version - 1];
+        const uint16_t dataCapacity = moduleCount / 8 - NUM_ERROR_CORRECTION_CODEWORDS[eccFormatBits][version - 1];
+#else
+        const uint16_t moduleCount = NUM_RAW_DATA_MODULES;
+        const uint16_t dataCapacity = moduleCount / 8 - NUM_ERROR_CORRECTION_CODEWORDS[eccFormatBits];
+#endif
+        /* Mode indicator (4 bits) plus the byte-mode length field, rounded up to
+         * a whole byte, is the header every byte-mode payload pays for before its
+         * data — the same accounting qrcode_initBytes itself does. */
+        const uint16_t header_bytes = (4 + (uint16_t)getModeBits(version, MODE_BYTE) + 7) / 8;
+        if (dataCapacity > header_bytes && (uint16_t)(dataCapacity - header_bytes) >= length) {
+            return version;
+        }
+    }
+    return 0;
+}
+
 // @TODO: Return error if data is too big.
 int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8_t ecc, uint8_t* data, uint16_t length)
 {
