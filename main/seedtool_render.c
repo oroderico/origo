@@ -739,6 +739,9 @@ bool seedtool_render_qr(const char* title, const char* text)
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
     if (qrcode_initText(&qr, modules, QR_VERSION, ECC_LOW, text) != 0) {
+        /* A failed encode may already have written part of `text` into
+         * `modules` before the encoder gave up. */
+        memset(modules, 0, sizeof(modules));
         return false;
     }
     return draw_qr(&qr, modules, title);
@@ -774,6 +777,9 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size
     /* qrcode_initBytes only reads through `data` into its own codeword
      * buffer; this cast does not let it write through it. */
     if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        /* `data` here is raw seed entropy; a failed encode may already have
+         * written some of it into `modules` before the encoder gave up. */
+        memset(modules, 0, sizeof(modules));
         return false;
     }
     return draw_qr(&qr, modules, title);
@@ -846,6 +852,10 @@ bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, con
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
     if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        /* `data` here is raw seed entropy (Compact SeedQR's only caller); a
+         * failed encode may already have written some of it into `modules`
+         * before the encoder gave up. */
+        memset(modules, 0, sizeof(modules));
         return false;
     }
     const size_t region_size = qr_region_size(qr.size);
