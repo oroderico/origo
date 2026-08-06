@@ -421,26 +421,18 @@ static bool page_text(const char* title, const char* text)
     }
 }
 
-/* One exportable value. The account keys carry their key origin, so a scan does
- * not have to be told the derivation path afterwards. */
-typedef struct {
-    char title[24];
-    char value[sizeof("[00000000/84'/0'/0']") + SEEDTOOL_MAX_XPUB_LEN];
-} qr_item_t;
+/* The account key carries its key origin, so a scan does not have to be told
+ * the derivation path afterwards. */
+#define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/0']") + SEEDTOOL_MAX_XPUB_LEN)
 
-#define QR_ITEMS 2
-
-/* Every part of any value show_qr can carry fits in one qr_item_t.value; used
- * as the upper bound on a single BBQr part's byte length too, since a part is
- * never longer than the whole value it is cut from. */
-#define BBQR_MAX_VALUE_LEN (sizeof(((qr_item_t*)0)->value) - 1)
+/* The upper bound on a single BBQr part's byte length: a part is never longer
+ * than the whole value it is cut from, and the account key is the only value
+ * this firmware ever hands to show_bbqr. */
+#define BBQR_MAX_VALUE_LEN (ACCOUNT_KEY_LEN - 1)
 #define BBQR_FRAME_LEN (SEEDTOOL_BBQR_HEADER_LEN + (BBQR_MAX_VALUE_LEN * 8 + 4) / 5 + 1)
 
-/* Frames auto-advance with no press needed; L/R still switch to the other QR
- * item immediately, same as a static one would, and BOTH/timeout still leave
- * the screen, so show_qr can delegate the account key's frame to this in
- * place of a single seedtool_display_qr call and keep the rest of its own
- * loop unchanged. */
+/* Frames auto-advance with no press needed; BOTH/timeout leave the screen,
+ * same as a static QR would. */
 #define BBQR_FRAME_INTERVAL_MS 700
 
 /* Steps an account key too big for one QR (see seedtool_render.c's QR_VERSION
@@ -449,9 +441,8 @@ typedef struct {
  * BBQr support (src/krux/bbqr.py, src/krux/qr.py FORMAT_BBQR) is the
  * reference this follows for the wire format; there is no deflate library
  * here to use its "Z" compressed encoding, so this always sends "2" (plain
- * base32). Returns the key that ended the animation -- KEY_PREV/KEY_NEXT so
- * the caller can switch items, anything else so it can leave, exactly the
- * set of keys a single seedtool_display_qr call would have handed back. */
+ * base32). Returns the key that ended the animation, exactly what a single
+ * seedtool_display_qr call would have handed back. */
 static seedtool_key_t show_bbqr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
@@ -464,7 +455,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
     size_t part = 0;
     for (;;) {
         char frame[BBQR_FRAME_LEN];
-        /* items[].title (qr_item_t) is 24 bytes; %.20s plus the widest
+        /* export_qr's title buffer is 24 bytes; %.20s plus the widest
          * plausible "N/N" part counter still fits with room to spare, so
          * this never truncates in practice -- sized generously rather than
          * exactly so it stays provably within bounds regardless of what a
@@ -496,32 +487,17 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
     }
 }
 
-/* The QR screen steps sideways through everything the wallet can be given, so an
- * account key and the address it belongs to are one press apart. Item 0, the
- * account key, is the one value long enough to need show_bbqr's animation;
- * item 1, a single address, always fits one static frame. */
-static void show_qr(const qr_item_t* items, const size_t count, size_t selected)
+/* A single account key's own QR, the same shape as show_address_qr below: no
+ * carousel to switch to some other value, since the account key stands on its
+ * own here. Falls back to show_bbqr's animation only when the key origin plus
+ * key genuinely does not fit one static frame (see seedtool_render.c's
+ * QR_VERSION comment) -- ordinarily it does, so this is a single still QR the
+ * same way an address is. */
+static void show_account_key_qr(const char* title, const char* value)
 {
-    while (count) {
-        seedtool_key_t key;
-        if (selected == 0) {
-            key = show_bbqr(items[selected].title, items[selected].value);
-        } else if (seedtool_display_qr(items[selected].title, items[selected].value)) {
-            key = wait_key();
-        } else {
-            (void)acknowledge("Too long for a QR", items[selected].title, "Read it as text instead");
-            key = KEY_SELECT;
-        }
-        switch (key) {
-        case KEY_PREV:
-            selected = (selected + count - 1) % count;
-            break;
-        case KEY_NEXT:
-            selected = (selected + 1) % count;
-            break;
-        case KEY_REDRAW:
-            break;
-        default:
+    for (;;) {
+        const seedtool_key_t key = seedtool_display_qr(title, value) ? wait_key() : show_bbqr(title, value);
+        if (key != KEY_REDRAW) {
             return;
         }
     }
@@ -862,51 +838,28 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
     return ok;
 }
 
-/* Derives both exportable values for one type up front so stepping between
- * them is instant rather than a fresh BIP32 derivation per press. */
-static bool build_qr_items(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const seedtool_key_format_t format, const uint32_t index,
-    qr_item_t items[QR_ITEMS])
-{
-    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
-    bool ok = seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK;
-    if (ok) {
-        (void)snprintf(items[0].title, sizeof(items[0].title), "BIP%u %s", (unsigned)type,
-            format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
-        (void)snprintf(items[0].value, sizeof(items[0].value), "[%s/%u'/0'/0']%s", fphex, (unsigned)type, xpub);
-    }
-    seedtool_zero(xpub, sizeof(xpub));
-    if (ok) {
-        char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        ok = seedtool_mainnet_address(mnemonic, passphrase, type, index, address, sizeof(address)) == SEEDTOOL_OK;
-        if (ok) {
-            (void)snprintf(
-                items[1].title, sizeof(items[1].title), "BIP%u address %u", (unsigned)type, (unsigned)index);
-            (void)snprintf(items[1].value, sizeof(items[1].value), "%s", address);
-        }
-        seedtool_zero(address, sizeof(address));
-    }
-    return ok;
-}
-
-/* Entering the QR screen from anywhere reaches the account key, so the warning
- * is about it rather than about the value the reader started from. */
+/* The account key's own QR, warned about up front since a photo of it reveals
+ * every address it can derive -- unlike a single address's QR below, which
+ * reveals nothing more than itself. */
 static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const seedtool_key_format_t format, const uint32_t index,
-    const size_t selected)
+    const seedtool_address_type_t type, const seedtool_key_format_t format)
 {
-    qr_item_t items[QR_ITEMS];
-    memset(items, 0, sizeof(items));
     if (!acknowledge("QR export", "Account key included", "A photo reveals every address")) {
-        seedtool_zero(items, sizeof(items));
         return;
     }
-    if (build_qr_items(mnemonic, passphrase, fphex, type, format, index, items)) {
-        show_qr(items, QR_ITEMS, selected);
+    char title[24];
+    (void)snprintf(title, sizeof(title), "BIP%u %s", (unsigned)type, format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
+    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    char value[ACCOUNT_KEY_LEN] = { 0 };
+    if (seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+        (void)snprintf(value, sizeof(value), "[%s/%u'/0'/0']%s", fphex, (unsigned)type, xpub);
+        seedtool_zero(xpub, sizeof(xpub));
+        show_account_key_qr(title, value);
     } else {
+        seedtool_zero(xpub, sizeof(xpub));
         (void)acknowledge("Error", "Could not derive", NULL);
     }
-    seedtool_zero(items, sizeof(items));
+    seedtool_zero(value, sizeof(value));
 }
 
 /* A single address's own QR, opened from the address list: no account key in
@@ -927,19 +880,11 @@ static void show_address_qr(const char* title, const char* address)
 
 /* Labels for the address list are derived once when the list is opened, so
  * stepping through a hundred rows is instant rather than a fresh BIP32
- * derivation per row, the same tactic build_qr_items uses. Static: this does
- * not belong on the stack, and the list widget needs every row addressable up
- * front, there is no windowed variant of it. */
+ * derivation per row. Static: this does not belong on the stack, and the list
+ * widget needs every row addressable up front, there is no windowed variant
+ * of it. */
 static char address_labels[ADDRESS_LIST_ROWS][ADDRESS_LABEL_LEN];
 static const char* address_items[ADDRESS_LIST_ROWS + 1]; /* + Back */
-
-/* What has been shown for one address type this session, so the QR carousel
- * can step between the account key and "the" address without asking which
- * one: the last one opened, index 0 until then. */
-typedef struct {
-    seedtool_key_format_t format; /* unused for BIP86, which is xpub only */
-    uint32_t last_index;
-} type_state_t;
 
 /* Builds the address list for one type and lets the reader browse it. Returns
  * the chosen index, or -1 on Back, timeout or a derivation error. On a
@@ -973,8 +918,8 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
 /* One address type's worth of the wallet viewer: its account key, in whichever
  * format was asked for, and its addresses. SLIP-132 defines no taproot version
  * prefix, so BIP86 never offers a format choice, only BIP84 does. */
-static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, type_state_t* const state)
+static void show_type_menu(
+    const char* mnemonic, const char* passphrase, const char* fphex, const seedtool_address_type_t type)
 {
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
     for (;;) {
@@ -993,13 +938,12 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                 }
                 format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
             }
-            state->format = format;
             char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
             char origin[32];
             (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/0']", fphex, (unsigned)type);
             if (seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
                 if (page_text(origin, xpub)) {
-                    export_qr(mnemonic, passphrase, fphex, type, state->format, state->last_index, 0);
+                    export_qr(mnemonic, passphrase, fphex, type, format);
                 }
             } else {
                 (void)acknowledge("Error", "Could not derive account key", NULL);
@@ -1017,7 +961,6 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                     seedtool_zero(address, sizeof(address));
                     break;
                 }
-                state->last_index = (uint32_t)index;
                 char path[32];
                 (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
                 if (page_text(path, address)) {
@@ -1137,8 +1080,6 @@ static void show_wallet_data(const char* mnemonic)
     uint8_t fp[4] = { 0 };
     char fphex[9] = { 0 };
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    type_state_t bip84 = { SEEDTOOL_XPUB, 0 };
-    type_state_t bip86 = { SEEDTOOL_XPUB, 0 }; /* format unused: BIP86 is xpub only */
 
     if (!get_session_passphrase(passphrase)) {
         goto done;
@@ -1162,8 +1103,7 @@ static void show_wallet_data(const char* mnemonic)
         } else if (selected == 3) {
             show_backup_menu(mnemonic);
         } else {
-            show_type_menu(mnemonic, passphrase, fphex, selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86,
-                selected == 1 ? &bip84 : &bip86);
+            show_type_menu(mnemonic, passphrase, fphex, selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86);
         }
     }
 done:
