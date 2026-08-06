@@ -138,13 +138,17 @@ static bool dice_confirm(const char* title, const char* one, const char* two, co
 
 /* Every choice in the firmware is made here, on a list that shows five options
  * at once. Which rows are on screen follows from the count and the selection
- * alone, so a choice screen is reproducible from what the user has done. */
-static int choose(const char* title, const char* const* items, const size_t count)
+ * alone, so a choice screen is reproducible from what the user has done.
+ * `hint` is false only for the Origo menu: the very first screen after the
+ * splash is not the place to also be teaching the chord, and every screen
+ * reachable from it already carries its own hint until the chord is learned. */
+static int choose(const char* title, const char* const* items, const size_t count, const bool hint)
 {
     size_t selected = 0, top = 0;
     for (;;) {
         char footer[48];
-        (void)snprintf(footer, sizeof(footer), "%u/%u%s", (unsigned)(selected + 1), (unsigned)count, nav_hint());
+        (void)snprintf(
+            footer, sizeof(footer), "%u/%u%s", (unsigned)(selected + 1), (unsigned)count, hint ? nav_hint() : "");
         top = seedtool_list_top(count, selected, top);
         seedtool_display_list(title, items, count, selected, top, footer);
         switch (wait_key()) {
@@ -259,16 +263,56 @@ static int enter_value(const char* title, const unsigned position, const unsigne
     }
 }
 
+/* A coin flip is a choice between two outcomes, not a position in a range: one
+ * press per flip (KEY_PREV, physical "up", for Heads; KEY_NEXT for Tails)
+ * rather than cycling a carousel to the wanted value and confirming it —
+ * worth doing here specifically because a run is 128 or 256 flips long, so
+ * halving the presses per flip halves the whole entry. There is no longer a
+ * neutral carousel position to escape through, so KEY_SELECT (both buttons)
+ * takes over as "undo the last flip", the same contract enter_value's [back]
+ * had: 0 for the caller to step back one, 1 with `*bit` set for a flip made,
+ * -1 on timeout.
+ *
+ * The prompt no longer needs a whole body line for a value the reader picks
+ * directly, so that line goes to a second line of transcript tail instead —
+ * with no carousel to spend a keypress paging through it, showing passively
+ * more of what was just flipped is pure upside. */
+static int enter_coin_flip(
+    const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history)
+{
+    char heading[48];
+    (void)snprintf(heading, sizeof(heading), "%s  %u/%u", title, position, total);
+    size_t split = 0;
+    const size_t tail = seedtool_render_fit_tail2(history, &split);
+    const char* const shown = history + strlen(history) - tail;
+    char tail1[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1], tail2[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
+    memcpy(tail1, shown, split);
+    tail1[split] = '\0';
+    (void)snprintf(tail2, sizeof(tail2), "%s", shown + split);
+    for (;;) {
+        screen_text3(heading, "Heads (up)   Tails (down)", tail1, tail2, chord_learned ? NULL : NAV_FOOTER);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            return 0;
+        case KEY_PREV:
+            *bit = 1;
+            return 1;
+        case KEY_NEXT:
+            *bit = 0;
+            return 1;
+        case KEY_REDRAW:
+            break;
+        default:
+            return -1;
+        }
+    }
+}
+
 static void format_card(const unsigned value, char* output, const size_t output_len)
 {
     static const char ranks[] = "A23456789TJQK";
     static const char suits[] = "CDHS";
     (void)snprintf(output, output_len, "%c%c", ranks[value % 13], suits[value / 13]);
-}
-
-static void format_coin(const unsigned value, char* output, const size_t output_len)
-{
-    (void)snprintf(output, output_len, "%s", value ? "Heads (1)" : "Tails (0)");
 }
 
 static void hexstr(const uint8_t* bytes, const size_t len, char* output)
@@ -441,7 +485,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             }
             items[matches] = "[delete]";
             (void)snprintf(listing, sizeof(listing), "%s  %s", title, stem_len ? stem : "-");
-            const int chosen = choose(listing, items, matches + 1);
+            const int chosen = choose(listing, items, matches + 1, true);
             seedtool_zero(listing, sizeof(listing));
             if (chosen < 0) {
                 seedtool_zero(stem, sizeof(stem));
@@ -594,7 +638,7 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
 static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
 {
     const char* methods[] = { "Type the letters", "Enter word numbers", "Back" };
-    const int method = choose("Word entry", methods, 3);
+    const int method = choose("Word entry", methods, 3, true);
     if (method < 0) {
         return -1;
     }
@@ -691,7 +735,7 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
 static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
     const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
-    const int selected = choose("Optional passphrase", options, 3);
+    const int selected = choose("Optional passphrase", options, 3, true);
     if (selected != 1) {
         passphrase[0] = '\0';
         /* Only "No passphrase" derives; back and timeout both leave without. */
@@ -776,20 +820,20 @@ typedef struct {
  * the chosen index, or -1 on Back, timeout or a derivation error. */
 static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type)
 {
-    for (uint32_t i = 0; i <= SEEDTOOL_MAX_ADDRESS_INDEX; ++i) {
-        char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        if (seedtool_mainnet_address(mnemonic, passphrase, type, i, address, sizeof(address)) != SEEDTOOL_OK) {
-            seedtool_zero(address, sizeof(address));
-            seedtool_zero(address_labels, sizeof(address_labels));
-            (void)acknowledge("Error", "Could not derive addresses", NULL);
-            return -1;
-        }
-        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %s", (unsigned)i, address);
-        address_items[i] = address_labels[i];
-        seedtool_zero(address, sizeof(address));
+    static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, ADDRESS_LIST_ROWS, addresses) != SEEDTOOL_OK) {
+        seedtool_zero(addresses, sizeof(addresses));
+        seedtool_zero(address_labels, sizeof(address_labels));
+        (void)acknowledge("Error", "Could not derive addresses", NULL);
+        return -1;
     }
+    for (uint32_t i = 0; i < ADDRESS_LIST_ROWS; ++i) {
+        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %s", (unsigned)i, addresses[i]);
+        address_items[i] = address_labels[i];
+    }
+    seedtool_zero(addresses, sizeof(addresses));
     address_items[ADDRESS_LIST_ROWS] = "Back";
-    const int selected = choose("Addresses", address_items, ADDRESS_LIST_ROWS + 1);
+    const int selected = choose("Addresses", address_items, ADDRESS_LIST_ROWS + 1, true);
     seedtool_zero(address_labels, sizeof(address_labels));
     return selected < 0 || selected == (int)ADDRESS_LIST_ROWS ? -1 : selected;
 }
@@ -803,7 +847,7 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
     for (;;) {
         const char* items[] = { "Account key", "Addresses", "Back" };
-        const int selected = choose(title, items, 3);
+        const int selected = choose(title, items, 3, true);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -811,7 +855,7 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
             seedtool_key_format_t format = SEEDTOOL_XPUB;
             if (type == SEEDTOOL_BIP84) {
                 const char* const formats[] = { "xpub", "zpub", "Back" };
-                const int chosen = choose("Account key format", formats, 3);
+                const int chosen = choose("Account key format", formats, 3, true);
                 if (chosen < 0 || chosen == 2) {
                     continue;
                 }
@@ -863,7 +907,7 @@ static void show_stackbit(const char* mnemonic)
         return;
     }
     const char* const layouts[] = { "Simple grid", "Physical layout", "Back" };
-    const int layout = choose("Stackbit 1248", layouts, 3);
+    const int layout = choose("Stackbit 1248", layouts, 3, true);
     if (layout < 0 || layout == 2) {
         seedtool_zero(numbers, sizeof(numbers));
         return;
@@ -926,7 +970,7 @@ static void show_backup_menu(const char* mnemonic)
 {
     for (;;) {
         const char* items[] = { "Stackbit 1248", "Compact SeedQR", "Back" };
-        const int selected = choose("Backup", items, 3);
+        const int selected = choose("Backup", items, 3, true);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -958,7 +1002,7 @@ static void show_wallet_data(const char* mnemonic)
     for (;;) {
         const char* menu[]
             = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)", "Backup", "Done / erase" };
-        const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]));
+        const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
         if (selected < 0 || selected == 4) {
             break;
         }
@@ -1017,9 +1061,9 @@ static int collect_entropy(const int source, const size_t words)
 {
     static const char* const names[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
     const size_t required = seedtool_required_events((seedtool_source_t)source, words);
-    const unsigned min = (source == SEEDTOOL_COIN || source == SEEDTOOL_CARDS) ? 0 : 1;
-    const unsigned max = source == SEEDTOOL_D6 ? 6 : source == SEEDTOOL_D20 ? 20 : source == SEEDTOOL_COIN ? 1 : 51;
-    const format_fn format = source == SEEDTOOL_CARDS ? format_card : source == SEEDTOOL_COIN ? format_coin : NULL;
+    const unsigned min = source == SEEDTOOL_CARDS ? 0 : 1;
+    const unsigned max = source == SEEDTOOL_D6 ? 6 : source == SEEDTOOL_D20 ? 20 : 51;
+    const format_fn format = source == SEEDTOOL_CARDS ? format_card : NULL;
     const bool is_dice = source == SEEDTOOL_D6 || source == SEEDTOOL_D20;
     const size_t min_bits = is_dice ? seedtool_min_entropy_bits(words) : 0;
 
@@ -1056,8 +1100,14 @@ static int collect_entropy(const int source, const size_t words)
             const seedtool_progress_t progress
                 = is_dice ? dice_progress((seedtool_source_t)source, values, i, required, min_bits)
                           : (seedtool_progress_t) { 0 };
-            const int result = enter_value(names[source], (unsigned)(i + 1), (unsigned)required, min, max, &value,
-                format, source == SEEDTOOL_CARDS ? available : NULL, history + shown, is_dice ? &progress : NULL);
+            const char* const label = names[source];
+            int result;
+            if (source == SEEDTOOL_COIN) {
+                result = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history);
+            } else {
+                result = enter_value(label, (unsigned)(i + 1), (unsigned)required, min, max, &value, format,
+                    source == SEEDTOOL_CARDS ? available : NULL, history + shown, is_dice ? &progress : NULL);
+            }
             if (result < 0) {
                 outcome = -1;
                 break;
@@ -1129,7 +1179,7 @@ static void create_seed(void)
 {
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Back" };
-        const int source = choose("Entropy source", sources, sizeof(sources) / sizeof(sources[0]));
+        const int source = choose("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), true);
         if (source < 0 || source == 4) {
             return;
         }
@@ -1143,7 +1193,7 @@ static void create_seed(void)
         }
         for (;;) {
             const char* lengths[] = { "12 words", "24 words", "Back" };
-            const int length = choose("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]));
+            const int length = choose("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]), true);
             if (length < 0) {
                 return;
             }
@@ -1161,7 +1211,7 @@ static void complete_checksum(void)
 {
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins", "Back" };
-        const int selected = choose("Complete checksum", lengths, 3);
+        const int selected = choose("Complete checksum", lengths, 3, true);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -1177,8 +1227,7 @@ static void complete_checksum(void)
             for (size_t f = 0; f < i; ++f) {
                 flips[f] = (char)('0' + bits[f]);
             }
-            const int result = enter_value("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, 0, 1, &bit,
-                format_coin, NULL, flips, NULL);
+            const int result = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips);
             if (result < 0) {
                 outcome = -1;
             } else if (result == 0) {
@@ -1211,7 +1260,7 @@ static void restore_seed(void)
 {
     for (;;) {
         const char* lengths[] = { "12 words", "24 words", "Back" };
-        const int selected = choose("Restore mnemonic", lengths, 3);
+        const int selected = choose("Restore mnemonic", lengths, 3, true);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -1261,7 +1310,7 @@ void seedtool_run(void)
 
     for (;;) {
         const char* menu[] = { "Create Seed", "Restore Seed", "Complete Checksum", "About / Safety", "Reboot" };
-        const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]));
+        const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
         if (selected < 0 || selected == 4) {
             seedtool_platform_restart();
         } else if (selected == 0) {

@@ -137,18 +137,29 @@ stay dependency-free.
 
 ## Controls
 
-The board has two buttons and no select button. The left button moves to the
-previous item, the right button to the next, and both pressed together select.
-Holding one button repeats it. A press is acted on only once both buttons are
-released, so a chord is never mistaken for a step.
+The board has two buttons and no select button. In a list, the left button
+moves to the previous item and the right button to the next; both pressed
+together select. Holding one button repeats it. A press is acted on only once
+both buttons are released, so a chord is never mistaken for a step. A numeric
+carousel (dice rolls, cards) reads the same two buttons the other way: left
+raises the value, right lowers it, since there the physical button read as
+"up" raising what is on screen matters more than reusing a list's sense of
+"previous".
 
 Pressing a button teaches left, right and hold. It cannot teach the chord, since
 nothing moves until both buttons are released, so `L/R move   BOTH select` sits
-under the first screens and disappears for good once the chord has been used
-once. What stays under a screen after that is its position counter alone. The
-two footers that name a consequence rather than a gesture — `BOTH continue   L/R
-back`, and the timeout's `BOTH extend   L/R erase` — are always shown, because
-guessing wrong there costs a session.
+under the first screens reachable from the main menu and disappears for good
+once the chord has been used once — not under the main menu itself, which is
+not the place to also be teaching it. What stays under a screen after that is
+its position counter alone. The two footers that name a consequence rather
+than a gesture — `BOTH continue   L/R back`, and the timeout's `BOTH extend
+L/R erase` — are always shown, because guessing wrong there costs a session.
+
+Coin flips are a direct choice rather than a carousel position: left picks
+Heads, right picks Tails, one press per flip. With a run as long as 128 or 256
+flips, halving the presses per flip halves the whole entry. Both buttons
+together undoes the last flip, since there is no longer a neutral carousel
+position to step onto for that.
 
 Three gestures is all two buttons afford, and all three are spoken for, so going
 back cannot be a button: it is a place on the screen. Every screen has one, and
@@ -157,7 +168,10 @@ it steps back exactly one stage rather than abandoning the flow. Menus carry a
 returns to the previous word, and past the first word to the menu before it. The
 numeric carousel carries `[back]` one step below its lowest value, so a misread
 roll 29 of 50 is corrected by stepping back to it rather than by waiting out the
-session timeout and starting the transcript again.
+session timeout and starting the transcript again. Coin flips are the one
+exception: both a value and its confirmation used to cost two of the three
+gestures, so freeing the one that used to confirm turns it into "undo" instead
+of a screen position, since a direct choice has nothing left to confirm.
 
 Every choice is a list showing three options at once with the selection
 highlighted, so an option is always read alongside its neighbours. Three rather
