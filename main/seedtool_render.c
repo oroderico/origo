@@ -224,7 +224,10 @@ static void draw_centered_line(
     draw_line_at(font, text, length, x + offset, y, COLOR_WHITE);
 }
 
-/* Centred and wrapped inside the box of `width` pixels starting at `x`. */
+/* Centred and wrapped inside the box of `width` pixels starting at `x`. A
+ * wrap that would land inside a word backs off to the last space instead, so
+ * the word carries whole onto the next line; a single word wider than the
+ * whole box is the one case with no better break, and is left to split. */
 static void draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
 {
     if (!text) {
@@ -234,17 +237,23 @@ static void draw_centered_box(const uint8_t* font, const char* text, const int x
     const char* cursor = text;
     while (*cursor && y + line_height <= SEEDTOOL_DISPLAY_HEIGHT) {
         const char* end = cursor;
+        const char* last_space = NULL;
         int used = 0;
         while (*end && *end != '\n') {
             const int advance = glyph_advance(font, (unsigned char)*end);
             if (end != cursor && used + advance > width) {
                 break;
             }
+            if (*end == ' ') {
+                last_space = end;
+            }
             used += advance;
             ++end;
         }
-        draw_centered_line(font, cursor, (size_t)(end - cursor), x, width, y);
-        cursor = *end == '\n' ? end + 1 : end;
+        const bool mid_word = end > cursor && end[-1] != ' ' && *end && *end != '\n' && *end != ' ';
+        const char* const line_end = mid_word && last_space && last_space != cursor ? last_space : end;
+        draw_centered_line(font, cursor, (size_t)(line_end - cursor), x, width, y);
+        cursor = *line_end == ' ' || *line_end == '\n' ? line_end + 1 : line_end;
         y += line_height;
     }
 }
@@ -284,9 +293,28 @@ static size_t fit_in(const uint8_t* font, const char* text, const size_t limit, 
     return count;
 }
 
+/* Same as fit_in, but backs a mid-word fit off to the last space within it,
+ * so paged text (page_text, via seedtool_render_fit) never splits a word
+ * across pages the way a raw pixel-width cut can. Only for callers that have
+ * a next line to carry the rest of the word onto: a list row's single-line
+ * truncation (seedtool_render_fit_row) has none, so it keeps the plain cut. */
+static size_t fit_in_wrapped(const uint8_t* font, const char* text, const size_t limit, const int max_width)
+{
+    const size_t fit = fit_in(font, text, limit, max_width);
+    if (!fit || !text[fit] || text[fit] == ' ') {
+        return fit;
+    }
+    for (size_t i = fit; i > 0; --i) {
+        if (text[i - 1] == ' ') {
+            return i;
+        }
+    }
+    return fit;
+}
+
 size_t seedtool_render_fit(const char* text, const size_t limit)
 {
-    return fit_in(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+    return fit_in_wrapped(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
 size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
