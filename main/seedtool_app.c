@@ -225,17 +225,13 @@ static int enter_value(const char* title, const unsigned position, const unsigne
             }
             *value = current;
             return 1;
+        /* A value is a quantity, not a position in a list: unlike every list or
+         * keyboard screen, where KEY_PREV/KEY_NEXT move toward the previous or
+         * next item, here KEY_PREV raises the value and KEY_NEXT lowers it —
+         * matching the physical button read as "up" on this board being the
+         * one that increases what is on screen, the same way a spinner's up
+         * arrow does, rather than reusing list-navigation's sense of "previous". */
         case KEY_PREV:
-            if (on_back) {
-                on_back = false;
-                current = last;
-            } else if (current == first) {
-                on_back = true;
-            } else {
-                current = step_value(current, min, max, false, allowed);
-            }
-            break;
-        case KEY_NEXT:
             if (on_back) {
                 on_back = false;
                 current = first;
@@ -243,6 +239,16 @@ static int enter_value(const char* title, const unsigned position, const unsigne
                 on_back = true;
             } else {
                 current = step_value(current, min, max, true, allowed);
+            }
+            break;
+        case KEY_NEXT:
+            if (on_back) {
+                on_back = false;
+                current = last;
+            } else if (current == first) {
+                on_back = true;
+            } else {
+                current = step_value(current, min, max, false, allowed);
             }
             break;
         case KEY_REDRAW:
