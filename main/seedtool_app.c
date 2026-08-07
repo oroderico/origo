@@ -1319,7 +1319,14 @@ static void entropy_quality(
         (void)seedtool_card_pattern_detected(values, count, pattern_out);
         return;
     }
-    uint8_t faces[256];
+    /* Zero-initialized, not left bare: the loop below only fills faces[0..
+     * count-1], and GCC's -Wmaybe-uninitialized can't always prove that
+     * partial fill is enough once faces_ptr crosses the opaque pointer
+     * boundary into seedtool_dice_entropy_bits - a false positive under
+     * -O2's constant propagation, but a real bare array here would leave
+     * bytes past count genuinely uninitialized if anything ever read past
+     * it. */
+    uint8_t faces[256] = { 0 };
     const uint8_t* faces_ptr = values;
     if (source == SEEDTOOL_COIN || source == SEEDTOOL_CARDS_REPLACE) {
         for (size_t i = 0; i < count; ++i) {
