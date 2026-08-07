@@ -1,12 +1,6 @@
 build*/
 sdkconfig
 sdkconfig.old
-
-# Local checkout of Blockstream Jade, kept alongside for reference only.
-jade/
-
-# Local checkout of the krux fork, kept alongside for reference only.
-krux/
 __pycache__/
 *.py[cod]
 
