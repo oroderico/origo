@@ -60,16 +60,6 @@
 #define QR_TITLE_Y 50
 _Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest QR no longer fits the display");
 
-/* Layout for the Compact SeedQR region map: a legend, not a scannable code,
- * so unlike draw_qr it is drawn deliberately smaller than the display to
- * leave room for a column-number row above it and a row-letter column beside
- * it - the same letters and numbers "Region A1" etc. label each zoomed tile
- * with. */
-#define MAP_LEFT 16
-#define MAP_TOP 38
-#define MAP_RIGHT_MARGIN 4
-#define MAP_BOTTOM_MARGIN 4
-
 /* Stackbit 1248 punch grid: four digit columns (thousands..units, left to
  * right) times four weight rows (1,2,4,8 top to bottom), with the word
  * number and word text in a panel to its right. A simplified layout rather
@@ -873,13 +863,15 @@ size_t seedtool_render_qr_bytes_regions(const size_t len)
     return columns * columns;
 }
 
-/* The region map itself: the whole code redrawn small enough to leave a
- * column-number row above it and a row-letter column beside it, with a dim
- * line at every region boundary - the same qr_region_size/columns split
- * seedtool_render_qr_bytes_regions and draw_qr_region already use, so the
- * legend can never fall out of step with what a zoomed tile actually shows.
- * Coarse and off-centre on purpose: unlike seedtool_render_qr_bytes, this
- * view is read once for orientation, not scanned or hand-copied. */
+/* The region map: the exact same full-size code seedtool_render_qr_bytes
+ * draws (same QR_LEFT/scale/extent/title placement, so it looks like the
+ * same screen, not a different one) with a dim line at every region boundary
+ * and each region's own "A1" etc label stamped inside its own block - the
+ * same qr_region_size/columns split, and the same dim-line-over-modules
+ * convention draw_qr_region already uses on its own zoomed tile, just spaced
+ * a region apart instead of a module apart. So the legend can never fall out
+ * of step with what a zoomed tile actually shows, and the code is never
+ * shrunk to make room for it. */
 bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len)
 {
     if (len > UINT16_MAX) {
@@ -897,39 +889,41 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
     }
     const size_t region_size = qr_region_size(qr.size);
     const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    const int avail_width = SEEDTOOL_DISPLAY_WIDTH - MAP_LEFT - MAP_RIGHT_MARGIN;
-    const int avail_height = SEEDTOOL_DISPLAY_HEIGHT - MAP_TOP - MAP_BOTTOM_MARGIN;
-    const int width_scale = avail_width / qr.size;
-    const int height_scale = avail_height / qr.size;
-    int scale = width_scale < height_scale ? width_scale : height_scale;
-    if (scale < 1) {
-        scale = 1;
-    }
-    const int extent = (int)qr.size * scale;
+    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (qr.size + 2);
+    const int extent = (qr.size + 2) * scale;
+    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
+    const int title_x = QR_LEFT + extent + 5;
+    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
+    /* The code's own top-left corner, one quiet-zone module in from the white
+     * fill's corner: where the boundary grid and the region labels are drawn
+     * relative to, since the quiet zone itself has no region to divide. */
+    const int code_left = QR_LEFT + scale;
+    const int code_top = top + scale;
+    const int code_extent = (int)qr.size * scale;
     const int block = (int)region_size * scale;
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 5);
-    for (size_t i = 0; i < columns; ++i) {
-        char label[4];
-        (void)snprintf(label, sizeof(label), "%u", (unsigned)(i + 1));
-        draw_centered_in(
-            tft_DefaultFont, label, MAP_LEFT + (int)i * block, block, MAP_TOP - tft_DefaultFont[1] - 2, COLOR_DIM);
-        char letter[2] = { (char)('A' + i), '\0' };
-        draw_centered_in(tft_DefaultFont, letter, 0, MAP_LEFT - 2,
-            MAP_TOP + (int)i * block + (block - tft_DefaultFont[1]) / 2, COLOR_DIM);
-    }
-    fill_rect(MAP_LEFT, MAP_TOP, extent, extent, COLOR_WHITE);
+    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr.size; ++y) {
         for (uint8_t x = 0; x < qr.size; ++x) {
             if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(MAP_LEFT + x * scale, MAP_TOP + y * scale, scale, scale, COLOR_BLACK);
+                fill_rect(QR_LEFT + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
             }
         }
     }
     for (size_t i = 0; i <= columns; ++i) {
-        fill_rect(MAP_LEFT, MAP_TOP + (int)i * block, extent, 1, COLOR_DIM);
-        fill_rect(MAP_LEFT + (int)i * block, MAP_TOP, 1, extent, COLOR_DIM);
+        const int pos = (int)i * block;
+        fill_rect(code_left, code_top + pos, code_extent, 1, COLOR_DIM);
+        fill_rect(code_left + pos, code_top, 1, code_extent, COLOR_DIM);
     }
+    for (size_t row = 0; row < columns; ++row) {
+        for (size_t column = 0; column < columns; ++column) {
+            char label[4];
+            (void)snprintf(label, sizeof(label), "%c%u", (char)('A' + row), (unsigned)(column + 1));
+            draw_centered_in(tft_DefaultFont, label, code_left + (int)column * block, block,
+                code_top + (int)row * block + 2, COLOR_DIM);
+        }
+    }
+    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }

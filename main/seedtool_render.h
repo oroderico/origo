@@ -135,13 +135,15 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len
  * seedtool_display. */
 size_t seedtool_render_qr_bytes_regions(size_t len);
 
-/* The region map: the whole code redrawn deliberately smaller than
- * seedtool_render_qr_bytes draws it, with a column-number row above and a
- * row-letter column beside it and a dim line at every region boundary - the
- * same letters and numbers "Region A1" etc. label a zoomed tile with, from
- * the same split seedtool_render_qr_bytes_regions counts. Meant to be shown
- * once before stepping into the zoomed tiles, so a reader knows where "A1"
- * sits relative to "B2" before copying either onto a paper template. */
+/* The region map: the same full-size code seedtool_render_qr_bytes draws,
+ * with a dim line at every region boundary and each region's own "A1" etc
+ * label stamped inside its own block - the same split
+ * seedtool_render_qr_bytes_regions counts, and the same dim-line-over-
+ * modules convention a zoomed tile already uses on itself, just a region
+ * apart instead of a module apart. Meant to be shown between the plain full
+ * code and the zoomed tiles, so a reader has already seen the code at this
+ * size before the labels are laid over it, and knows where "A1" sits
+ * relative to "B2" before copying either onto a paper template. */
 bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, size_t len);
 
 /* Draws one zoomed-in region tile of a byte-mode payload's QR code, in raster
