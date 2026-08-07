@@ -28,11 +28,6 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
 void seedtool_render_screen3(
     const char* title, const char* line1, const char* line2, const char* line3, const char* footer);
 
-/* Same again, with a fourth body line: for a numbered word list, one word per
- * line, four words per page. */
-void seedtool_render_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer);
-
 /* The dice-roll quality bar drawn under a D6/D20 entry screen: a top segment
  * for rolls collected against the minimum, a bottom segment for Shannon's
  * entropy of those rolls against the minimum bits needed. `warn` colors the

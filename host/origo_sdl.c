@@ -99,13 +99,6 @@ void seedtool_display_screen3(
     present();
 }
 
-void seedtool_display_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer)
-{
-    seedtool_render_screen4(title, line1, line2, line3, line4, footer);
-    present();
-}
-
 void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
     const seedtool_progress_t* progress)
 {
