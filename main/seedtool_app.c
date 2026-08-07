@@ -1603,9 +1603,9 @@ void seedtool_run(void)
     last_action = seedtool_platform_milliseconds();
 
     for (;;) {
-        const char* menu[] = { "New Seed", "Restore Seed", "Settings", "Reboot" };
+        const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
         const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
-        if (selected < 0 || selected == 3) {
+        if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {
             show_new_seed_menu();

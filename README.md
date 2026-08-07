@@ -223,10 +223,13 @@ how much is below them; the thumb says how much and where. The end of a list is
 never padded with blank rows. Only labels are listed. Values meant to be transcribed are paged
 instead, split by what fits the display.
 
-The last row of every list is the way out of it — `Back`, `Reboot`,
-`Done / erase`, `[delete]` — and a rule is drawn above it so it is not read as
-one more choice. That row is always last, in every list, so leaving a screen is
-always in the same place.
+The last row of every list with somewhere to return to is the way out of it —
+`Back`, `Done / erase`, `[delete]` — and a rule is drawn above it so it is not
+read as one more choice. That row is always last, in every such list, so
+leaving a screen is always in the same place. The one list with nowhere to
+return to is the main menu itself: there is no `Back` row there, and the
+session-timeout wipe (`BOTH extend   L/R erase`) is the only way out of it
+short of the board's own physical reset.
 
 Entering a mnemonic asks first whether the words will be typed as letters or as
 word numbers, and every word of that mnemonic is then entered the chosen way.
