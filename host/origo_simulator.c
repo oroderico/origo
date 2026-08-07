@@ -352,6 +352,63 @@ static bool partial_transcripts_are_prefixes(void)
     return true;
 }
 
+/* seedtool_generate must actually succeed at every source/word-count pairing
+ * this app offers, run at the *real* seedtool_required_events count - not a
+ * smaller stand-in. This is what caught SEEDTOOL_MAX_TRANSCRIPT_LEN being too
+ * small for a full 256-flip Coin/24-word transcript: partial_transcripts_are_
+ * prefixes above only ever exercises up to 40 events, so it structurally
+ * could not have caught a bug that only bites near the true maximum. */
+static bool full_entropy_events_generate(void)
+{
+    static const seedtool_source_t sources[]
+        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
+    static const size_t word_counts[] = { 12, 24 };
+    uint8_t values[256];
+    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
+        for (size_t w = 0; w < sizeof(word_counts) / sizeof(word_counts[0]); ++w) {
+            const size_t words = word_counts[w];
+            const size_t count = seedtool_required_events(sources[s], words);
+            if (!count) {
+                /* Not every source offers every word count (Cards doesn't do
+                 * 24, Cards-with-replacement doesn't do 12) - skip those. */
+                continue;
+            }
+            for (size_t i = 0; i < count; ++i) {
+                switch (sources[s]) {
+                case SEEDTOOL_D6:
+                    values[i] = (uint8_t)(1 + i % 6);
+                    break;
+                case SEEDTOOL_D20:
+                    values[i] = (uint8_t)(1 + i % 20);
+                    break;
+                case SEEDTOOL_COIN:
+                    values[i] = (uint8_t)(i % 2);
+                    break;
+                case SEEDTOOL_CARDS:
+                    /* No repeats allowed; count never exceeds the 52-card
+                     * deck, so a straight index is always distinct. */
+                    values[i] = (uint8_t)i;
+                    break;
+                case SEEDTOOL_CARDS_REPLACE:
+                    values[i] = (uint8_t)(i % 5);
+                    break;
+                default:
+                    values[i] = 0;
+                    break;
+                }
+            }
+            seedtool_generated_t generated;
+            const seedtool_result_t ret = seedtool_generate(sources[s], words, values, count, &generated);
+            seedtool_zero(&generated, sizeof(generated));
+            if (ret != SEEDTOOL_OK) {
+                return false;
+            }
+        }
+    }
+    seedtool_zero(values, sizeof(values));
+    return true;
+}
+
 /* Paging splits by pixel width, so the chunks must still reassemble byte for
  * byte: a dropped character in a displayed xpub or address would be transcribed
  * as fact. */
@@ -927,6 +984,10 @@ static int self_test(void)
     }
     if (!partial_transcripts_are_prefixes()) {
         fputs("Origo running transcript self-test failed\n", stderr);
+        return 1;
+    }
+    if (!full_entropy_events_generate()) {
+        fputs("Origo full-event-count generation self-test failed\n", stderr);
         return 1;
     }
     if (!dice_quality_is_sound()) {

@@ -6,7 +6,16 @@
 #include <stdint.h>
 
 #define SEEDTOOL_HASH_LEN 32
-#define SEEDTOOL_MAX_TRANSCRIPT_LEN 180
+/* Worst case across every (source, word count) seedtool_required_events
+ * covers: 256 single-character coin flips for a 24-word mnemonic
+ * (SEEDTOOL_COIN, 1 char/flip, no separator) - the largest transcript this
+ * app ever builds. D20/24 words is the next largest at up to 203 (68 rolls,
+ * "-" plus 1-2 digits each); D6, Cards and Cards-with-replacement all stay
+ * well under that. A smaller bound here silently truncated seedtool_transcript
+ * for exactly the sources/word-counts near this max, which seedtool_generate
+ * then surfaced as "Could not generate seed" only after every event had
+ * already been collected. */
+#define SEEDTOOL_MAX_TRANSCRIPT_LEN 256
 #define SEEDTOOL_MAX_MNEMONIC_LEN 240
 #define SEEDTOOL_MAX_PASSPHRASE_LEN 100
 #define SEEDTOOL_MAX_ADDRESS_LEN 96

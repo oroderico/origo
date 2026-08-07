@@ -995,7 +995,16 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
         return -1;
     }
     for (uint32_t i = 0; i < ADDRESS_LIST_ROWS; ++i) {
-        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %s", (unsigned)i, addresses[i]);
+        /* Precision on %s, not a bare conversion: addresses[i] is genuinely
+         * bounded (SEEDTOOL_MAX_ADDRESS_LEN), but that bound doesn't survive
+         * the array-to-pointer decay through this call for GCC's format-
+         * truncation analysis to see once inlined three levels deep into
+         * show_wallet_data - it falls back to assuming an unbounded string
+         * and flags a truncation risk that can't actually happen. An
+         * explicit precision equal to the same bound gives it a provable
+         * limit instead of a suppression. */
+        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %.*s", (unsigned)i,
+            (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1), addresses[i]);
         address_items[i] = address_labels[i];
     }
     address_items[ADDRESS_LIST_ROWS] = "Back";
@@ -1340,6 +1349,12 @@ static void entropy_quality(
     if (count) {
         *bits_out += (int)lround(seedtool_dice_entropy_bias_bits(source));
     }
+    /* faces holds a shifted copy of the real coin/card draws whenever it was
+     * filled above - the same secret values as `values`, just re-indexed for
+     * seedtool_dice_entropy_bits. Called on every keystroke while entropy is
+     * being collected, so this would otherwise leave many stale copies of
+     * live entropy scattered across old stack frames. */
+    seedtool_zero(faces, sizeof(faces));
 }
 
 /* Live quality readout for a run in progress: draws collected and bits so
