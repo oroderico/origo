@@ -915,12 +915,22 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
         fill_rect(code_left, code_top + pos, code_extent, 1, COLOR_DIM);
         fill_rect(code_left + pos, code_top, 1, code_extent, COLOR_DIM);
     }
+    /* A dim line over a QR module has one of two known backgrounds, black or
+     * white, so it always reads against at least one of them. A label is
+     * text, needed against both at once, and COLOR_DIM is too close to black
+     * to read on a black module - so each one gets a small solid plate under
+     * it first, sized to the block with a 1px gap from its boundary lines,
+     * and black-on-white text on top of that instead of straight onto
+     * whatever the code drew there. */
     for (size_t row = 0; row < columns; ++row) {
         for (size_t column = 0; column < columns; ++column) {
             char label[4];
             (void)snprintf(label, sizeof(label), "%c%u", (char)('A' + row), (unsigned)(column + 1));
-            draw_centered_in(tft_DefaultFont, label, code_left + (int)column * block, block,
-                code_top + (int)row * block + 2, COLOR_DIM);
+            const int label_x = code_left + (int)column * block;
+            const int label_y = code_top + (int)row * block + 2;
+            const int label_height = tft_DefaultFont[1] + 2;
+            fill_rect(label_x + 1, label_y - 1, block - 2, label_height, COLOR_WHITE);
+            draw_centered_in(tft_DefaultFont, label, label_x, block, label_y, COLOR_BLACK);
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
