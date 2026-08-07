@@ -194,9 +194,11 @@ static int choose(const char* title, const char* const* items, const size_t coun
 {
     size_t selected = 0, top = 0;
     for (;;) {
-        char footer[48];
-        (void)snprintf(
-            footer, sizeof(footer), "%u/%u%s", (unsigned)(selected + 1), (unsigned)count, hint ? nav_hint() : "");
+        /* No page counter here: choosing among options isn't paging through
+         * content, and the scrollbar (seedtool_render_list, gated the same way
+         * on count > SEEDTOOL_LIST_ROWS) already shows position when the list
+         * doesn't fit on screen. */
+        const char* const footer = (hint && !chord_learned) ? NAV_FOOTER : "";
         top = seedtool_list_top(count, selected, top);
         seedtool_display_list(title, items, count, selected, top, footer);
         switch (wait_key()) {
