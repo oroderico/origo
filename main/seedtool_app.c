@@ -1125,10 +1125,17 @@ static void show_numbered_list(const char* mnemonic, const bool show_words)
         for (size_t i = 0; i < 4 && first + i < count; ++i) {
             const size_t position = first + i + 1;
             const uint16_t number = numbers[first + i];
+            /* Position zero-padded to a fixed two-digit field, not space-
+             * padded: this font's digits share one advance width (tabular
+             * figures) but its space glyph is narrower, so only zero-padding
+             * keeps the field's total width - and everything after it - fixed
+             * from row to row. That, plus screen4's left-aligned rows, lines
+             * every word up under the last instead of each row centring
+             * around its own width and the column drifting line to line. */
             if (show_words) {
-                (void)snprintf(lines[i], sizeof(lines[i]), "%u  %s", (unsigned)position, seedtool_word(number - 1));
+                (void)snprintf(lines[i], sizeof(lines[i]), "%02u. %s", (unsigned)position, seedtool_word(number - 1));
             } else {
-                (void)snprintf(lines[i], sizeof(lines[i]), "%u  %u", (unsigned)position, (unsigned)number);
+                (void)snprintf(lines[i], sizeof(lines[i]), "%02u. %04u", (unsigned)position, (unsigned)number);
             }
         }
         char footer[16];

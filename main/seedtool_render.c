@@ -24,6 +24,11 @@
 #define DICE_BAR_Y 90
 #define DICE_BAR_HEIGHT 14
 
+/* Left margin for seedtool_render_screen4's four body lines: a numbered list
+ * reads as a table, so every row starts at the same x rather than each being
+ * centred as its own block and drifting with how wide its own text is. */
+#define SCREEN4_TEXT_X 20
+
 #define KEYBOARD_COLUMNS 10
 #define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
 #define KEY_HEIGHT 27
@@ -268,6 +273,14 @@ static void draw_centered(const uint8_t* font, const char* text, const int y)
     draw_centered_box(font, text, 0, SEEDTOOL_DISPLAY_WIDTH, y);
 }
 
+/* Left-aligned rather than boxed and centred: a numbered list reads as a
+ * table, with the word (or word number) starting at the same x on every row,
+ * not drifting with how wide each entry's own text happens to be. */
+static void draw_left(const uint8_t* font, const char* text, const int x, const int y)
+{
+    draw_line_at(font, text, strlen(text), x, y, COLOR_WHITE);
+}
+
 /* What has been typed so far, read back to be checked, so it takes the larger
  * face. Only the tail that fits one line is drawn: a passphrase long enough to
  * wrap would push a second line down into the keyboard. */
@@ -406,10 +419,10 @@ void seedtool_render_screen4(const char* title, const char* line1, const char* l
 {
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, 5);
-    draw_centered(tft_Ubuntu16, line1, 28);
-    draw_centered(tft_Ubuntu16, line2, 48);
-    draw_centered(tft_Ubuntu16, line3, 68);
-    draw_centered(tft_Ubuntu16, line4, 88);
+    draw_left(tft_Ubuntu16, line1, SCREEN4_TEXT_X, 28);
+    draw_left(tft_Ubuntu16, line2, SCREEN4_TEXT_X, 48);
+    draw_left(tft_Ubuntu16, line3, SCREEN4_TEXT_X, 68);
+    draw_left(tft_Ubuntu16, line4, SCREEN4_TEXT_X, 88);
     draw_centered(tft_DefaultFont, footer, 111);
 }
 
