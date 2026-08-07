@@ -1189,11 +1189,11 @@ static void show_numbered_list(const char* mnemonic, const bool show_words)
  * this one is every key the mnemonic can ever derive. There is no camera to
  * scan the result back with, so tools/origo_verify.py inspect prints the same
  * payload for an independent check instead. */
-/* Index 0 is the region map (which zone is which, before diving into any of
- * them); index 1 is the full code; 2..regions+1 are Krux-style "Zoomed
- * Region" tiles of it, stepped sideways the same way show_qr steps between
- * values, so the carousel convention stays one shape everywhere a QR is
- * shown. */
+/* Index 0 is the full code, seen at its natural size first; index 1 is the
+ * region map (that same code, with the boundaries and labels each zoomed
+ * tile beyond it will use); 2..regions+1 are Krux-style "Zoomed Region"
+ * tiles, stepped sideways the same way show_qr steps between values, so the
+ * carousel convention stays one shape everywhere a QR is shown. */
 static void export_seed_qr(const char* mnemonic)
 {
     if (!acknowledge("Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds")) {
@@ -1207,8 +1207,8 @@ static void export_seed_qr(const char* mnemonic)
         size_t selected = 0;
         for (;;) {
             const bool ok = selected == 0
-                ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
-                : selected == 1 ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
+                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
+                : selected == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
                                 : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 2);
             if (!ok) {
                 (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
@@ -1486,19 +1486,24 @@ static int collect_entropy(const int source, const size_t words)
     return outcome;
 }
 
-static void create_seed(void)
+/* Returns whether a seed was actually generated and carried all the way
+ * through the wallet viewer to Done/erase (or a timeout) - as opposed to the
+ * reader backing out of the source or length picker before ever starting.
+ * show_new_seed_menu uses this to tell "done, go all the way home" apart from
+ * plain "back one level". */
+static bool create_seed(void)
 {
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Back" };
         const int source = choose("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), true);
         if (source < 0 || source == 4) {
-            return;
+            return false;
         }
         for (;;) {
             const char* lengths[] = { "12 words", "24 words", "Back" };
             const int length = choose("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]), true);
             if (length < 0) {
-                return;
+                return false;
             }
             if (length == 2) {
                 break;
@@ -1509,19 +1514,22 @@ static void create_seed(void)
              * reshuffled after every draw, a genuine 52-sided die instead. */
             const int collect_source = length && source == SEEDTOOL_CARDS ? SEEDTOOL_CARDS_REPLACE : source;
             if (collect_entropy(collect_source, length ? 24 : 12) != 0) {
-                return;
+                return true;
             }
         }
     }
 }
 
-static void complete_checksum(void)
+/* Same contract as create_seed(): true once a completed mnemonic actually
+ * reached the wallet viewer (or a timeout), false for backing out of the
+ * length picker or the very first word before anything was entered. */
+static bool complete_checksum(void)
 {
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins", "Back" };
         const int selected = choose("Complete checksum", lengths, 3, true);
         if (selected < 0 || selected == 2) {
-            return;
+            return false;
         }
         const size_t count = selected ? 23 : 11;
         const size_t bits_count = selected ? 3 : 7;
@@ -1560,7 +1568,7 @@ static void complete_checksum(void)
         seedtool_zero(completed, sizeof(completed));
         seedtool_zero(bits, sizeof(bits));
         if (outcome != 0) {
-            return;
+            return true;
         }
     }
 }
@@ -1579,10 +1587,14 @@ static void show_new_seed_menu(void)
         if (selected < 0 || selected == 2) {
             return;
         }
-        if (selected == 0) {
-            create_seed();
-        } else {
-            complete_checksum();
+        /* A seed that made it all the way to Done/erase (or a timeout) closes
+         * this menu too, straight back to the Origo/Home menu, rather than
+         * reopening "New Seed" - that reopening was the actual bug: pressing
+         * Done/erase landed back inside New Seed instead of at Home. Backing
+         * out of the source/length picker before anything was generated
+         * keeps the old "one level up" behaviour. */
+        if (selected == 0 ? create_seed() : complete_checksum()) {
+            return;
         }
     }
 }
