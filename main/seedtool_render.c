@@ -392,6 +392,27 @@ void seedtool_render_screen3(
     draw_centered(tft_DefaultFont, footer, 111);
 }
 
+/* Same face and footer again, pitched tighter still (20px, against three
+ * lines' 25px) to fit a fourth: a numbered word (or word-number) list reads
+ * one entry per line, so 12 or 24 entries comes out to a clean 3 or 6 pages
+ * this way instead of the 4 or 8 three lines would need. Still clears the
+ * footer with room to spare at the same 16px face - the four lines run
+ * title+23 to title+23+3*20+16, i.e. y=28 to 108, three pixels shy of the
+ * footer at 111. Pixel-scanned directly (seedtool_render_pixels) to confirm
+ * every line clears the next with a real gap - the zoomed Compact SeedQR
+ * region label overlap bug was proof enough not to eyeball this arithmetic. */
+void seedtool_render_screen4(const char* title, const char* line1, const char* line2, const char* line3,
+    const char* line4, const char* footer)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, 5);
+    draw_centered(tft_Ubuntu16, line1, 28);
+    draw_centered(tft_Ubuntu16, line2, 48);
+    draw_centered(tft_Ubuntu16, line3, 68);
+    draw_centered(tft_Ubuntu16, line4, 88);
+    draw_centered(tft_DefaultFont, footer, 111);
+}
+
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
 {
     seedtool_thumb_t thumb = { 0, track };
