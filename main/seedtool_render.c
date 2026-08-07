@@ -329,23 +329,6 @@ size_t seedtool_render_fit_tail(const char* text)
     return length - start;
 }
 
-size_t seedtool_render_fit_tail2(const char* text, size_t* split_out)
-{
-    const size_t length = strlen(text);
-    size_t start = 0;
-    for (;;) {
-        const size_t first_line = fit_in(tft_Ubuntu16, text + start, SIZE_MAX, SEEDTOOL_DISPLAY_WIDTH - 4);
-        const size_t rest = length - start - first_line;
-        if (!rest || text_width(tft_Ubuntu16, text + start + first_line, rest) <= SEEDTOOL_DISPLAY_WIDTH - 4) {
-            if (split_out) {
-                *split_out = first_line;
-            }
-            return length - start;
-        }
-        ++start;
-    }
-}
-
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
 
 /* The splash is the logo as it was drawn — mark, wordmark and tagline in one
@@ -784,10 +767,10 @@ bool seedtool_render_qr(const char* title, const char* text)
     return draw_qr(&qr, modules, title);
 }
 
-size_t seedtool_render_qr_alphanumeric_capacity(void)
+size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
 {
     size_t chars = 0;
-    while (qrcode_versionForAlphanumeric(ECC_LOW, (uint16_t)(chars + 1), QR_VERSION)) {
+    while (qrcode_versionForAlphanumeric(ECC_LOW, (uint16_t)(chars + 1), max_version)) {
         ++chars;
     }
     return chars;

@@ -29,6 +29,14 @@ typedef enum {
     SEEDTOOL_D20,
     SEEDTOOL_COIN,
     SEEDTOOL_CARDS,
+    /* Same 52-card deck as SEEDTOOL_CARDS, but drawn with replacement: a
+     * card is returned and the deck reshuffled before the next draw, rather
+     * than set aside. A without-replacement deck tops out at log2(52!) -
+     * about 225.6 bits, less than a 24-word mnemonic needs even drawing
+     * every card - so 24 words uses this instead, at a genuine 52-sided-die
+     * shape (see dice_source in seedtool_core.c), never offered as its own
+     * top-level entropy source. */
+    SEEDTOOL_CARDS_REPLACE,
 } seedtool_source_t;
 
 typedef enum {
@@ -58,14 +66,18 @@ size_t seedtool_required_events(seedtool_source_t source, size_t words);
  * a dice roll run against, not to gate the hash itself. */
 size_t seedtool_min_entropy_bits(size_t words);
 
-/* Shannon's entropy, in bits, of the D6/D20 face distribution in
- * `values[0..values_len)`, and whether consecutive rolls look patterned (an
- * arithmetic run such as 1,2,3,4,5,6,1,2,3,...) rather than random. Both are
- * pure functions of the values already entered: they are a UI quality signal
- * only and never reach seedtool_generate, which remains a function of the
- * transcript alone. EINVAL for any source other than SEEDTOOL_D6/SEEDTOOL_D20.
- * Adapted from Krux's dice-roll entropy screen
- * (github.com/selfcustody/krux, src/krux/pages/new_mnemonic/dice_rolls.py). */
+/* Shannon's entropy, in bits, of the D6/D20/coin/with-replacement-card face
+ * distribution in `values[0..values_len)` (a coin flip is a two-sided die
+ * and a with-replacement card draw a 52-sided one, both 1-indexed like
+ * every source here - not the 0/1 or 0..51 seedtool_transcript stores), and
+ * whether consecutive rolls look patterned (an arithmetic run such as
+ * 1,2,3,4,5,6,1,2,3,...) rather than random. Both are pure functions of the
+ * values already entered: they are a UI quality signal only and never reach
+ * seedtool_generate, which remains a function of the transcript alone.
+ * EINVAL for SEEDTOOL_CARDS (without replacement), which is not a die - see
+ * seedtool_card_entropy_bits/seedtool_card_pattern_detected. Adapted from
+ * Krux's dice-roll entropy screen (github.com/selfcustody/krux,
+ * src/krux/pages/new_mnemonic/dice_rolls.py). */
 seedtool_result_t seedtool_dice_entropy_bits(
     seedtool_source_t source, const uint8_t* values, size_t values_len, int* bits_out);
 seedtool_result_t seedtool_dice_pattern_detected(
@@ -82,6 +94,19 @@ seedtool_result_t seedtool_dice_pattern_detected(
  * (worst case, D20, is otherwise flagged on almost every random run). Returns
  * 0.0 for a non-dice source. */
 double seedtool_dice_entropy_bias_bits(seedtool_source_t source);
+
+/* Cards are drawn without replacement, so unlike a die's distribution their
+ * information content is exact rather than statistically estimated: there
+ * are exactly 52!/(52-drawn_count)! equally likely ordered draws of that
+ * length, so seedtool_card_entropy_bits returns log2 of that count directly
+ * - no Miller-Madow correction, since nothing here is being estimated from a
+ * sample. EINVAL if drawn_count exceeds the deck. seedtool_card_pattern_detected
+ * checks each draw's rank alone (ignoring suit) for the same kind of
+ * arithmetic-run pattern seedtool_dice_pattern_detected looks for; both are a
+ * UI quality signal only, exactly like their dice counterparts. */
+seedtool_result_t seedtool_card_entropy_bits(size_t drawn_count, int* bits_out);
+seedtool_result_t seedtool_card_pattern_detected(
+    const uint8_t* values, size_t values_len, bool* detected_out);
 
 /* The canonical transcript of the first `values_len` events. Callable with a
  * prefix of a run: what it writes is byte for byte the start of what the whole

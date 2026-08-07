@@ -250,10 +250,11 @@ static bool word_numbers_round_trip_is_sound(void)
  * last glyph that fits; nothing here is transcribed, but a silently shortened
  * label still misnames what the buttons are about to do. */
 static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
-    "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "Create Seed", "Restore Seed",
-    "Complete Checksum", "About / Safety", "Reboot", "11 words + 7 coins", "23 words + 3 coins", "No passphrase",
-    "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words", "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers",
-    "Backup", "Stackbit 1248", "Compact SeedQR", "Simple grid", "Physical layout" };
+    "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "New Seed", "From entropy",
+    "Restore Seed", "Complete checksum", "About", "Settings", "Reboot", "11 words + 7 coins", "23 words + 3 coins",
+    "No passphrase", "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words",
+    "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers", "Plain text", "Backup",
+    "Stackbit 1248", "Compact SeedQR", "Simple grid", "Physical layout" };
 #define MENU_LABEL_COUNT (sizeof(menu_labels) / sizeof(menu_labels[0]))
 
 static bool labels_fit_a_row(void)
@@ -313,15 +314,23 @@ static bool list_viewport_is_sound(void)
  * Checked for every prefix length of every source. */
 static bool partial_transcripts_are_prefixes(void)
 {
-    static const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS };
-    static const uint8_t limits[] = { 6, 20, 1, 51 };
-    for (size_t s = 0; s < 4; ++s) {
+    static const seedtool_source_t sources[]
+        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
+    static const uint8_t limits[] = { 6, 20, 1, 51, 51 };
+    for (size_t s = 0; s < 5; ++s) {
         uint8_t values[52];
-        const size_t count = sources[s] == SEEDTOOL_CARDS ? 25 : 40;
+        const size_t count = sources[s] == SEEDTOOL_CARDS ? 25 : sources[s] == SEEDTOOL_CARDS_REPLACE ? 48 : 40;
         for (size_t i = 0; i < count; ++i) {
-            values[i] = sources[s] == SEEDTOOL_CARDS
-                ? (uint8_t)(i * 2 + 1)
-                : (uint8_t)((sources[s] == SEEDTOOL_COIN ? 0 : 1) + (i * 7 + 3) % limits[s]);
+            /* Deliberately repeats (only 5 distinct values across 48 draws):
+             * unlike SEEDTOOL_CARDS, a repeat here must be accepted, not
+             * rejected as a data-integrity error. */
+            if (sources[s] == SEEDTOOL_CARDS_REPLACE) {
+                values[i] = (uint8_t)(i % 5);
+            } else if (sources[s] == SEEDTOOL_CARDS) {
+                values[i] = (uint8_t)(i * 2 + 1);
+            } else {
+                values[i] = (uint8_t)((sources[s] == SEEDTOOL_COIN ? 0 : 1) + (i * 7 + 3) % limits[s]);
+            }
         }
         char whole[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
         if (seedtool_transcript(sources[s], values, count, whole, sizeof(whole)) != SEEDTOOL_OK) {
@@ -404,9 +413,70 @@ static bool dice_quality_is_sound(void)
         return false;
     }
 
-    /* Defined only for D6/D20. */
-    const uint8_t coin[2] = { 0, 1 };
-    return seedtool_dice_entropy_bits(SEEDTOOL_COIN, coin, sizeof(coin), &bits) == SEEDTOOL_EINVAL;
+    /* A coin is a two-sided die, 1-indexed like every other source here -
+     * not the 0/1 seedtool_transcript stores. All-heads: no information. */
+    const uint8_t coin_all_heads[10] = { 2, 2, 2, 2, 2, 2, 2, 2, 2, 2 };
+    if (seedtool_dice_entropy_bits(SEEDTOOL_COIN, coin_all_heads, sizeof(coin_all_heads), &bits) != SEEDTOOL_OK
+        || bits != 0) {
+        return false;
+    }
+    if (seedtool_dice_pattern_detected(SEEDTOOL_COIN, coin_all_heads, sizeof(coin_all_heads), &pattern) != SEEDTOOL_OK
+        || !pattern) {
+        return false;
+    }
+
+    /* Cards are not a die - see card_quality_is_sound below. */
+    const uint8_t card = 0;
+    return seedtool_dice_entropy_bits(SEEDTOOL_CARDS, &card, 1, &bits) == SEEDTOOL_EINVAL;
+}
+
+/* Vectors for the live card-draw quality readout. Bits are exact (see
+ * seedtool_card_entropy_bits' doc comment), not estimated, so this checks
+ * boundaries and monotonicity rather than restating the log2 formula the
+ * function itself computes - a check on its loop/off-by-one behavior, not a
+ * tautology. */
+static bool card_quality_is_sound(void)
+{
+    int bits = -1;
+    if (seedtool_card_entropy_bits(0, &bits) != SEEDTOOL_OK || bits != 0) {
+        return false;
+    }
+    /* The required draw count for a 12-word seed (seedtool_required_events)
+     * must clear the 128-bit minimum by construction - nothing here is
+     * estimated, so there is no room for doubt the way a dice run has. */
+    if (seedtool_card_entropy_bits(25, &bits) != SEEDTOOL_OK || bits < (int)seedtool_min_entropy_bits(12)) {
+        return false;
+    }
+    /* Non-decreasing over the whole deck: every further card at least does
+     * not remove information, with equality only ever possible at the very
+     * last card, which is fully determined by the other 51 and so adds
+     * exactly zero. */
+    int previous = 0;
+    for (size_t drawn = 1; drawn <= 52; ++drawn) {
+        if (seedtool_card_entropy_bits(drawn, &bits) != SEEDTOOL_OK || bits < previous) {
+            return false;
+        }
+        previous = bits;
+    }
+    if (seedtool_card_entropy_bits(53, &bits) != SEEDTOOL_EINVAL) {
+        return false;
+    }
+
+    /* A fresh, unshuffled deck read off in order: rank climbs 0..12 within
+     * each suit before resetting, the same "counting through the faces"
+     * shape seedtool_dice_pattern_detected catches for dice. */
+    uint8_t ascending[25];
+    for (size_t i = 0; i < sizeof(ascending); ++i) {
+        ascending[i] = (uint8_t)i;
+    }
+    bool pattern = false;
+    if (seedtool_card_pattern_detected(ascending, sizeof(ascending), &pattern) != SEEDTOOL_OK || !pattern) {
+        return false;
+    }
+
+    /* Too few draws to judge a pattern either way. */
+    const uint8_t short_run[9] = { 0, 1, 2, 3, 4, 5, 6, 7, 8 };
+    return seedtool_card_pattern_detected(short_run, sizeof(short_run), &pattern) == SEEDTOOL_OK && !pattern;
 }
 
 /* xorshift32: a tiny, deterministic, portable PRNG (not libc rand(), which is
@@ -433,8 +503,16 @@ static uint32_t xorshift32(uint32_t* state)
  * seedtool_app.c, since it is UI-gate policy, not core behaviour. */
 static bool dice_entropy_false_positive_rate_is_bounded(void)
 {
-    const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20 };
-    const size_t sides[] = { 6, 20 };
+    /* Coin included at its actual required count (128/256, exactly the
+     * theoretical minimum - no cushion past it the way dice's roll counts
+     * carry, a known, accepted trade-off): this is the empirical check that
+     * its false-positive rate still lands under the same bound, not just
+     * the back-of-envelope estimate that motivated accepting it. Same for
+     * SEEDTOOL_CARDS_REPLACE at its chosen 48 draws (12-word is skipped
+     * below - seedtool_required_events returns 0 for it, since 24-word
+     * SEEDTOOL_CARDS already covers that case without needing replacement). */
+    const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS_REPLACE };
+    const size_t sides[] = { 6, 20, 2, 52 };
     const size_t words[] = { 12, 24 };
     const int dice_entropy_tolerance = 4; /* DICE_ENTROPY_TOLERANCE in main/seedtool_app.c */
     const size_t trials = 500;
@@ -445,10 +523,13 @@ static bool dice_entropy_false_positive_rate_is_bounded(void)
         const double bias = seedtool_dice_entropy_bias_bits(sources[s]);
         for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w) {
             const size_t required = seedtool_required_events(sources[s], words[w]);
+            if (!required) {
+                continue; /* this source/word-count combination is not offered */
+            }
             const size_t min_bits = seedtool_min_entropy_bits(words[w]);
             size_t flagged = 0;
             for (size_t t = 0; t < trials; ++t) {
-                uint8_t values[128];
+                uint8_t values[256];
                 for (size_t i = 0; i < required; ++i) {
                     values[i] = (uint8_t)(xorshift32(&state) % sides[s]) + 1;
                 }
@@ -738,7 +819,8 @@ static bool bbqr_parts_are_sound(void)
                             "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4"
                             "ZeZXYVUhLv1VMrjPC7PW6V";
     const size_t len = strlen(payload);
-    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity();
+    const uint8_t bbqr_frame_max_version = 3; /* BBQR_FRAME_MAX_VERSION in main/seedtool_app.c */
+    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity(bbqr_frame_max_version);
     const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
     if (!parts) {
         return false;
@@ -849,6 +931,10 @@ static int self_test(void)
     }
     if (!dice_quality_is_sound()) {
         fputs("Origo dice entropy quality self-test failed\n", stderr);
+        return 1;
+    }
+    if (!card_quality_is_sound()) {
+        fputs("Origo card entropy quality self-test failed\n", stderr);
         return 1;
     }
     if (!dice_entropy_false_positive_rate_is_bounded()) {

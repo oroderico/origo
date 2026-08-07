@@ -56,11 +56,18 @@ only later would mean checking a string the device then rewrites.
 | D6 | 50 rolls | 99 rolls | digits concatenated, e.g. `123456` |
 | D20 | 30 rolls | 60 rolls | decimal rolls joined by `-`, e.g. `1-20-7` |
 | Coins | 128 flips | 256 flips | Heads=`1`, Tails=`0`, concatenated |
-| Cards | first 25 distinct cards | unsupported | `cards-v1:` plus rank/suit codes |
+| Cards | first 25 distinct cards | first 48 cards, with replacement | `cards-v1:` plus rank/suit codes |
 
 Card ranks are `A23456789TJQK`; suits are `CDHS`. The canonical deck order is
-`AC..KC`, `AD..KD`, `AH..KH`, `AS..KS`. Only the order of the first 25 distinct
-cards is used.
+`AC..KC`, `AD..KD`, `AH..KH`, `AS..KS`. 12-word draws the first 25 distinct
+cards from one deck; without replacement, a single 52-card deck tops out
+around `log2(52!) ≈ 225.6` bits, short of a 24-word mnemonic's 256 even
+drawing every card, and the 52nd card would add nothing anyway once the
+other 51 are known. 24 words instead returns each card and reshuffles before
+drawing the next, so a repeat is expected and valid there - the encoding is
+otherwise identical, just longer and, being drawn with replacement, graded
+the same estimated way as dice and coins (see below) rather than the exact
+count 12-word cards uses.
 
 Turning that transcript into words is three mechanical steps, always in this
 order, and nothing else touches them: no RNG, no timestamp, no per-device
@@ -93,23 +100,39 @@ literal randomness this path needs, and they must be exactly as many bits as
 are missing — one too few or too many and the call is rejected outright rather
 than guessing.
 
-Neither path ever reads the device RNG. The dice-roll quality bar described
+Neither path ever reads the device RNG. The entropy quality bar described
 next grades what has already been typed; it cannot add or remove a single bit
 from what gets hashed.
 
-A D6 or D20 run opens on a screen naming how many rolls it needs and what the
-bar below is about, with that bar already in place but empty. While rolls are
-being keyed in, its two segments track rolls collected and Shannon's entropy
-of them, each against its minimum, and the entropy segment turns red if
-consecutive rolls look patterned — an arithmetic run such as
-`1,2,3,4,5,6,1,2,3,...` rather than a real roll. Once all the required rolls
-are in, poor entropy or a detected pattern is confirmed before the mnemonic is
-generated; declining any of these screens steps back to redo the last roll.
-With neither problem, the bar's outline turns green on one last "Entropy
-looks good" screen before generating. All of this is a pure function of the
-rolls already typed: a UI quality signal only, never an input to the
-transcript that gets hashed. Adapted from Krux's dice-roll entropy screen
-(github.com/selfcustody/krux).
+Every source's run opens on a screen naming how many rolls, flips or cards it
+needs and what the bar below is about, with that bar already in place but
+empty. While entries are being keyed in, its two segments track draws
+collected and bits so far, each against the mnemonic's minimum, and the
+entropy segment turns red if the run looks patterned — an arithmetic run such
+as `1,2,3,4,5,6,1,2,3,...` for dice and coins, or a fresh unshuffled deck read
+straight through for cards, rather than a real draw. Once all the required
+entries are in, poor entropy or a detected pattern is confirmed before the
+mnemonic is generated; declining any of these screens steps back to redo the
+last entry. With neither problem, the bar's outline turns green on one last
+"Entropy looks good" screen before generating. All of this is a pure function
+of what's already been entered: a UI quality signal only, never an input to
+the transcript that gets hashed.
+
+D6, D20 and coin flips share the same plug-in Shannon-entropy estimator — a
+coin is read as a two-sided die for this purpose only, not the 0/1 its own
+transcript encoding uses, and (unlike dice) is collected at exactly the
+theoretical minimum with no cushion, so an honest run has a small (empirically
+under 10%, checked by a self-test) chance of tripping the "poor entropy"
+screen once on the way to "proceed anyway". 12-word cards are drawn without
+replacement, so their bits are exact rather than estimated —
+`log2(52!/(52-drawn)!)`, the same number regardless of which cards came up —
+and comfortably clear the 128-bit minimum by the 25th draw on their own; only
+their pattern check (each draw's rank, ignoring suit) can ever flag a card
+run. 24-word cards, drawn with replacement, go back to being an estimate —
+graded as a genuine 52-sided die, the same plug-in estimator and the same
+small (empirically under 1%, at the 48 draws that mode asks for) chance of
+an honest run tripping "poor entropy" once. Adapted from Krux's dice-roll
+entropy screen (github.com/selfcustody/krux).
 
 Checksum completion consumes 11 BIP39 words plus exactly 7 coin flips, or 23
 words plus exactly 3 flips. Those flips are the missing entropy bits and lead
@@ -160,6 +183,14 @@ Heads, right picks Tails, one press per flip. With a run as long as 128 or 256
 flips, halving the presses per flip halves the whole entry. Both buttons
 together undoes the last flip, since there is no longer a neutral carousel
 position to step onto for that.
+
+A card is picked in two carousels rather than one: suit first, then rank
+within it. Scanning the whole deck from `AC` for every one of the 25 cards a
+seed needs averages around 26 presses per card; splitting a 4-way suit
+carousel from a 13-way rank carousel cuts that to around 8.5. Stepping back
+off the rank carousel returns to the suit carousel for the same card, one
+stage back as everywhere else; only stepping back off the suit carousel
+undoes the card before it.
 
 Three gestures is all two buttons afford, and all three are spoken for, so going
 back cannot be a button: it is a place on the screen. Every screen has one, and
@@ -289,7 +320,7 @@ warns as sternly as the stakes call for and asks for a deliberate choice every
 time rather than trusting a warning read once.
 
 From the wallet viewer's `Backup` menu, a generated or restored mnemonic — the
-same screen both `Create Seed` and `Restore Seed` end on — can be shown two more
+same screen `New Seed` and `Restore Seed` both end on — can be shown two more
 ways, each read-only and each requiring its own acknowledgement before anything
 is drawn.
 

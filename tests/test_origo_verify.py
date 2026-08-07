@@ -100,6 +100,65 @@ class SeedToolVerifierTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "distinct"):
             verify.transcript("cards", ["AC"] * 25, 25)
 
+    def test_coin_is_a_two_sided_die(self):
+        # A coin flip is read as a two-sided die, 1/2 rather than the 0/1 the
+        # transcript itself uses - coin_faces does that remap.
+        self.assertEqual(verify.coin_faces(["H"] * 10), [2] * 10)
+        self.assertEqual(verify.coin_faces(["tails", "Heads", "0", "1"]), [1, 2, 1, 2])
+        with self.assertRaisesRegex(ValueError, "H/T"):
+            verify.coin_faces(["X"])
+        # All-heads carries no information, same shape as an all-one-face die.
+        self.assertEqual(verify.shannon_bits("coin", verify.coin_faces(["H"] * 128)), 0)
+        self.assertTrue(verify.pattern_detected("coin", verify.coin_faces(["H"] * 128)))
+        # An alternating run is the coin equivalent of counting through a
+        # die's faces: maximum entropy by count, but entirely predictable.
+        alternating = verify.coin_faces(["H", "T"] * 64)
+        self.assertEqual(verify.shannon_bits("coin", alternating), 128)
+        self.assertTrue(verify.pattern_detected("coin", alternating))
+
+    def test_card_entropy_bits_is_exact_not_estimated(self):
+        # Cards are drawn without replacement, so this is exact rather than
+        # estimated: no rolls needed to reach zero, and no upper bound but
+        # the deck itself.
+        self.assertEqual(verify.card_entropy_bits(0), 0)
+        # The required draw count for a 12-word seed clears the 128-bit
+        # minimum by construction.
+        self.assertGreaterEqual(verify.card_entropy_bits(25), 128)
+        # Non-decreasing over the whole deck; the very last card adds
+        # nothing, since the other 51 already determine it.
+        bits = [verify.card_entropy_bits(n) for n in range(53)]
+        self.assertEqual(bits, sorted(bits))
+        with self.assertRaisesRegex(ValueError, "52"):
+            verify.card_entropy_bits(53)
+
+    def test_card_pattern_detected_on_an_arithmetic_run(self):
+        # A fresh, unshuffled deck read off in order: rank climbs 0..12
+        # within each suit before resetting, the card equivalent of counting
+        # through a die's faces.
+        cards = [rank + suit for suit in "CDHS" for rank in "A23456789TJQK"][:25]
+        self.assertTrue(verify.card_pattern_detected(verify.card_values(cards)))
+        # A full, honestly shuffled draw is not flagged. Ten cards, right at
+        # the pattern check's minimum sample size, is too easily unlucky by
+        # chance alone (the same small-sample noise PATTERN_MIN_ROLLS exists
+        # to guard against for dice) to make a reliable test vector.
+        shuffled = ["TC", "JD", "KD", "4C", "9D", "KH", "4D", "AS", "7D", "QC", "8S", "QD", "8H", "4H", "6H", "5S",
+            "5C", "3H", "JC", "AH", "JH", "AC", "6S", "6D", "4S"]
+        self.assertFalse(verify.card_pattern_detected(verify.card_values(shuffled)))
+        # Too few draws to judge either way.
+        self.assertFalse(verify.card_pattern_detected(verify.card_values(cards[:9])))
+
+    def test_cards_replace_allows_repeats_and_is_a_52_sided_die(self):
+        # Unlike "cards", a repeat is valid here: the card is returned and
+        # the deck reshuffled before every draw, not set aside.
+        self.assertTrue(verify.transcript("cards-replace", ["AC"] * 48, 48).startswith("cards-v1:"))
+        # Graded the same way "coin" already reuses the dice machinery for a
+        # two-sided die - here a genuine 52-sided one.
+        faces = [v + 1 for v in verify.card_values(["AC"] * 48)]
+        self.assertEqual(verify.shannon_bits("cards-replace", faces), 0)
+        self.assertTrue(verify.pattern_detected("cards-replace", faces))
+        with self.assertRaisesRegex(ValueError, "1..52"):
+            verify.shannon_bits("cards-replace", [0])
+
     def test_checksum_completion_all_zero(self):
         prefix = " ".join(["abandon"] * 11)
         wl = verify.words()

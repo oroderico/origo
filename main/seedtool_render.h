@@ -65,16 +65,6 @@ size_t seedtool_render_fit_row(const char* text);
  * transcript is read from its end, where what was just entered is. */
 size_t seedtool_render_fit_tail(const char* text);
 
-/* Same idea as seedtool_render_fit_tail, spread over two body lines instead of
- * one: whichever trailing run of `text` wraps into exactly two lines rather
- * than one or three. `split_out`, if not NULL, is set to how many of those
- * characters belong on the first of the two lines — the rest go on the
- * second. Used where a caller wants passively more of a running transcript's
- * tail on screen than one line holds, without the interactive paging
- * seedtool_render_fit's callers use for a value that has already stopped
- * growing. */
-size_t seedtool_render_fit_tail2(const char* text, size_t* split_out);
-
 /* First visible row so that `selected` is on screen, scrolling as little as
  * possible away from `previous_top`. A pure function of its arguments: the
  * entry path is exactly where the device RNG must not reach, and where the list
@@ -114,11 +104,13 @@ size_t seedtool_layout_center(const char* layout);
 bool seedtool_render_qr(const char* title, const char* text);
 
 /* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
- * fit in one frame at this file's QR_VERSION and ECC_LOW -- the same version
- * and error-correction level every other QR this firmware draws already
- * commits to. What a multi-part QR protocol such as BBQr needs to know to
- * decide how many frames a payload needs. */
-size_t seedtool_render_qr_alphanumeric_capacity(void);
+ * fit in one frame at `max_version` and ECC_LOW -- the same error-correction
+ * level every other QR this firmware draws already commits to. What a
+ * multi-part QR protocol such as BBQr needs to know to decide how many
+ * frames a payload needs; capping `max_version` below this file's QR_VERSION
+ * trades more, smaller frames for a coarser, more legible module grid on
+ * each one. */
+size_t seedtool_render_qr_alphanumeric_capacity(uint8_t max_version);
 
 /* Same as seedtool_render_qr, but for raw bytes rather than a null-terminated
  * string: entropy can contain embedded 0x00 bytes, which qrcode_initText's

@@ -49,6 +49,14 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
         return words == 12 ? 128 : 256;
     case SEEDTOOL_CARDS:
         return words == 12 ? 25 : 0;
+    case SEEDTOOL_CARDS_REPLACE:
+        /* Monte-Carlo checked (host/origo_simulator.c's
+         * dice_entropy_false_positive_rate_is_bounded): 44 draws flags a
+         * genuinely random run 87% of the time, 46 still 19%; 48 is the
+         * smallest count under the same bound every other source here
+         * uses. Not offered for 12 words - SEEDTOOL_CARDS already covers
+         * that case, without needing replacement. */
+        return words == 24 ? 48 : 0;
     default:
         return 0;
     }
@@ -56,6 +64,17 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
 
 size_t seedtool_min_entropy_bits(const size_t words) { return valid_words(words) ? (words == 12 ? 128 : 256) : 0; }
 
+/* The largest side count any recognised dice_source() can return
+ * (SEEDTOOL_CARDS_REPLACE, a full 52-card draw with replacement) - the
+ * fixed-size buffers below are sized off this one constant so they can
+ * never fall out of sync with what dice_source() actually hands out. */
+#define DICE_SOURCE_MAX_SIDES 52
+
+/* D6, D20, a coin flip, or a with-replacement card draw, each read as an
+ * N-sided die: the same plug-in Shannon estimator and pattern check apply
+ * unmodified to any of them. SEEDTOOL_CARDS (without replacement) is not a
+ * die - its entropy is exact rather than estimated, see
+ * seedtool_card_entropy_bits - and is deliberately not recognised here. */
 static bool dice_source(const seedtool_source_t source, size_t* sides)
 {
     if (source == SEEDTOOL_D6) {
@@ -64,6 +83,14 @@ static bool dice_source(const seedtool_source_t source, size_t* sides)
     }
     if (source == SEEDTOOL_D20) {
         *sides = 20;
+        return true;
+    }
+    if (source == SEEDTOOL_COIN) {
+        *sides = 2;
+        return true;
+    }
+    if (source == SEEDTOOL_CARDS_REPLACE) {
+        *sides = DICE_SOURCE_MAX_SIDES;
         return true;
     }
     return false;
@@ -97,7 +124,7 @@ seedtool_result_t seedtool_dice_entropy_bits(
     if (!values) {
         return SEEDTOOL_EINVAL;
     }
-    unsigned counts[20] = { 0 };
+    unsigned counts[DICE_SOURCE_MAX_SIDES] = { 0 };
     for (size_t i = 0; i < values_len; ++i) {
         if (values[i] < 1 || values[i] > sides) {
             return SEEDTOOL_ERANGE;
@@ -124,6 +151,28 @@ double seedtool_dice_entropy_bias_bits(const seedtool_source_t source)
  * that maximum, to call the run patterned. Krux's PATTERN_DETECT_TOLERANCE. */
 #define PATTERN_DETECT_TOLERANCE 30.0
 
+/* Shared by seedtool_dice_pattern_detected and seedtool_card_pattern_detected:
+ * consecutive differences of a `sides`-valued 1-indexed sequence range over
+ * -(sides-1)..(sides-1), and an operator lazily counting up (or down) through
+ * the faces leaves a run of derivatives that all land on the same value or
+ * two, which collapses this distribution's entropy far below its maximum.
+ * `sides` must be at most DICE_SOURCE_MAX_SIDES (12-word cards call this
+ * with rank alone, 13 sides, not the full 52-card value). */
+static bool derivative_pattern_detected(const uint8_t* values_1indexed, const size_t values_len, const size_t sides)
+{
+    const size_t derivative_range = 2 * sides - 1;
+    const size_t derivatives = values_len - 1;
+    unsigned counts[2 * DICE_SOURCE_MAX_SIDES - 1] = { 0 };
+    for (size_t i = 1; i < values_len; ++i) {
+        const int derivative = (int)values_1indexed[i] - (int)values_1indexed[i - 1];
+        ++counts[(size_t)(derivative + (int)sides - 1)];
+    }
+    const double entropy = shannon_bits_per_symbol(counts, derivative_range, derivatives);
+    const double max_entropy = log2((double)derivative_range);
+    const double normalized = max_entropy > 0.0 ? (max_entropy - entropy) / max_entropy * 100.0 : 0.0;
+    return normalized > PATTERN_DETECT_TOLERANCE;
+}
+
 seedtool_result_t seedtool_dice_pattern_detected(
     const seedtool_source_t source, const uint8_t* values, const size_t values_len, bool* detected_out)
 {
@@ -143,21 +192,56 @@ seedtool_result_t seedtool_dice_pattern_detected(
             return SEEDTOOL_ERANGE;
         }
     }
-    /* Consecutive differences range over -(sides-1)..(sides-1): an operator
-     * lazily counting up (or down) the die's faces leaves a run of derivatives
-     * that all land on the same value or two, which collapses this
-     * distribution's entropy far below its maximum. */
-    const size_t derivative_range = 2 * sides - 1;
-    const size_t derivatives = values_len - 1;
-    unsigned counts[2 * 20 - 1] = { 0 };
-    for (size_t i = 1; i < values_len; ++i) {
-        const int derivative = (int)values[i] - (int)values[i - 1];
-        ++counts[(size_t)(derivative + (int)sides - 1)];
+    *detected_out = derivative_pattern_detected(values, values_len, sides);
+    return SEEDTOOL_OK;
+}
+
+/* A card draw is without replacement, so unlike a die's distribution its
+ * exact information content is known rather than estimated: there are
+ * exactly 52!/(52-drawn_count)! equally likely ordered draws of that length,
+ * so specifying which one occurred conveys log2 of that count, full stop -
+ * no Miller-Madow correction, because there is nothing here being estimated
+ * from a sample. */
+seedtool_result_t seedtool_card_entropy_bits(const size_t drawn_count, int* bits_out)
+{
+    if (!bits_out || drawn_count > 52) {
+        return SEEDTOOL_EINVAL;
     }
-    const double entropy = shannon_bits_per_symbol(counts, derivative_range, derivatives);
-    const double max_entropy = log2((double)derivative_range);
-    const double normalized = max_entropy > 0.0 ? (max_entropy - entropy) / max_entropy * 100.0 : 0.0;
-    *detected_out = normalized > PATTERN_DETECT_TOLERANCE;
+    double bits = 0.0;
+    for (size_t i = 0; i < drawn_count; ++i) {
+        bits += log2((double)(52 - i));
+    }
+    *bits_out = (int)bits;
+    return SEEDTOOL_OK;
+}
+
+/* Cards are not a die, so this does not go through dice_source/derivative_
+ * pattern_detected's sides=52 - suit carries real information (it is part
+ * of what the deterministic bits above count), but is not itself vulnerable
+ * to the "counting through the faces" pattern this check exists to catch;
+ * rank is. Ranks are re-indexed 1..13 for derivative_pattern_detected's
+ * 1-indexed contract. */
+seedtool_result_t seedtool_card_pattern_detected(
+    const uint8_t* values, const size_t values_len, bool* detected_out)
+{
+    if (!detected_out) {
+        return SEEDTOOL_EINVAL;
+    }
+    *detected_out = false;
+    if (values_len < PATTERN_MIN_ROLLS) {
+        return SEEDTOOL_OK;
+    }
+    if (!values || values_len > 52) {
+        return SEEDTOOL_EINVAL;
+    }
+    uint8_t ranks[52];
+    for (size_t i = 0; i < values_len; ++i) {
+        if (values[i] >= 52) {
+            return SEEDTOOL_ERANGE;
+        }
+        ranks[i] = (uint8_t)(values[i] % 13 + 1);
+    }
+    *detected_out = derivative_pattern_detected(ranks, values_len, 13);
     return SEEDTOOL_OK;
 }
 
@@ -182,7 +266,8 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
     bool seen[52] = { false };
     output[0] = '\0';
 
-    if (source == SEEDTOOL_CARDS && append(output, output_len, &used, "cards-v1:") != SEEDTOOL_OK) {
+    const bool is_cards = source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE;
+    if (is_cards && append(output, output_len, &used, "cards-v1:") != SEEDTOOL_OK) {
         return SEEDTOOL_ENOSPACE;
     }
     for (size_t i = 0; i < values_len; ++i) {
@@ -213,6 +298,16 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
                 return SEEDTOOL_ERANGE;
             }
             seen[values[i]] = true;
+            item[0] = ranks[values[i] % 13];
+            item[1] = suits[values[i] / 13];
+            item[2] = '\0';
+            break;
+        case SEEDTOOL_CARDS_REPLACE:
+            /* Drawn with replacement: unlike SEEDTOOL_CARDS, a repeat is
+             * expected and valid, not a data-integrity error. */
+            if (values[i] >= 52) {
+                return SEEDTOOL_ERANGE;
+            }
             item[0] = ranks[values[i] % 13];
             item[1] = suits[values[i] / 13];
             item[2] = '\0';

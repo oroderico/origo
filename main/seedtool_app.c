@@ -331,20 +331,13 @@ static int enter_value(const char* title, const unsigned position, const unsigne
  * selects — and every path that reaches this screen already went through at
  * least one chord-gated menu first, so chord_learned is always true by then
  * anyway. */
-static int enter_coin_flip(
-    const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history)
+static int enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
+    const char* history, const seedtool_progress_t* progress)
 {
     char heading[48];
     (void)snprintf(heading, sizeof(heading), "%s  %u/%u", title, position, total);
-    size_t split = 0;
-    const size_t tail = seedtool_render_fit_tail2(history, &split);
-    const char* const shown = history + strlen(history) - tail;
-    char tail1[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1], tail2[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-    memcpy(tail1, shown, split);
-    tail1[split] = '\0';
-    (void)snprintf(tail2, sizeof(tail2), "%s", shown + split);
     for (;;) {
-        screen_text3(heading, "Heads (up)   Tails (down)", tail1, tail2, NULL);
+        seedtool_display_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
         switch (wait_key()) {
         case KEY_SELECT:
             return 0;
@@ -362,11 +355,67 @@ static int enter_coin_flip(
     }
 }
 
-static void format_card(const unsigned value, char* output, const size_t output_len)
+static const char CARD_RANKS[] = "A23456789TJQK";
+static const char* const CARD_SUIT_NAMES[4] = { "Clubs", "Diamonds", "Hearts", "Spades" };
+
+static void format_rank(const unsigned value, char* output, const size_t output_len)
 {
-    static const char ranks[] = "A23456789TJQK";
-    static const char suits[] = "CDHS";
-    (void)snprintf(output, output_len, "%c%c", ranks[value % 13], suits[value / 13]);
+    (void)snprintf(output, output_len, "%c", CARD_RANKS[value]);
+}
+
+static void format_suit(const unsigned value, char* output, const size_t output_len)
+{
+    (void)snprintf(output, output_len, "%s", CARD_SUIT_NAMES[value]);
+}
+
+/* A card is picked in two carousels, suit then rank within it, rather than
+ * one 52-way ring: scanning the whole deck from `AC` every time averages
+ * about 26 presses per card across the 25 a seed needs, where 4-way then
+ * 13-way averages about 8.5. Backing out of the rank step returns to the
+ * suit step - one stage, matching every other back gesture in the app -
+ * and only backing out of the suit step undoes the card itself, which the
+ * caller already handles exactly as it did for the single-carousel pick
+ * this replaces (same 1/back/timeout contract as enter_value). */
+/* `available`, like `enter_value`'s own `allowed`, is optional: NULL means
+ * every suit and rank is reachable, the with-replacement draw's case, where
+ * nothing is ever excluded. */
+static int enter_card(const unsigned position, const unsigned total, unsigned* value, const bool* available,
+    const char* history, const seedtool_progress_t* progress)
+{
+    for (;;) {
+        bool suit_allowed[4];
+        for (unsigned s = 0; s < 4; ++s) {
+            suit_allowed[s] = !available;
+            for (unsigned r = 0; available && r < 13; ++r) {
+                if (available[s * 13 + r]) {
+                    suit_allowed[s] = true;
+                    break;
+                }
+            }
+        }
+        unsigned suit = 0;
+        const int suit_result
+            = enter_value("Suit", position, total, 0, 3, &suit, format_suit, suit_allowed, history, progress);
+        if (suit_result <= 0) {
+            return suit_result;
+        }
+
+        bool rank_allowed[13];
+        for (unsigned r = 0; r < 13; ++r) {
+            rank_allowed[r] = !available || available[suit * 13 + r];
+        }
+        unsigned rank = 0;
+        const int rank_result = enter_value(
+            CARD_SUIT_NAMES[suit], position, total, 0, 12, &rank, format_rank, rank_allowed, history, progress);
+        if (rank_result < 0) {
+            return -1;
+        }
+        if (rank_result == 0) {
+            continue;
+        }
+        *value = suit * 13 + rank;
+        return 1;
+    }
 }
 
 static void hexstr(const uint8_t* bytes, const size_t len, char* output)
@@ -453,18 +502,26 @@ static bool page_text(const char* title, const char* text)
  * same as a static QR would. */
 #define BBQR_FRAME_INTERVAL_MS 700
 
-/* Steps an account key too big for one QR (see seedtool_render.c's QR_VERSION
- * comment) through BBQr (github.com/coinkite/BBQr) parts, the same animated
- * multi-part convention other hardware wallets read with a camera. Krux's own
- * BBQr support (src/krux/bbqr.py, src/krux/qr.py FORMAT_BBQR) is the
- * reference this follows for the wire format; there is no deflate library
- * here to use its "Z" compressed encoding, so this always sends "2" (plain
- * base32). Returns the key that ended the animation, exactly what a single
+/* Each frame is capped well below this file's QR_VERSION so it draws at a
+ * coarser, more legible module grid on this display's 135px height: versions
+ * 4-6 all land on the same 3px modules, version 3 steps up to 4px, and 1-2
+ * to 5px but at roughly double the frame count (and cycling time) version 3
+ * needs for the account key -- 3 is the more legible-for-fewer-frames
+ * trade-off. */
+#define BBQR_FRAME_MAX_VERSION 3
+
+/* Steps an account key too big for one QR at BBQR_FRAME_MAX_VERSION through
+ * BBQr (github.com/coinkite/BBQr) parts, the same animated multi-part
+ * convention other hardware wallets read with a camera. Krux's own BBQr
+ * support (src/krux/bbqr.py, src/krux/qr.py FORMAT_BBQR) is the reference
+ * this follows for the wire format; there is no deflate library here to use
+ * its "Z" compressed encoding, so this always sends "2" (plain base32).
+ * Returns the key that ended the animation, exactly what a single
  * seedtool_display_qr call would have handed back. */
 static seedtool_key_t show_bbqr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
-    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity();
+    const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity(BBQR_FRAME_MAX_VERSION);
     const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
     if (!parts) {
         (void)acknowledge("Too long for a QR", title, "Read it as text instead");
@@ -505,16 +562,17 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
     }
 }
 
-/* A single account key's own QR, the same shape as show_address_qr below: no
- * carousel to switch to some other value, since the account key stands on its
- * own here. Falls back to show_bbqr's animation only when the key origin plus
- * key genuinely does not fit one static frame (see seedtool_render.c's
- * QR_VERSION comment) -- ordinarily it does, so this is a single still QR the
- * same way an address is. */
+/* A single account key's own QR: no carousel to switch to some other value,
+ * since the account key stands on its own here, but always shown through
+ * show_bbqr's animation rather than a single still frame the way an address
+ * (show_address_qr below) is -- the account key is long enough that a
+ * static frame needs this file's full QR_VERSION, a fine enough module grid
+ * on this display's 135px height to be worth the extra frames BBQR_FRAME_
+ * MAX_VERSION's coarser ones cost. */
 static void show_account_key_qr(const char* title, const char* value)
 {
     for (;;) {
-        const seedtool_key_t key = seedtool_display_qr(title, value) ? wait_key() : show_bbqr(title, value);
+        const seedtool_key_t key = show_bbqr(title, value);
         if (key != KEY_REDRAW) {
             return;
         }
@@ -1080,12 +1138,14 @@ static void export_seed_qr(const char* mnemonic)
 static void show_backup_menu(const char* mnemonic)
 {
     for (;;) {
-        const char* items[] = { "Stackbit 1248", "Compact SeedQR", "Back" };
-        const int selected = choose("Backup", items, 3, true);
-        if (selected < 0 || selected == 2) {
+        const char* items[] = { "Plain text", "Stackbit 1248", "Compact SeedQR", "Back" };
+        const int selected = choose("Backup", items, 4, true);
+        if (selected < 0 || selected == 3) {
             return;
         }
         if (selected == 0) {
+            (void)page_text("BIP39 mnemonic", mnemonic);
+        } else if (selected == 1) {
             show_stackbit(mnemonic);
         } else {
             export_seed_qr(mnemonic);
@@ -1141,24 +1201,53 @@ static void show_generated(seedtool_generated_t* generated)
     seedtool_zero(hash, sizeof(hash));
 }
 
-/* Live quality readout for a D6/D20 run in progress: rolls collected and
- * Shannon's entropy of them so far, each against its minimum. Adapted from
- * Krux's dice-roll entropy screen (github.com/selfcustody/krux,
- * src/krux/pages/new_mnemonic/dice_rolls.py) — a display of what has already
- * been typed, not an input to what gets hashed. */
-static seedtool_progress_t dice_progress(const seedtool_source_t source, const uint8_t* values, const size_t count,
+/* Bits collected so far and whether the run looks patterned, for any of the
+ * four sources - the one place that decides which source-appropriate method
+ * to use, so the live bar below and collect_entropy's end-of-run gate can
+ * never disagree. Cards drawn without replacement (SEEDTOOL_CARDS) have
+ * exact bits (seedtool_card_entropy_bits), not estimated, and carry no bias
+ * correction. Everything else here - D6/D20/coin, and a with-replacement
+ * card draw (SEEDTOOL_CARDS_REPLACE), a genuine 52-sided die - shares the
+ * same plug-in Shannon estimator; coin's 0/1 and card's 0..51 both become a
+ * 1-indexed face for this call only - a local copy, never the canonical
+ * values[] the transcript is built from - since seedtool_dice_entropy_bits
+ * expects every source it covers to be 1-indexed like D6/D20 already are. */
+static void entropy_quality(
+    const seedtool_source_t source, const uint8_t* values, const size_t count, int* bits_out, bool* pattern_out)
+{
+    if (source == SEEDTOOL_CARDS) {
+        (void)seedtool_card_entropy_bits(count, bits_out);
+        (void)seedtool_card_pattern_detected(values, count, pattern_out);
+        return;
+    }
+    uint8_t faces[256];
+    const uint8_t* faces_ptr = values;
+    if (source == SEEDTOOL_COIN || source == SEEDTOOL_CARDS_REPLACE) {
+        for (size_t i = 0; i < count; ++i) {
+            faces[i] = (uint8_t)(values[i] + 1);
+        }
+        faces_ptr = faces;
+    }
+    (void)seedtool_dice_entropy_bits(source, faces_ptr, count, bits_out);
+    (void)seedtool_dice_pattern_detected(source, faces_ptr, count, pattern_out);
+    /* Skipped at zero draws: there is no distribution yet to be biased. */
+    if (count) {
+        *bits_out += (int)lround(seedtool_dice_entropy_bias_bits(source));
+    }
+}
+
+/* Live quality readout for a run in progress: draws collected and bits so
+ * far, each against what the seed needs. Adapted from Krux's dice-roll
+ * entropy screen (github.com/selfcustody/krux,
+ * src/krux/pages/new_mnemonic/dice_rolls.py) and extended here to every
+ * source - a display of what has already been entered, not an input to what
+ * gets hashed. */
+static seedtool_progress_t entropy_progress(const seedtool_source_t source, const uint8_t* values, const size_t count,
     const size_t required, const size_t min_bits)
 {
     int bits = 0;
     bool pattern = false;
-    (void)seedtool_dice_entropy_bits(source, values, count, &bits);
-    (void)seedtool_dice_pattern_detected(source, values, count, &pattern);
-    /* Same bias correction the final gate in collect_entropy applies, so the
-     * live bar does not read as more pessimistic than the verdict it leads up
-     * to. Skipped at zero rolls: there is no distribution yet to be biased. */
-    if (count) {
-        bits += (int)lround(seedtool_dice_entropy_bias_bits(source));
-    }
+    entropy_quality(source, values, count, &bits, &pattern);
     const int capped_bits = (size_t)bits < min_bits ? bits : (int)min_bits;
     const seedtool_progress_t progress = {
         .rolls_pct = (int)(count * 100 / required),
@@ -1173,13 +1262,11 @@ static seedtool_progress_t dice_progress(const seedtool_source_t source, const u
  * produced, 0 when the user backed out of the first entry, -1 on timeout. */
 static int collect_entropy(const int source, const size_t words)
 {
-    static const char* const names[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
+    static const char* const names[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Cards" };
+    static const char* const nouns[] = { "rolls", "rolls", "flips", "cards", "cards" };
     const size_t required = seedtool_required_events((seedtool_source_t)source, words);
-    const unsigned min = source == SEEDTOOL_CARDS ? 0 : 1;
-    const unsigned max = source == SEEDTOOL_D6 ? 6 : source == SEEDTOOL_D20 ? 20 : 51;
-    const format_fn format = source == SEEDTOOL_CARDS ? format_card : NULL;
-    const bool is_dice = source == SEEDTOOL_D6 || source == SEEDTOOL_D20;
-    const size_t min_bits = is_dice ? seedtool_min_entropy_bits(words) : 0;
+    const unsigned max = source == SEEDTOOL_D6 ? 6 : 20;
+    const size_t min_bits = seedtool_min_entropy_bits(words);
 
     uint8_t values[256] = { 0 };
     bool available[52];
@@ -1190,13 +1277,19 @@ static int collect_entropy(const int source, const size_t words)
     memset(available, 1, sizeof(available));
     memset(&generated, 0, sizeof(generated));
 
-    if (is_dice) {
+    {
         /* Shown once, with the bar already in place but empty, so its shape and
          * position are seen before they start moving. */
-        char rolls_needed[24];
-        (void)snprintf(rolls_needed, sizeof(rolls_needed), "%u rolls needed", (unsigned)required);
+        char needed[24];
+        (void)snprintf(needed, sizeof(needed), "%u %s needed", (unsigned)required, nouns[source]);
+        /* One deck can't reach 256 bits without replacement (see
+         * SEEDTOOL_CARDS_REPLACE's doc comment), so this is the one source
+         * whose upfront screen has a physical process to explain rather
+         * than just a red-bar hint. */
+        const char* const hint
+            = source == SEEDTOOL_CARDS_REPLACE ? "Return card, reshuffle each draw" : "Red bar = non-random";
         const seedtool_progress_t empty = { 0 };
-        if (!dice_confirm(names[source], rolls_needed, "Red bar = non-random", &empty)) {
+        if (!dice_confirm(names[source], needed, hint, &empty)) {
             outcome = 0;
         }
     }
@@ -1212,15 +1305,21 @@ static int collect_entropy(const int source, const size_t words)
             }
             const size_t shown = strlen(history) - seedtool_render_fit_tail(history);
             const seedtool_progress_t progress
-                = is_dice ? dice_progress((seedtool_source_t)source, values, i, required, min_bits)
-                          : (seedtool_progress_t) { 0 };
+                = entropy_progress((seedtool_source_t)source, values, i, required, min_bits);
             const char* const label = names[source];
             int result;
             if (source == SEEDTOOL_COIN) {
-                result = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history);
+                result = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history + shown,
+                    &progress);
+            } else if (source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE) {
+                /* A with-replacement draw excludes nothing, so it passes no
+                 * availability mask - enter_card treats NULL the same way
+                 * enter_value already treats a NULL allowed[]. */
+                result = enter_card((unsigned)(i + 1), (unsigned)required, &value,
+                    source == SEEDTOOL_CARDS ? available : NULL, history + shown, &progress);
             } else {
-                result = enter_value(label, (unsigned)(i + 1), (unsigned)required, min, max, &value, format,
-                    source == SEEDTOOL_CARDS ? available : NULL, history + shown, is_dice ? &progress : NULL);
+                result = enter_value(label, (unsigned)(i + 1), (unsigned)required, 1, max, &value, NULL, NULL,
+                    history + shown, &progress);
             }
             if (result < 0) {
                 outcome = -1;
@@ -1245,7 +1344,7 @@ static int collect_entropy(const int source, const size_t words)
             }
             ++i;
         }
-        if (outcome != 1 || !is_dice) {
+        if (outcome != 1) {
             break;
         }
         /* The whole run is fixed-length, unlike Krux's open-ended rolling: there
@@ -1254,11 +1353,8 @@ static int collect_entropy(const int source, const size_t words)
          * manual [back] already does. */
         int bits = 0;
         bool pattern = false;
-        (void)seedtool_dice_entropy_bits((seedtool_source_t)source, values, required, &bits);
-        (void)seedtool_dice_pattern_detected((seedtool_source_t)source, values, required, &pattern);
-        const int corrected_bits
-            = bits + (int)lround(seedtool_dice_entropy_bias_bits((seedtool_source_t)source));
-        const bool poor = (size_t)corrected_bits + DICE_ENTROPY_TOLERANCE < min_bits;
+        entropy_quality((seedtool_source_t)source, values, required, &bits, &pattern);
+        const bool poor = (size_t)bits + DICE_ENTROPY_TOLERANCE < min_bits;
         bool proceed = true;
         if (poor) {
             proceed = acknowledge("Poor entropy!", "Proceed anyway?", NULL);
@@ -1299,14 +1395,6 @@ static void create_seed(void)
         if (source < 0 || source == 4) {
             return;
         }
-        if (source == SEEDTOOL_CARDS) {
-            /* Cards are 12 words only, so there is no length to choose and
-             * backing out of the first card returns to the source menu. */
-            if (collect_entropy(source, 12) != 0) {
-                return;
-            }
-            continue;
-        }
         for (;;) {
             const char* lengths[] = { "12 words", "24 words", "Back" };
             const int length = choose("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]), true);
@@ -1316,7 +1404,12 @@ static void create_seed(void)
             if (length == 2) {
                 break;
             }
-            if (collect_entropy(source, length ? 24 : 12) != 0) {
+            /* 24-word Cards can't reach 256 bits without replacement (one
+             * deck tops out around 225 bits) - SEEDTOOL_CARDS_REPLACE draws
+             * the same deck, but with the card returned and the deck
+             * reshuffled after every draw, a genuine 52-sided die instead. */
+            const int collect_source = length && source == SEEDTOOL_CARDS ? SEEDTOOL_CARDS_REPLACE : source;
+            if (collect_entropy(collect_source, length ? 24 : 12) != 0) {
                 return;
             }
         }
@@ -1343,7 +1436,8 @@ static void complete_checksum(void)
             for (size_t f = 0; f < i; ++f) {
                 flips[f] = (char)('0' + bits[f]);
             }
-            const int result = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips);
+            const int result
+                = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips, NULL);
             if (result < 0) {
                 outcome = -1;
             } else if (result == 0) {
@@ -1368,6 +1462,28 @@ static void complete_checksum(void)
         seedtool_zero(bits, sizeof(bits));
         if (outcome != 0) {
             return;
+        }
+    }
+}
+
+/* Two ways to end up with a seed to work with: build one from entropy, or
+ * finish one that is already mostly known (its words come from elsewhere -
+ * typically a physical Stackbit backup - and only the checksum word is
+ * missing). Grouped under one menu since both lead to the same wallet
+ * viewer, rather than sitting as peers of Restore/Settings on the main
+ * menu, which is specifically about *entering* an already-complete seed. */
+static void show_new_seed_menu(void)
+{
+    for (;;) {
+        const char* items[] = { "From entropy", "Complete checksum", "Back" };
+        const int selected = choose("New Seed", items, 3, true);
+        if (selected < 0 || selected == 2) {
+            return;
+        }
+        if (selected == 0) {
+            create_seed();
+        } else {
+            complete_checksum();
         }
     }
 }
@@ -1455,7 +1571,7 @@ static void show_settings_menu(void)
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
                 "record entropy independently. Left and right move, both buttons together select. Origo is derived "
                 "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
-                "Blockstream. The dice-roll entropy bar is adapted from Krux (github.com/selfcustody/krux).");
+                "Blockstream. The entropy quality bar is adapted from Krux (github.com/selfcustody/krux).");
         }
     }
 }
@@ -1487,16 +1603,14 @@ void seedtool_run(void)
     last_action = seedtool_platform_milliseconds();
 
     for (;;) {
-        const char* menu[] = { "Create Seed", "Restore Seed", "Complete Checksum", "Settings", "Reboot" };
+        const char* menu[] = { "New Seed", "Restore Seed", "Settings", "Reboot" };
         const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
-        if (selected < 0 || selected == 4) {
+        if (selected < 0 || selected == 3) {
             seedtool_platform_restart();
         } else if (selected == 0) {
-            create_seed();
+            show_new_seed_menu();
         } else if (selected == 1) {
             restore_seed();
-        } else if (selected == 2) {
-            complete_checksum();
         } else {
             show_settings_menu();
         }
