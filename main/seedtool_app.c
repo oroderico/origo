@@ -196,9 +196,10 @@ static bool dice_confirm(const char* title, const char* one, const char* two, co
  * `hint` is false only for the Origo menu: the very first screen after the
  * splash is not the place to also be teaching the chord, and every screen
  * reachable from it already carries its own hint until the chord is learned. */
-static int choose(const char* title, const char* const* items, const size_t count, const bool hint)
+static int choose_at(const char* title, const char* const* items, const size_t count, const bool hint,
+    const size_t initial)
 {
-    size_t selected = 0, top = 0;
+    size_t selected = initial < count ? initial : 0, top = 0;
     for (;;) {
         /* No page counter here: choosing among options isn't paging through
          * content, and the scrollbar (seedtool_render_list, gated the same way
@@ -222,6 +223,11 @@ static int choose(const char* title, const char* const* items, const size_t coun
             return -1;
         }
     }
+}
+
+static int choose(const char* title, const char* const* items, const size_t count, const bool hint)
+{
+    return choose_at(title, items, count, hint, 0);
 }
 
 static unsigned step_value(
@@ -973,9 +979,12 @@ static const char* address_items[ADDRESS_LIST_ROWS + 1]; /* + Back */
 /* Builds the address list for one type and lets the reader browse it. Returns
  * the chosen index, or -1 on Back, timeout or a derivation error. On a
  * selection, the chosen address is copied into address_out before the working
- * array is zeroed, so the caller does not have to derive it a second time. */
+ * array is zeroed, so the caller does not have to derive it a second time.
+ * `cursor` is both where the list opens and where it is left: a reader who
+ * opens address 10, views its QR and comes straight back lands on 10 again
+ * rather than back at the top of the list. */
 static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    char* address_out, const size_t address_out_len)
+    char* address_out, const size_t address_out_len, size_t* cursor)
 {
     static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
     screen_text("Addresses", "Deriving addresses...", NULL, NULL);
@@ -990,7 +999,10 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
         address_items[i] = address_labels[i];
     }
     address_items[ADDRESS_LIST_ROWS] = "Back";
-    const int selected = choose("Addresses", address_items, ADDRESS_LIST_ROWS + 1, true);
+    const int selected = choose_at("Addresses", address_items, ADDRESS_LIST_ROWS + 1, true, *cursor);
+    if (selected >= 0) {
+        *cursor = (size_t)selected;
+    }
     if (selected >= 0 && selected < (int)ADDRESS_LIST_ROWS) {
         (void)snprintf(address_out, address_out_len, "%s", addresses[selected]);
     }
@@ -1037,10 +1049,13 @@ static void show_type_menu(
             /* Loops back to the address list itself after each address's QR,
              * rather than out to this menu: picking another address is the
              * common next step, not re-choosing "Addresses" again. Only
-             * backing out of the list (or a timeout) reaches the outer loop. */
+             * backing out of the list (or a timeout) reaches the outer loop.
+             * `cursor` lives outside this loop so the list reopens wherever it
+             * was left, rather than back at address 0 every time. */
+            size_t cursor = 0;
             for (;;) {
                 char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-                const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address));
+                const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address), &cursor);
                 if (index < 0) {
                     seedtool_zero(address, sizeof(address));
                     break;
