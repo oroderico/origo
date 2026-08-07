@@ -288,23 +288,24 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertIn("fonts/DefaultFont.c", cmake)
         self.assertIn("fonts/Ubuntu16.c", cmake)
 
-    def test_qr_is_locked_to_one_version_everywhere(self):
-        # The encoder is pinned to a single version so no other version's tables
-        # or code paths are linked in. Firmware, simulator and renderer must pin
-        # the same one, or a code that scans off the simulator would not be the
-        # code the device draws.
+    def test_qr_max_version_is_shared_and_unlocked(self):
+        # LOCK_VERSION used to pin the encoder to a single fixed version; that
+        # was deliberately removed (git history: "Fix D6 roll count display
+        # and draw Compact SeedQR at its true size") so Compact SeedQR draws
+        # at the smallest version its own entropy needs instead of always at
+        # the size the larger account-key QR requires - unlocking it costs
+        # under 2 KiB of flash. Firmware and simulator must agree on *not*
+        # locking it, and on the same upper bound (QR_VERSION), since that
+        # bound is still what makes the account-key payload fit at all.
         root = Path(__file__).parents[1]
         firmware = (root / "main/CMakeLists.txt").read_text()
         host = (root / "host/CMakeLists.txt").read_text()
-        source = (root / "main/qrcode.c").read_text()
         render = (root / "main/seedtool_render.c").read_text()
 
-        locked = re.findall(r"LOCK_VERSION=(\d+)", firmware)
-        self.assertEqual(locked, ["6"])
-        self.assertEqual(re.findall(r"LOCK_VERSION=(\d+)", host), locked)
-        self.assertIn(f"LOCK_VERSION == {locked[0]}", source)
-        self.assertIn(f"#define QR_VERSION {locked[0]}", render)
-        # Version 6 is what makes the account key payload fit at all.
+        self.assertNotIn("LOCK_VERSION", firmware)
+        self.assertNotIn("LOCK_VERSION", host)
+        max_version = re.findall(r"#define QR_VERSION (\d+)", render)
+        self.assertEqual(max_version, ["6"])
         self.assertGreaterEqual(verify.QR_CAPACITY, 131)
 
     def test_bip84_and_bip86_published_vectors(self):
