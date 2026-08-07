@@ -227,11 +227,15 @@ static void draw_centered_line(
 /* Centred and wrapped inside the box of `width` pixels starting at `x`. A
  * wrap that would land inside a word backs off to the last space instead, so
  * the word carries whole onto the next line; a single word wider than the
- * whole box is the one case with no better break, and is left to split. */
-static void draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
+ * whole box is the one case with no better break, and is left to split.
+ * Returns the y just past the last line drawn, so a caller stacking more text
+ * beneath a value of unknown line count - draw_qr_region's title, which wraps
+ * whenever the zoomed layout's narrow column can't fit it on one line - can
+ * place it without guessing how many lines came before it. */
+static int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
 {
     if (!text) {
-        return;
+        return y;
     }
     const int line_height = font[1];
     const char* cursor = text;
@@ -256,6 +260,7 @@ static void draw_centered_box(const uint8_t* font, const char* text, const int x
         cursor = *line_end == ' ' || *line_end == '\n' ? line_end + 1 : line_end;
         y += line_height;
     }
+    return y;
 }
 
 static void draw_centered(const uint8_t* font, const char* text, const int y)
@@ -853,10 +858,10 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
         fill_rect(QR_LEFT, top + (int)i * scale, extent, 1, COLOR_DIM);
         fill_rect(QR_LEFT + (int)i * scale, top, 1, extent, COLOR_DIM);
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    const int label_y = draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
-    draw_centered_box(tft_DefaultFont, label, title_x, title_width, QR_TITLE_Y + tft_DefaultFont[1] + 4);
+    draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }
 
