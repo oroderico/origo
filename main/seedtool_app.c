@@ -1189,9 +1189,11 @@ static void show_numbered_list(const char* mnemonic, const bool show_words)
  * this one is every key the mnemonic can ever derive. There is no camera to
  * scan the result back with, so tools/origo_verify.py inspect prints the same
  * payload for an independent check instead. */
-/* Index 0 is the full code; 1..regions are Krux-style "Zoomed Region" tiles of
- * it, stepped sideways the same way show_qr steps between values, so the
- * carousel convention stays one shape everywhere a QR is shown. */
+/* Index 0 is the region map (which zone is which, before diving into any of
+ * them); index 1 is the full code; 2..regions+1 are Krux-style "Zoomed
+ * Region" tiles of it, stepped sideways the same way show_qr steps between
+ * values, so the carousel convention stays one shape everywhere a QR is
+ * shown. */
 static void export_seed_qr(const char* mnemonic)
 {
     if (!acknowledge("Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds")) {
@@ -1201,11 +1203,13 @@ static void export_seed_qr(const char* mnemonic)
     size_t len = 0;
     if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) == SEEDTOOL_OK) {
         const size_t regions = seedtool_render_qr_bytes_regions(len);
+        const size_t steps = regions + 2;
         size_t selected = 0;
         for (;;) {
             const bool ok = selected == 0
-                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
-                : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 1);
+                ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
+                : selected == 1 ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
+                                : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 2);
             if (!ok) {
                 (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
@@ -1215,9 +1219,9 @@ static void export_seed_qr(const char* mnemonic)
                 continue;
             }
             if (key == KEY_PREV) {
-                selected = selected == 0 ? regions : selected - 1;
+                selected = selected == 0 ? steps - 1 : selected - 1;
             } else if (key == KEY_NEXT) {
-                selected = selected == regions ? 0 : selected + 1;
+                selected = selected == steps - 1 ? 0 : selected + 1;
             } else {
                 break;
             }

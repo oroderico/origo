@@ -160,6 +160,15 @@ bool seedtool_display_qr_bytes_region(const char* title, const uint8_t* data, co
     return ok;
 }
 
+bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, const size_t len)
+{
+    const bool ok = seedtool_render_qr_bytes_map(title, data, len);
+    if (ok) {
+        present();
+    }
+    return ok;
+}
+
 void seedtool_display_stackbit_screen(
     const char* title, const unsigned word_number, const char* word, const char* footer)
 {
