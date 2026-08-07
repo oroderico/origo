@@ -1,5 +1,7 @@
 # Origo
 
+*Not your entropy, not your coins.*
+
 Origo is a dedicated, stateless firmware for the original LILYGO
 TTGO T-Display (ESP32, 240x135, two buttons). It is not a hardware wallet. It
 does not sign, store a seed, expose an RPC protocol, update itself, or start a
