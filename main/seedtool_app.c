@@ -87,6 +87,12 @@ static void screen_text3(
     seedtool_display_screen3(title, line1, line2, line3, footer);
 }
 
+static void screen_text4(const char* title, const char* line1, const char* line2, const char* line3,
+    const char* line4, const char* footer)
+{
+    seedtool_display_screen4(title, line1, line2, line3, line4, footer);
+}
+
 /* A flipped orientation means the case, and the buttons wired to it, are
  * physically rotated 180 degrees too - so what used to read as the left
  * button is now on the user's right. Swapping PREV/NEXT here, the one place
@@ -1093,6 +1099,58 @@ static void show_stackbit(const char* mnemonic)
     }
 }
 
+/* Every word, numbered the way a physical backup numbers them (seedtool_word_
+ * numbers again, same lookup show_stackbit uses), four to a page rather than
+ * page_text's plain reflow: a reader checking word 7 against paper can go
+ * straight to page 2 instead of counting words through wrapped lines. Four
+ * words a page divides both 12 and 24 evenly, for 3 or 6 pages. */
+static void show_numbered_words(const char* mnemonic)
+{
+    uint16_t numbers[24];
+    size_t count = 0;
+    if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
+        (void)acknowledge("Error", "Could not compute", "word numbers");
+        return;
+    }
+    const size_t pages = (count + 3) / 4;
+    size_t page = 0;
+    for (;;) {
+        char lines[4][24] = { { 0 } };
+        const size_t first = page * 4;
+        for (size_t i = 0; i < 4 && first + i < count; ++i) {
+            const uint16_t number = numbers[first + i];
+            (void)snprintf(lines[i], sizeof(lines[i]), "%u  %s", (unsigned)number, seedtool_word(number - 1));
+        }
+        char footer[16];
+        (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
+        screen_text4("BIP39 words", lines[0], lines[1], lines[2], lines[3], footer);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            seedtool_zero(numbers, sizeof(numbers));
+            return;
+        case KEY_NEXT:
+            if (page + 1 >= pages) {
+                seedtool_zero(numbers, sizeof(numbers));
+                return;
+            }
+            ++page;
+            break;
+        case KEY_PREV:
+            if (!page) {
+                seedtool_zero(numbers, sizeof(numbers));
+                return;
+            }
+            --page;
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            seedtool_zero(numbers, sizeof(numbers));
+            return;
+        }
+    }
+}
+
 /* Entering this screen reaches the whole seed, so the warning is far starker
  * than the account-key QR's: that one only ever exposes future addresses,
  * this one is every key the mnemonic can ever derive. There is no camera to
@@ -1140,13 +1198,13 @@ static void export_seed_qr(const char* mnemonic)
 static void show_backup_menu(const char* mnemonic)
 {
     for (;;) {
-        const char* items[] = { "Plain text", "Stackbit 1248", "Compact SeedQR", "Back" };
+        const char* items[] = { "Words", "Stackbit 1248", "Compact SeedQR", "Back" };
         const int selected = choose("Backup", items, 4, true);
         if (selected < 0 || selected == 3) {
             return;
         }
         if (selected == 0) {
-            (void)page_text("BIP39 mnemonic", mnemonic);
+            show_numbered_words(mnemonic);
         } else if (selected == 1) {
             show_stackbit(mnemonic);
         } else {
