@@ -41,6 +41,13 @@
 #define WORD_NUMBER_LAYOUT SEEDTOOL_WORD_NUMBER_LAYOUT
 #define WORD_NUMBER_KEYS (SEEDTOOL_DIGITS + 2)
 
+/* Same physical keypad as WORD_NUMBER_LAYOUT, reused for the account index:
+ * exactly enough digits for SEEDTOOL_MAX_ACCOUNT_INDEX (999), so every digit
+ * key stays reachable at any prefix length up to the cap - no need for the
+ * word-number keyboard's variable reachable-digit pruning, which exists only
+ * because 2048 isn't a round power of ten. */
+#define ACCOUNT_DIGITS 3
+
 /* Every key is found by its character rather than by where it sits, so the
  * layouts are QWERTY, or anything else, purely by changing the strings above. */
 #define PASSPHRASE_PAGES SEEDTOOL_PASSPHRASE_PAGES
@@ -503,8 +510,9 @@ static bool page_text(const char* title, const char* text)
 }
 
 /* The account key carries its key origin, so a scan does not have to be told
- * the derivation path afterwards. */
-#define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/0']") + SEEDTOOL_MAX_XPUB_LEN)
+ * the derivation path afterwards. The account component's "999" is
+ * SEEDTOOL_MAX_ACCOUNT_INDEX's own width, not a placeholder. */
+#define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/999']") + SEEDTOOL_MAX_XPUB_LEN)
 
 /* The upper bound on a single BBQr part's byte length: a part is never longer
  * than the whole value it is cut from, and the account key is the only value
@@ -829,6 +837,77 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
     }
 }
 
+/* The account index (m/type'/0'/account'), typed on the same keypad
+ * enter_word_number uses. Every digit key is reachable up to ACCOUNT_DIGITS
+ * typed (unlike the word-number keyboard, any prefix here is already a
+ * complete, in-range value - 0 through 999), so there is nothing to prune:
+ * only the digit cap and Accept/Backspace's own enabling need computing.
+ * Returns 1 with `*value` set when a number was accepted, 0 when the reader
+ * backed out of the first digit, -1 on timeout - the same three-way contract
+ * every other entry screen here uses. */
+static int enter_account(uint32_t* value)
+{
+    char digits[ACCOUNT_DIGITS + 1] = { 0 };
+    size_t digits_len = 0;
+    size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
+    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
+
+    for (;;) {
+        bool enabled[WORD_NUMBER_KEYS] = { false };
+        for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
+            const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
+            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
+                : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0
+                                                       : digits_len < ACCOUNT_DIGITS;
+        }
+        /* Same fix as enter_word_number's Accept/Backspace race: once every
+         * digit key goes dark at the length cap, jump straight to Accept
+         * rather than trusting nearest_enabled's ring distance to land there. */
+        selected
+            = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
+        bool picked = false;
+        while (!picked) {
+            seedtool_display_keyboard("Account", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected);
+            switch (wait_key()) {
+            case KEY_SELECT:
+                picked = true;
+                break;
+            case KEY_PREV:
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
+                break;
+            case KEY_NEXT:
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
+                break;
+            case KEY_REDRAW:
+                break;
+            default:
+                seedtool_zero(digits, sizeof(digits));
+                return -1;
+            }
+        }
+        const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
+        if (pressed == SEEDTOOL_KEY_ACCEPT) {
+            uint32_t number = 0;
+            for (size_t i = 0; i < digits_len; ++i) {
+                number = number * 10 + (uint32_t)(digits[i] - '0');
+            }
+            seedtool_zero(digits, sizeof(digits));
+            *value = number;
+            return 1;
+        }
+        if (pressed == SEEDTOOL_KEY_BACKSPACE) {
+            if (!digits_len) {
+                seedtool_zero(digits, sizeof(digits));
+                return 0;
+            }
+            digits[--digits_len] = '\0';
+        } else if (digits_len < ACCOUNT_DIGITS) {
+            digits[digits_len++] = pressed;
+            digits[digits_len] = '\0';
+        }
+    }
+}
+
 /* Returns 1 when a whole mnemonic was entered, 0 when the user backed out of the
  * first word or the method menu, -1 on timeout or overflow. Fills `words` (a
  * caller-owned array so restore_mnemonic below can keep reviewing them after
@@ -1072,7 +1151,7 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
  * every address it can derive -- unlike a single address's QR below, which
  * reveals nothing more than itself. */
 static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const seedtool_key_format_t format)
+    const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
 {
     if (!acknowledge("QR export", "Account key included", "A photo reveals every address")) {
         return;
@@ -1081,8 +1160,8 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
     (void)snprintf(title, sizeof(title), "BIP%u %s", (unsigned)type, format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
     char value[ACCOUNT_KEY_LEN] = { 0 };
-    if (seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
-        (void)snprintf(value, sizeof(value), "[%s/%u'/0'/0']%s", fphex, (unsigned)type, xpub);
+    if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+        (void)snprintf(value, sizeof(value), "[%s/%u'/0'/%u']%s", fphex, (unsigned)type, (unsigned)account, xpub);
         seedtool_zero(xpub, sizeof(xpub));
         show_account_key_qr(title, value);
     } else {
@@ -1124,11 +1203,12 @@ static const char* address_items[ADDRESS_LIST_ROWS + 1]; /* + Back */
  * opens address 10, views its QR and comes straight back lands on 10 again
  * rather than back at the top of the list. */
 static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    char* address_out, const size_t address_out_len, size_t* cursor)
+    const uint32_t account, char* address_out, const size_t address_out_len, size_t* cursor)
 {
     static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
     screen_text("Addresses", "Deriving addresses...", NULL, NULL);
-    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, ADDRESS_LIST_ROWS, addresses) != SEEDTOOL_OK) {
+    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, ADDRESS_LIST_ROWS, addresses)
+        != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         seedtool_zero(address_labels, sizeof(address_labels));
         (void)acknowledge("Error", "Could not derive addresses", NULL);
@@ -1167,11 +1247,27 @@ static void show_type_menu(
     const char* mnemonic, const char* passphrase, const char* fphex, const seedtool_address_type_t type)
 {
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+    /* m/type'/0'/account': lives for this menu's whole visit, not just one
+     * pick of "Account key" or "Addresses", so switching to account 1 and
+     * then checking both its key and its addresses does not mean reselecting
+     * it twice. Resets to 0 on the next visit rather than persisting further
+     * - there is nowhere session-scoped to keep it that would not also have
+     * to survive a device restart, which this firmware never does. */
+    uint32_t account = 0;
     for (;;) {
-        const char* items[] = { "Account key", "Addresses", "Back" };
-        const int selected = choose(title, items, 3, true);
-        if (selected < 0 || selected == 2) {
+        char account_item[16];
+        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
+        const char* items[] = { "Account key", "Addresses", account_item, "Back" };
+        const int selected = choose(title, items, 4, true);
+        if (selected < 0 || selected == 3) {
             return;
+        }
+        if (selected == 2) {
+            uint32_t chosen_account = account;
+            if (enter_account(&chosen_account) == 1) {
+                account = chosen_account;
+            }
+            continue;
         }
         if (selected == 0) {
             seedtool_key_format_t format = SEEDTOOL_XPUB;
@@ -1185,10 +1281,11 @@ static void show_type_menu(
             }
             char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
             char origin[32];
-            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/0']", fphex, (unsigned)type);
-            if (seedtool_account_xpub(mnemonic, passphrase, type, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
+            if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub))
+                == SEEDTOOL_OK) {
                 if (page_text(origin, xpub)) {
-                    export_qr(mnemonic, passphrase, fphex, type, format);
+                    export_qr(mnemonic, passphrase, fphex, type, account, format);
                 }
             } else {
                 (void)acknowledge("Error", "Could not derive account key", NULL);
@@ -1204,13 +1301,15 @@ static void show_type_menu(
             size_t cursor = 0;
             for (;;) {
                 char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-                const int index = browse_addresses(mnemonic, passphrase, type, address, sizeof(address), &cursor);
+                const int index
+                    = browse_addresses(mnemonic, passphrase, type, account, address, sizeof(address), &cursor);
                 if (index < 0) {
                     seedtool_zero(address, sizeof(address));
                     break;
                 }
                 char path[32];
-                (void)snprintf(path, sizeof(path), "m/%u'/0'/0'/0/%u", (unsigned)type, (unsigned)index);
+                (void)snprintf(
+                    path, sizeof(path), "m/%u'/0'/%u'/0/%u", (unsigned)type, (unsigned)account, (unsigned)index);
                 if (page_text(path, address)) {
                     show_address_qr(path, address);
                 }

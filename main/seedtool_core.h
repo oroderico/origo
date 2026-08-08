@@ -25,6 +25,14 @@
  * limit: raising it costs nothing but a bigger on-screen list. */
 #define SEEDTOOL_MAX_ADDRESS_INDEX 99
 
+/* Highest BIP44-style account (the hardened third path level, m/type'/0'/
+ * account') the viewer will derive. Three digits comfortably covers every
+ * account a wallet actually offering a chooser (rather than free-typing a
+ * number) would ever reach - keeps the on-device entry a fixed-width keypad
+ * like every other numeric entry here, with no need for the word-number
+ * keyboard's variable-length reachable-digit pruning. */
+#define SEEDTOOL_MAX_ACCOUNT_INDEX 999
+
 typedef enum {
     SEEDTOOL_OK = 0,
     SEEDTOOL_EINVAL = -1,
@@ -161,16 +169,16 @@ seedtool_result_t seedtool_mnemonic_entropy(
 seedtool_result_t seedtool_master_fingerprint(
     const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
 
-/* Watch-only account key at m/type'/0'/0'. `format` is the standard BIP32 xpub
- * or, for BIP84 only, its SLIP-132 zpub: the same 78 bytes with the four
- * version bytes swapped, since libwally itself knows only the plain BIP32
- * versions and has no notion of SLIP-132. The caller shows it with its
- * derivation path. */
+/* Watch-only account key at m/type'/0'/account'. `format` is the standard
+ * BIP32 xpub or, for BIP84 only, its SLIP-132 zpub: the same 78 bytes with
+ * the four version bytes swapped, since libwally itself knows only the plain
+ * BIP32 versions and has no notion of SLIP-132. `account` must not exceed
+ * SEEDTOOL_MAX_ACCOUNT_INDEX. The caller shows it with its derivation path. */
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
-    seedtool_key_format_t format, char* output, size_t output_len);
+    uint32_t account, seedtool_key_format_t format, char* output, size_t output_len);
 
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
-    uint32_t index, char* output, size_t output_len);
+    uint32_t account, uint32_t index, char* output, size_t output_len);
 
 /* Same addresses seedtool_mainnet_address would compute at each index
  * 0..count-1, but the mnemonic-to-seed PBKDF2 and the account-level derivation
@@ -178,7 +186,7 @@ seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* pas
  * browsing the address list does, is slow enough on hardware with no EC
  * acceleration to look like a hang. `addresses` must hold at least `count` rows. */
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
-    seedtool_address_type_t type, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+    seedtool_address_type_t type, uint32_t account, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
 void seedtool_zero(void* ptr, size_t len);
 

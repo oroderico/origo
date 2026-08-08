@@ -59,6 +59,21 @@ class SeedToolVerifierTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capacity"):
             verify.account_qr_payload("73c5da0a", 84, "x" * verify.QR_CAPACITY)
 
+    def test_account_index_changes_derivation_and_still_fits_the_qr(self):
+        # Mirrors the firmware's own account-index self-test: a different
+        # account must give a different xpub (the parameter is actually
+        # threaded into the derivation, not silently ignored), and the
+        # worst-case three-digit account still fits the same 134-byte
+        # encoder the plain account-0 payload does - it lands right at that
+        # ceiling rather than comfortably under it.
+        _, _, account_zero = verify.addresses(self.MNEMONIC, "", 0, account_index=0)
+        _, _, account_one = verify.addresses(self.MNEMONIC, "", 0, account_index=1)
+        self.assertNotEqual(account_zero[84], account_one[84])
+        fingerprint, _, accounts_max = verify.addresses(self.MNEMONIC, "", 0, account_index=999)
+        payload = verify.account_qr_payload(fingerprint, 84, accounts_max[84], account=999)
+        self.assertEqual(payload, f"[{fingerprint}/84'/0'/999']{accounts_max[84]}")
+        self.assertLessEqual(len(payload), verify.QR_CAPACITY)
+
     def test_krux_compatible_d6_transcript_vector(self):
         entries = list("123456" * 8 + "12")
         text = verify.transcript("d6", entries, 50)

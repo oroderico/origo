@@ -922,17 +922,38 @@ static int self_test(void)
     char address[SEEDTOOL_MAX_ADDRESS_LEN];
     char xpub[SEEDTOOL_MAX_XPUB_LEN];
     if (wally_init(0) != WALLY_OK || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
-        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, address, sizeof(address)) != SEEDTOOL_OK
+        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, 0, address, sizeof(address)) != SEEDTOOL_OK
         || strcmp(address, expected_address) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
         || strcmp(xpub, expected_xpub84) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
         || strcmp(xpub, expected_xpub86) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
         || strcmp(xpub, expected_zpub84) != 0
-        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) != SEEDTOOL_EINVAL) {
+        || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub))
+            != SEEDTOOL_EINVAL) {
         fputs("Origo host self-test failed\n", stderr);
         return 1;
+    }
+    /* Account really is threaded into the derivation, not silently ignored -
+     * a different account must give a different xpub - and it is bounded:
+     * SEEDTOOL_MAX_ACCOUNT_INDEX + 1 is rejected outright. */
+    {
+        char xpub_account_zero[SEEDTOOL_MAX_XPUB_LEN];
+        char xpub_account_one[SEEDTOOL_MAX_XPUB_LEN];
+        if (seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub_account_zero,
+                sizeof(xpub_account_zero))
+                != SEEDTOOL_OK
+            || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 1, SEEDTOOL_XPUB, xpub_account_one,
+                   sizeof(xpub_account_one))
+                != SEEDTOOL_OK
+            || strcmp(xpub_account_zero, xpub_account_one) == 0
+            || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_MAX_ACCOUNT_INDEX + 1, SEEDTOOL_XPUB,
+                   xpub_account_one, sizeof(xpub_account_one))
+                != SEEDTOOL_EINVAL) {
+            fputs("Origo account index self-test failed\n", stderr);
+            return 1;
+        }
     }
     if (!wordlist_completion_is_sound()) {
         fputs("Origo wordlist completion self-test failed\n", stderr);
@@ -1007,11 +1028,16 @@ static int self_test(void)
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key
-     * payload is the longest thing the device ever puts in a code. */
+     * payload is the longest thing the device ever puts in a code - and with
+     * the account index now user-chosen rather than always "0", the account
+     * component itself can grow to SEEDTOOL_MAX_ACCOUNT_INDEX's own three
+     * digits, landing right at this encoder's 134-byte ceiling rather than
+     * comfortably under it. */
     for (size_t i = 0; i < 2; ++i) {
         char payload[160];
         const unsigned purpose = i ? 86 : 84;
-        (void)snprintf(payload, sizeof(payload), "[73c5da0a/%u'/0'/0']%s", purpose, i ? expected_xpub86 : expected_xpub84);
+        (void)snprintf(payload, sizeof(payload), "[73c5da0a/%u'/0'/%u']%s", purpose, SEEDTOOL_MAX_ACCOUNT_INDEX,
+            i ? expected_xpub86 : expected_xpub84);
         if (strlen(payload) > 134 || !seedtool_render_qr("BIP84 account key", payload)) {
             fputs("Origo account key QR self-test failed\n", stderr);
             return 1;

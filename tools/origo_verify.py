@@ -57,14 +57,14 @@ def word_numbers(mnemonic):
 QR_CAPACITY = 134
 
 
-def account_qr_payload(fingerprint, purpose, xpub):
+def account_qr_payload(fingerprint, purpose, xpub, account=0):
     """Exactly the bytes the device puts in the account key QR.
 
     Key origin then xpub with no separator, which is what a watch-only wallet
     needs to import the account without being told the derivation path. A photo
     of this code reveals every address of the account, past and future.
     """
-    payload = f"[{fingerprint}/{purpose}'/0'/0']{xpub}"
+    payload = f"[{fingerprint}/{purpose}'/0'/{account}']{xpub}"
     if len(payload) > QR_CAPACITY:
         raise ValueError(f"payload is {len(payload)} bytes, over the {QR_CAPACITY}-byte QR capacity")
     return payload
@@ -362,11 +362,11 @@ def tagged_hash(tag, data):
     return hashlib.sha256(th + th + data).digest()
 
 
-def addresses(mnemonic, passphrase, index):
+def addresses(mnemonic, passphrase, index, account_index=0):
     root = master(mnemonic, passphrase)
     result, accounts = {}, {}
     for purpose in (84, 86):
-        account = derive(root, (purpose | H, 0 | H, 0 | H))
+        account = derive(root, (purpose | H, 0 | H, account_index | H))
         accounts[purpose] = xpub(account)
         if purpose == 84:
             accounts["84z"] = zpub(account)
@@ -424,18 +424,18 @@ def generate(args):
 
 def inspect(args):
     mnemonic_entropy(args.mnemonic)
-    fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index)
+    fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index, args.account)
     print("checksum:   valid")
     print("word numbers:", " ".join(str(n) for n in word_numbers(args.mnemonic)))
     print("compact seedqr (hex):", compact_seedqr_payload(args.mnemonic).hex())
     print("fingerprint:", fingerprint)
     for purpose in (84, 86):
-        print(f"[{fingerprint}/{purpose}'/0'/0']: {accounts[purpose]}")
-    print(f"[{fingerprint}/84'/0'/0'] (zpub): {accounts['84z']}")
+        print(f"[{fingerprint}/{purpose}'/0'/{args.account}']: {accounts[purpose]}")
+    print(f"[{fingerprint}/84'/0'/{args.account}'] (zpub): {accounts['84z']}")
     for purpose in (84, 86):
-        print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose])}")
+        print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose], args.account)}")
     for purpose in (84, 86):
-        print(f"m/{purpose}'/0'/0'/0/{args.index}: {addrs[purpose]}")
+        print(f"m/{purpose}'/0'/{args.account}'/0/{args.index}: {addrs[purpose]}")
 
 
 def complete(args):
@@ -467,6 +467,7 @@ def main():
     check.add_argument("mnemonic")
     check.add_argument("--passphrase", default="")
     check.add_argument("--index", type=int, choices=range(100), default=0)
+    check.add_argument("--account", type=int, choices=range(1000), default=0)
     check.set_defaults(func=inspect)
     comp = sub.add_parser("complete")
     comp.add_argument("prefix")
