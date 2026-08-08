@@ -946,24 +946,26 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
         }
-        review_items[count] = valid ? "Continue" : "Checksum invalid";
-        review_items[count + 1] = "Back";
+        /* Continue only appears once it would actually do something: an
+         * invalid checksum can't be acted on, so an inert "Checksum invalid"
+         * row that just redisplays the same list on select was a dead click
+         * - the title already says "Review - fix a word", no extra row
+         * needed to repeat that. */
+        size_t entries = count;
+        if (valid) {
+            review_items[entries++] = "Continue";
+        }
+        review_items[entries++] = "Back";
         const int selected
-            = choose_at(valid ? "Review words" : "Review - fix a word", review_items, count + 2, true, cursor);
+            = choose_at(valid ? "Review words" : "Review - fix a word", review_items, entries, true, cursor);
         if (selected < 0) {
             return -1;
         }
-        if ((size_t)selected == count + 1) {
+        if ((size_t)selected == entries - 1) {
             return 0;
         }
-        if ((size_t)selected == count) {
-            if (valid) {
-                return 1;
-            }
-            /* Nothing to do but keep reviewing - Continue only exits once the
-             * checksum actually passes, since a mnemonic that fails it must
-             * never reach show_wallet_data. */
-            continue;
+        if (valid && (size_t)selected == count) {
+            return 1;
         }
         cursor = (size_t)selected;
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
