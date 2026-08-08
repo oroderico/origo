@@ -409,6 +409,42 @@ static bool full_entropy_events_generate(void)
     return true;
 }
 
+/* Checked against BIP380's own published example (bip-0380.mediawiki,
+ * "Checksum" section: raw(deadbeef) -> raw(deadbeef)#89f8spxm) rather than a
+ * vector this project invented for itself, plus a real wpkh() descriptor
+ * built from this file's own published BIP84 xpub vector, its checksum
+ * cross-checked independently against a from-scratch Python transcription of
+ * the same bip-0380.mediawiki pseudocode before this C version was written -
+ * two independent implementations of the spec agreeing is the actual
+ * confidence here, not either one alone. Also checks EINVAL on a character
+ * outside the checksum's charset and ENOSPACE on a buffer too small for the
+ * result. */
+static bool descriptor_checksum_matches_bip380_vector(void)
+{
+    char out[256];
+    if (seedtool_descriptor_checksum("raw(deadbeef)", out, sizeof(out)) != SEEDTOOL_OK
+        || strcmp(out, "raw(deadbeef)#89f8spxm") != 0) {
+        return false;
+    }
+    char body[192];
+    (void)snprintf(body, sizeof(body), "wpkh([73c5da0a/84'/0'/0']%s/0/*)", expected_xpub84);
+    if (seedtool_descriptor_checksum(body, out, sizeof(out)) != SEEDTOOL_OK) {
+        return false;
+    }
+    char expected[256];
+    (void)snprintf(expected, sizeof(expected), "%s#wc3n3van", body);
+    if (strcmp(out, expected) != 0) {
+        return false;
+    }
+    /* A raw newline is outside DESCRIPTOR_INPUT_CHARSET's structural
+     * alphabet - checks the rejection path. */
+    if (seedtool_descriptor_checksum("raw(dead\nbeef)", out, sizeof(out)) != SEEDTOOL_EINVAL) {
+        return false;
+    }
+    char tiny[5];
+    return seedtool_descriptor_checksum("raw(deadbeef)", tiny, sizeof(tiny)) == SEEDTOOL_ENOSPACE;
+}
+
 /* Paging splits by pixel width, so the chunks must still reassemble byte for
  * byte: a dropped character in a displayed xpub or address would be transcribed
  * as fact. */
@@ -1009,6 +1045,10 @@ static int self_test(void)
     }
     if (!full_entropy_events_generate()) {
         fputs("Origo full-event-count generation self-test failed\n", stderr);
+        return 1;
+    }
+    if (!descriptor_checksum_matches_bip380_vector()) {
+        fputs("Origo descriptor checksum self-test failed\n", stderr);
         return 1;
     }
     if (!dice_quality_is_sound()) {

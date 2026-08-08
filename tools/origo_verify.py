@@ -70,6 +70,62 @@ def account_qr_payload(fingerprint, purpose, xpub, account=0):
     return payload
 
 
+"""bip-0380.mediawiki's own reference charsets and generator, transcribed
+verbatim from the spec's own pseudocode - this is the whole checksum
+algorithm, not an approximation of it."""
+DESCRIPTOR_INPUT_CHARSET = (
+    "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ "
+)
+DESCRIPTOR_CHECKSUM_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+DESCRIPTOR_GENERATOR = [0xF5DEE51989, 0xA9FDCA3312, 0x1BAB10E32D, 0x3706B1677A, 0x644D626FFD]
+
+
+def _descriptor_polymod(symbols):
+    chk = 1
+    for value in symbols:
+        top = chk >> 35
+        chk = ((chk & 0x7FFFFFFFF) << 5) ^ value
+        for i in range(5):
+            if (top >> i) & 1:
+                chk ^= DESCRIPTOR_GENERATOR[i]
+    return chk
+
+
+def _descriptor_expand(s):
+    groups = []
+    symbols = []
+    for c in s:
+        if c not in DESCRIPTOR_INPUT_CHARSET:
+            raise ValueError(f"{c!r} is outside the descriptor checksum charset")
+        v = DESCRIPTOR_INPUT_CHARSET.find(c)
+        symbols.append(v & 31)
+        groups.append(v >> 5)
+        if len(groups) == 3:
+            symbols.append(groups[0] * 9 + groups[1] * 3 + groups[2])
+            groups = []
+    if len(groups) == 1:
+        symbols.append(groups[0])
+    elif len(groups) == 2:
+        symbols.append(groups[0] * 3 + groups[1])
+    return symbols
+
+
+def descriptor_checksum(desc):
+    """BIP380 output descriptor checksum: the 8 characters after desc's '#'."""
+    symbols = _descriptor_expand(desc) + [0] * 8
+    checksum = _descriptor_polymod(symbols) ^ 1
+    return "".join(DESCRIPTOR_CHECKSUM_CHARSET[(checksum >> (5 * (7 - i))) & 31] for i in range(8))
+
+
+def descriptor(fingerprint, purpose, xpub, account=0):
+    """The full wpkh()/tr() output descriptor Origo's own Descriptor export
+    shows, checksum included - script fragment matches the address type,
+    always plain xpub (BIP380 has no notion of SLIP-132's zpub)."""
+    fragment = "wpkh" if purpose == 84 else "tr"
+    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/0/*)"
+    return f"{body}#{descriptor_checksum(body)}"
+
+
 def mnemonic_entropy(mnemonic):
     wl = words()
     try:
@@ -436,6 +492,8 @@ def inspect(args):
         print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose], args.account)}")
     for purpose in (84, 86):
         print(f"m/{purpose}'/0'/{args.account}'/0/{args.index}: {addrs[purpose]}")
+    for purpose in (84, 86):
+        print(f"descriptor {purpose}: {descriptor(fingerprint, purpose, accounts[purpose], args.account)}")
 
 
 def complete(args):

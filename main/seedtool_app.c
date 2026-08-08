@@ -514,10 +514,19 @@ static bool page_text(const char* title, const char* text)
  * SEEDTOOL_MAX_ACCOUNT_INDEX's own width, not a placeholder. */
 #define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/999']") + SEEDTOOL_MAX_XPUB_LEN)
 
-/* The upper bound on a single BBQr part's byte length: a part is never longer
- * than the whole value it is cut from, and the account key is the only value
- * this firmware ever hands to show_bbqr. */
-#define BBQR_MAX_VALUE_LEN (ACCOUNT_KEY_LEN - 1)
+/* A BIP380 output descriptor for this account, checksum included: prefix,
+ * bracketed origin, xpub, the receive-chain "0" and wildcard "*" suffix, a
+ * "#" and 8 checksum characters. "wpkh" rather than "tr" since it is one
+ * character longer, the only other prefix this ever produces, so it is the
+ * binding case; the account component and the checksum's fixed 8 characters
+ * follow ACCOUNT_KEY_LEN's own convention above. */
+#define DESCRIPTOR_LEN (sizeof("wpkh([00000000/84'/0'/999']/0/*)#12345678") + SEEDTOOL_MAX_XPUB_LEN)
+
+/* The upper bound on a single BBQr part's byte length: a part is never
+ * longer than the whole value it is cut from, and a descriptor - longer than
+ * the bracketed account key alone - is now the largest value this firmware
+ * ever hands to show_bbqr, not always the account key. */
+#define BBQR_MAX_VALUE_LEN ((ACCOUNT_KEY_LEN > DESCRIPTOR_LEN ? ACCOUNT_KEY_LEN : DESCRIPTOR_LEN) - 1)
 #define BBQR_FRAME_LEN (SEEDTOOL_BBQR_HEADER_LEN + (BBQR_MAX_VALUE_LEN * 8 + 4) / 5 + 1)
 
 /* Frames auto-advance with no press needed; BOTH/timeout leave the screen,
@@ -1171,6 +1180,44 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
     seedtool_zero(value, sizeof(value));
 }
 
+/* A BIP380 output descriptor for this account - fingerprint, path, xpub and
+ * a checksum, all in the one string most modern watch-only wallets (Sparrow,
+ * Bitcoin Core, others) can import directly, rather than a reader typing the
+ * key origin and xpub in by hand from the plain "Account key" screen above.
+ * Same "reveals every address" warning as export_qr, since it carries the
+ * exact same xpub - a descriptor just states the script type inline instead
+ * of leaving it implied by which menu the xpub came from. Always plain xpub,
+ * never zpub: SLIP-132 version bytes are a wallet-display convention BIP380
+ * itself has no notion of. */
+static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const uint32_t account)
+{
+    if (!acknowledge("Descriptor export", "Account key included", "A photo reveals every address")) {
+        return;
+    }
+    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    char body[DESCRIPTOR_LEN] = { 0 };
+    char value[DESCRIPTOR_LEN] = { 0 };
+    if (seedtool_account_xpub(mnemonic, passphrase, type, account, SEEDTOOL_XPUB, xpub, sizeof(xpub))
+        == SEEDTOOL_OK) {
+        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/0/*)", type == SEEDTOOL_BIP84 ? "wpkh" : "tr",
+            fphex, (unsigned)type, (unsigned)account, xpub);
+        seedtool_zero(xpub, sizeof(xpub));
+        if (seedtool_descriptor_checksum(body, value, sizeof(value)) == SEEDTOOL_OK) {
+            if (page_text("Descriptor", value)) {
+                show_account_key_qr("Descriptor", value);
+            }
+        } else {
+            (void)acknowledge("Error", "Could not derive", NULL);
+        }
+    } else {
+        seedtool_zero(xpub, sizeof(xpub));
+        (void)acknowledge("Error", "Could not derive", NULL);
+    }
+    seedtool_zero(body, sizeof(body));
+    seedtool_zero(value, sizeof(value));
+}
+
 /* A single address's own QR, opened from the address list: no account key in
  * this view to warn about or to carousel over to, since a photo of one
  * address on its own reveals nothing the address itself did not already. */
@@ -1248,9 +1295,9 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
 {
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
     for (;;) {
-        const char* items[] = { "Account key", "Addresses", "Back" };
-        const int selected = choose(title, items, 3, true);
-        if (selected < 0 || selected == 2) {
+        const char* items[] = { "Account key", "Descriptor", "Addresses", "Back" };
+        const int selected = choose(title, items, 4, true);
+        if (selected < 0 || selected == 3) {
             return;
         }
         if (selected == 0) {
@@ -1275,6 +1322,8 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                 (void)acknowledge("Error", "Could not derive account key", NULL);
             }
             seedtool_zero(xpub, sizeof(xpub));
+        } else if (selected == 1) {
+            show_descriptor(mnemonic, passphrase, fphex, type, account);
         } else {
             /* Loops back to the address list itself after each address's QR,
              * rather than out to this menu: picking another address is the

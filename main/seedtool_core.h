@@ -188,6 +188,17 @@ seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* pas
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
     seedtool_address_type_t type, uint32_t account, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
+/* BIP380 output descriptor checksum (bitcoin/bips, bip-0380.mediawiki):
+ * appends "#" plus 8 checksum characters to `descriptor`, writing the whole
+ * result to `output`. A pure function of the descriptor text alone - no
+ * mnemonic, no derivation, callable on whatever string the caller already
+ * assembled from a watch-only key origin and xpub. EINVAL if `descriptor`
+ * contains a character outside the checksum's own charset (a plain ASCII
+ * structural set; shouldn't happen for anything this firmware itself
+ * assembles, checked rather than trusted blindly). ENOSPACE if `output_len`
+ * is too small for descriptor + "#" + 8 checksum characters + a NUL. */
+seedtool_result_t seedtool_descriptor_checksum(const char* descriptor, char* output, size_t output_len);
+
 void seedtool_zero(void* ptr, size_t len);
 
 #endif

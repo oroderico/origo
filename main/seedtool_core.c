@@ -674,3 +674,87 @@ seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* p
     seedtool_zero(&account, sizeof(account));
     return ret;
 }
+
+/* bip-0380.mediawiki's own reference charsets and generator constants,
+ * transcribed verbatim - this is the entire spec, not an approximation of
+ * it. INPUT_CHARSET is the checksum's structural alphabet (every character a
+ * descriptor can legally contain); CHECKSUM_CHARSET is bech32's own 32-symbol
+ * alphabet, reused here as BIP380 itself reuses it. */
+static const char DESCRIPTOR_INPUT_CHARSET[]
+    = "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
+static const char DESCRIPTOR_CHECKSUM_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+static int descriptor_charset_index(const char c)
+{
+    for (int i = 0; DESCRIPTOR_INPUT_CHARSET[i]; ++i) {
+        if (DESCRIPTOR_INPUT_CHARSET[i] == c) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* One step of BIP380's polymod, over the same GF(2)-polynomial construction
+ * bech32's own checksum uses (a different generator, but the identical
+ * shape) - a 35-bit state clocked in 5 bits per symbol, folded through five
+ * fixed 40-bit generator polynomials whenever the top 5 bits that fall off
+ * are set. */
+static uint64_t descriptor_polymod_step(uint64_t chk, const uint32_t value)
+{
+    static const uint64_t generator[5]
+        = { 0xf5dee51989ULL, 0xa9fdca3312ULL, 0x1bab10e32dULL, 0x3706b1677aULL, 0x644d626ffdULL };
+    const uint64_t top = chk >> 35;
+    chk = ((chk & 0x7ffffffffULL) << 5) ^ value;
+    for (int i = 0; i < 5; ++i) {
+        if ((top >> i) & 1) {
+            chk ^= generator[i];
+        }
+    }
+    return chk;
+}
+
+seedtool_result_t seedtool_descriptor_checksum(const char* descriptor, char* output, const size_t output_len)
+{
+    if (!descriptor || !output) {
+        return SEEDTOOL_EINVAL;
+    }
+    const size_t len = strlen(descriptor);
+    if (len + 1 + 8 + 1 > output_len) {
+        return SEEDTOOL_ENOSPACE;
+    }
+    /* descsum_expand: every character contributes its low 5 bits as one
+     * symbol; its top bits (0-3, since the charset has under 128 entries)
+     * accumulate three at a time into a base-4 "class" symbol clocked in
+     * separately - BIP380's own way of folding a >32-symbol alphabet through
+     * a 5-bit-per-step polymod without a symbol ever exceeding 5 bits. */
+    uint64_t chk = 1;
+    unsigned cls = 0;
+    unsigned clscount = 0;
+    for (size_t i = 0; i < len; ++i) {
+        const int v = descriptor_charset_index(descriptor[i]);
+        if (v < 0) {
+            return SEEDTOOL_EINVAL;
+        }
+        chk = descriptor_polymod_step(chk, (uint32_t)v & 31);
+        cls = cls * 3 + ((uint32_t)v >> 5);
+        if (++clscount == 3) {
+            chk = descriptor_polymod_step(chk, cls);
+            cls = 0;
+            clscount = 0;
+        }
+    }
+    if (clscount > 0) {
+        chk = descriptor_polymod_step(chk, cls);
+    }
+    for (int i = 0; i < 8; ++i) {
+        chk = descriptor_polymod_step(chk, 0);
+    }
+    chk ^= 1;
+    memcpy(output, descriptor, len);
+    output[len] = '#';
+    for (size_t i = 0; i < 8; ++i) {
+        output[len + 1 + i] = DESCRIPTOR_CHECKSUM_CHARSET[(chk >> (5 * (7 - i))) & 31];
+    }
+    output[len + 9] = '\0';
+    return SEEDTOOL_OK;
+}

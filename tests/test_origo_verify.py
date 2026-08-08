@@ -74,6 +74,24 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(payload, f"[{fingerprint}/84'/0'/999']{accounts_max[84]}")
         self.assertLessEqual(len(payload), verify.QR_CAPACITY)
 
+    def test_descriptor_checksum_matches_bip380_vector(self):
+        # bip-0380.mediawiki's own published example, not a vector this
+        # project invented for itself.
+        self.assertEqual(verify.descriptor_checksum("raw(deadbeef)"), "89f8spxm")
+        with self.assertRaisesRegex(ValueError, "checksum charset"):
+            verify.descriptor_checksum("raw(dead\nbeef)")
+
+    def test_descriptor_matches_the_published_bip84_vector(self):
+        # The exact checksum this same descriptor got independently from the
+        # firmware's own C implementation (seedtool_descriptor_checksum) -
+        # two from-scratch implementations of bip-0380.mediawiki's pseudocode
+        # agreeing is the actual confidence here, not either one alone.
+        fingerprint, _, accounts = verify.addresses(self.MNEMONIC, "", 0)
+        self.assertEqual(
+            verify.descriptor(fingerprint, 84, accounts[84]),
+            f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/0/*)#wc3n3van",
+        )
+
     def test_krux_compatible_d6_transcript_vector(self):
         entries = list("123456" * 8 + "12")
         text = verify.transcript("d6", entries, 50)
