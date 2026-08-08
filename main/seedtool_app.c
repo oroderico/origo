@@ -549,6 +549,14 @@ static bool page_text(const char* title, const char* text)
  * its "Z" compressed encoding, so this always sends "2" (plain base32).
  * Returns the key that ended the animation, exactly what a single
  * seedtool_display_qr call would have handed back. */
+/* Shared by both places show_bbqr steps a frame by hand (already manual, and
+ * the moment auto-advance switches to manual), so the wraparound at each end
+ * of the frame range is one expression, not two copies to keep in sync. */
+static size_t bbqr_step_part(const size_t part, const size_t parts, const bool forward)
+{
+    return forward ? (part + 1) % parts : (part + parts - 1) % parts;
+}
+
 static seedtool_key_t show_bbqr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
@@ -593,7 +601,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
                 continue;
             }
             if (key == KEY_PREV || key == KEY_NEXT) {
-                part = key == KEY_PREV ? (part + parts - 1) % parts : (part + 1) % parts;
+                part = bbqr_step_part(part, parts, key == KEY_NEXT);
                 continue;
             }
             return key;
@@ -609,7 +617,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
         }
         if (key == KEY_PREV || key == KEY_NEXT) {
             manual = true;
-            part = key == KEY_PREV ? (part + parts - 1) % parts : (part + 1) % parts;
+            part = bbqr_step_part(part, parts, key == KEY_NEXT);
             continue;
         }
         return key;
@@ -1616,34 +1624,6 @@ done:
     seedtool_zero(passphrase, sizeof(passphrase));
 }
 
-/* The word at zero-based `index` of a mnemonic already known to be single
- * words joined by single spaces (join_words' own format) - the inverse of
- * join_words, needed here since confirm_backup only has the joined string,
- * not the words[][] array a fresh generation never builds. */
-static bool nth_word(const char* mnemonic, const size_t index, char* out, const size_t out_len)
-{
-    size_t word = 0;
-    const char* start = mnemonic;
-    for (const char* cursor = mnemonic;; ++cursor) {
-        if (*cursor == ' ' || *cursor == '\0') {
-            if (word == index) {
-                const size_t len = (size_t)(cursor - start);
-                if (len + 1 > out_len) {
-                    return false;
-                }
-                memcpy(out, start, len);
-                out[len] = '\0';
-                return true;
-            }
-            if (*cursor == '\0') {
-                return false;
-            }
-            start = cursor + 1;
-            ++word;
-        }
-    }
-}
-
 /* A backup is only as good as its transcription: quizzes one word from every
  * group of three consecutive words in the mnemonic just shown, against what
  * was actually generated - catching a copying mistake here rather than the
@@ -1676,37 +1656,42 @@ static bool nth_word(const char* mnemonic, const size_t index, char* out, const 
 
 static int confirm_backup(const char* mnemonic, const size_t count)
 {
+    /* The canonical parser (also show_numbered_list's), not a hand-rolled
+     * space-split: it validates every word against the wordlist on the way
+     * in, so a malformed mnemonic is caught here rather than confirm_backup
+     * quizzing against a substring nobody checked. */
+    uint16_t numbers[24];
+    size_t total = 0;
+    if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &total) != SEEDTOOL_OK) {
+        return -1;
+    }
     const size_t checks = count / 3;
     bool matched[CONFIRM_BACKUP_MAX_CHECKS] = { false };
     size_t n = 0;
     while (n < checks) {
         const size_t index = n * 3 + 1;
-        char expected[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+        const char* const expected = seedtool_word(numbers[index] - 1);
         char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        if (!nth_word(mnemonic, index, expected, sizeof(expected))) {
-            seedtool_zero(expected, sizeof(expected));
-            return -1;
-        }
         const int result = enter_word(index + 1, count, typed, sizeof(typed));
         if (result < 0) {
-            seedtool_zero(expected, sizeof(expected));
             seedtool_zero(typed, sizeof(typed));
+            seedtool_zero(numbers, sizeof(numbers));
             return -1;
         }
         if (result == 0) {
-            seedtool_zero(expected, sizeof(expected));
             seedtool_zero(typed, sizeof(typed));
             if (!n) {
+                seedtool_zero(numbers, sizeof(numbers));
                 return 0;
             }
             --n;
             continue;
         }
         matched[n] = strcmp(typed, expected) == 0;
-        seedtool_zero(expected, sizeof(expected));
         seedtool_zero(typed, sizeof(typed));
         ++n;
     }
+    seedtool_zero(numbers, sizeof(numbers));
     bool all_matched = true;
     for (size_t i = 0; i < checks; ++i) {
         all_matched = all_matched && matched[i];
@@ -1920,9 +1905,13 @@ static int collect_entropy(const int source, const size_t words)
         }
         if (proceed && !poor && !pattern) {
             /* The positive case: the bar's outline goes green, the one point in
-             * the run where seedtool_progress_t.complete is ever true. */
+             * the run where seedtool_progress_t.complete is ever true - but the
+             * verdict is also spelled out in the question itself, not left to
+             * the border colour alone, since not every reader (or every
+             * lighting condition) tells a green outline from a dim one at a
+             * glance. */
             const seedtool_progress_t complete = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
-            proceed = dice_confirm(names[source], bits_line, "Generate mnemonic?", &complete);
+            proceed = dice_confirm(names[source], bits_line, "Looks good - generate?", &complete);
         }
         if (proceed) {
             break;
