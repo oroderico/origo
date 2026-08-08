@@ -34,6 +34,13 @@
 #define KEY_HEIGHT 27
 #define KEYBOARD_TOP (SEEDTOOL_DISPLAY_HEIGHT - 3 * KEY_HEIGHT)
 
+/* The 6px gap left between the typed text (ends y=48) and the keyboard
+ * (starts at KEYBOARD_TOP=54) - same DICE_BAR_X/WIDTH margin as the entropy
+ * bar, so a word-count progress bar reads as the same widget in a narrower
+ * space, not a new one. */
+#define WORD_BAR_Y (KEYBOARD_TOP - 4)
+#define WORD_BAR_HEIGHT 3
+
 /* The 16px title, three 33px rows and the 11px footer fill the 135px display
  * exactly. The rightmost strip carries the scroll arrows and is kept clear of
  * the selection bar so a long label never runs underneath one. */
@@ -625,12 +632,20 @@ void seedtool_render_dice_screen(const char* title, const char* line1, const cha
     draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
 }
 
-void seedtool_render_keyboard(
-    const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
+void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
+    const size_t selected, const size_t position, const size_t total)
 {
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, 2);
     draw_typed(tft_Ubuntu16, text, 32);
+    if (total && position) {
+        const size_t done = position > total ? total : position - 1;
+        const int filled = (int)(DICE_BAR_WIDTH * done / total);
+        fill_rect(DICE_BAR_X, WORD_BAR_Y, DICE_BAR_WIDTH, WORD_BAR_HEIGHT, COLOR_DIM);
+        if (filled) {
+            fill_rect(DICE_BAR_X, WORD_BAR_Y, filled, WORD_BAR_HEIGHT, COLOR_HIGHLIGHT);
+        }
+    }
 
     size_t key = 0;
     int y = KEYBOARD_TOP;

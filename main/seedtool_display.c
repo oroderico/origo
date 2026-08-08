@@ -222,10 +222,10 @@ void seedtool_display_list(const char* title, const char* const* items, const si
     flush();
 }
 
-void seedtool_display_keyboard(
-    const char* title, const char* text, const char* layout, const bool* enabled, const size_t selected)
+void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
+    const size_t selected, const size_t position, const size_t total)
 {
-    seedtool_render_keyboard(title, text, layout, enabled, selected);
+    seedtool_render_keyboard(title, text, layout, enabled, selected, position, total);
     flush();
 }
 

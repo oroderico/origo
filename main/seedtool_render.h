@@ -92,9 +92,14 @@ void seedtool_render_list(const char* title, const char* const* items, size_t co
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole
  * layout, ignoring the separators; disabled keys are drawn dimmed and are meant
- * to be unreachable. `selected` is a key position and is drawn highlighted. */
-void seedtool_render_keyboard(
-    const char* title, const char* text, const char* layout, const bool* enabled, size_t selected);
+ * to be unreachable. `selected` is a key position and is drawn highlighted.
+ * `total` is the word count a mnemonic entry is part of; `position` (1-based)
+ * is which word this screen is typing. A thin bar between the typed text and
+ * the keys fills to `position - 1` of `total`, the words already behind this
+ * one - passphrase and account-index entry have no such count, so `total` of
+ * 0 skips the bar entirely rather than drawing an empty one. */
+void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
+    size_t selected, size_t position, size_t total);
 
 /* Layout geometry, kept here so the string is read the same way everywhere it is
  * drawn, walked or measured. */

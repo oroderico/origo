@@ -1102,13 +1102,13 @@ static int self_test(void)
     /* Draw the real layouts, each opened at its centre, so one that overflows a
      * row is caught here rather than on the device. */
     const bool letters[SEEDTOOL_LETTERS + 1] = { true };
-    seedtool_render_keyboard(
-        "Word 1/12", "aba", SEEDTOOL_WORD_LAYOUT, letters, seedtool_layout_center(SEEDTOOL_WORD_LAYOUT));
+    seedtool_render_keyboard("Word 1/12", "aba", SEEDTOOL_WORD_LAYOUT, letters,
+        seedtool_layout_center(SEEDTOOL_WORD_LAYOUT), 1, 12);
     seedtool_render_keyboard("Word 12/12", "4", SEEDTOOL_WORD_NUMBER_LAYOUT, NULL,
-        seedtool_layout_center(SEEDTOOL_WORD_NUMBER_LAYOUT));
+        seedtool_layout_center(SEEDTOOL_WORD_NUMBER_LAYOUT), 12, 12);
     for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
         seedtool_render_keyboard("BIP39 passphrase", "", seedtool_passphrase_layouts[page], NULL,
-            seedtool_layout_center(seedtool_passphrase_layouts[page]));
+            seedtool_layout_center(seedtool_passphrase_layouts[page]), 0, 0);
     }
     seedtool_zero(address, sizeof(address));
     seedtool_zero(xpub, sizeof(xpub));

@@ -559,6 +559,13 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
         return KEY_SELECT;
     }
     size_t part = 0;
+    /* Once the reader steps a frame by hand, auto-advance stops for the rest
+     * of this screen: the 700ms cadence is a guess at what a given camera
+     * needs, and a reader who has already found that guess wrong is better
+     * served by a still frame they step themselves than by the same guess
+     * still running underneath them. A single-part value has nothing to
+     * step to, so it starts (and stays) in that same still mode. */
+    bool manual = parts <= 1;
     for (;;) {
         char frame[BBQR_FRAME_LEN];
         /* export_qr's title buffer is 24 bytes; %.20s plus the widest
@@ -580,6 +587,17 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             (void)acknowledge("Too long for a QR", title, "Read it as text instead");
             return KEY_SELECT;
         }
+        if (manual) {
+            const seedtool_key_t key = wait_key();
+            if (key == KEY_REDRAW) {
+                continue;
+            }
+            if (key == KEY_PREV || key == KEY_NEXT) {
+                part = key == KEY_PREV ? (part + parts - 1) % parts : (part + 1) % parts;
+                continue;
+            }
+            return key;
+        }
         bool ticked = false;
         const seedtool_key_t key = wait_key_or_tick(BBQR_FRAME_INTERVAL_MS, &ticked);
         if (ticked) {
@@ -587,6 +605,11 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             continue;
         }
         if (key == KEY_REDRAW) {
+            continue;
+        }
+        if (key == KEY_PREV || key == KEY_NEXT) {
+            manual = true;
+            part = key == KEY_PREV ? (part + parts - 1) % parts : (part + 1) % parts;
             continue;
         }
         return key;
@@ -717,7 +740,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             selected = nearest_enabled(enabled, WORD_KEYS, selected);
             bool picked = false;
             while (!picked) {
-                seedtool_display_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected);
+                seedtool_display_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected, position, total);
                 switch (wait_key()) {
                 case KEY_SELECT:
                     picked = true;
@@ -791,7 +814,8 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
         selected = !enabled[selected] && number ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_display_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected);
+            seedtool_display_keyboard(
+                title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, position, total);
             switch (wait_key()) {
             case KEY_SELECT:
                 picked = true;
@@ -876,7 +900,8 @@ static int enter_account(uint32_t* value)
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_display_keyboard("Account", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected);
+            seedtool_display_keyboard(
+                "Account", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
             switch (wait_key()) {
             case KEY_SELECT:
                 picked = true;
@@ -1100,7 +1125,7 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
             selected = seedtool_layout_center(layout);
         }
         const char* const tail = used > PASSPHRASE_TAIL ? output + used - PASSPHRASE_TAIL : output;
-        seedtool_display_keyboard("BIP39 passphrase", tail, layout, NULL, selected);
+        seedtool_display_keyboard("BIP39 passphrase", tail, layout, NULL, selected, 0, 0);
         switch (wait_key()) {
         case KEY_PREV:
             selected = (selected + keys - 1) % keys;
@@ -1405,13 +1430,18 @@ static void show_stackbit(const char* mnemonic)
  * transcribing onto a numeric one (Stackbit 1248 digits, or any backup that
  * only ever records the 1-2048 dictionary number) - same list, same paging,
  * just the second column changes. */
-static void show_numbered_list(const char* mnemonic, const bool show_words)
+/* Same true/false contract as page_text: true on Select or paging past the
+ * last page, false on backing out at the first page or a timeout - so a
+ * caller chaining this into a must-complete sequence (show_generated) can
+ * short-circuit on it exactly like any other page_text step, while
+ * show_backup_menu's own callers, which don't chain, just discard it. */
+static bool show_numbered_list(const char* mnemonic, const bool show_words)
 {
     uint16_t numbers[24];
     size_t count = 0;
     if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
         (void)acknowledge("Error", "Could not compute", "word numbers");
-        return;
+        return false;
     }
     const size_t pages = (count + 3) / 4;
     size_t page = 0;
@@ -1441,18 +1471,18 @@ static void show_numbered_list(const char* mnemonic, const bool show_words)
         switch (wait_key()) {
         case KEY_SELECT:
             seedtool_zero(numbers, sizeof(numbers));
-            return;
+            return true;
         case KEY_NEXT:
             if (page + 1 >= pages) {
                 seedtool_zero(numbers, sizeof(numbers));
-                return;
+                return true;
             }
             ++page;
             break;
         case KEY_PREV:
             if (!page) {
                 seedtool_zero(numbers, sizeof(numbers));
-                return;
+                return false;
             }
             --page;
             break;
@@ -1460,7 +1490,7 @@ static void show_numbered_list(const char* mnemonic, const bool show_words)
             break;
         default:
             seedtool_zero(numbers, sizeof(numbers));
-            return;
+            return false;
         }
     }
 }
@@ -1524,9 +1554,9 @@ static void show_backup_menu(const char* mnemonic)
             return;
         }
         if (selected == 0) {
-            show_numbered_list(mnemonic, true);
+            (void)show_numbered_list(mnemonic, true);
         } else if (selected == 1) {
-            show_numbered_list(mnemonic, false);
+            (void)show_numbered_list(mnemonic, false);
         } else if (selected == 2) {
             show_stackbit(mnemonic);
         } else {
@@ -1586,13 +1616,125 @@ done:
     seedtool_zero(passphrase, sizeof(passphrase));
 }
 
+/* The word at zero-based `index` of a mnemonic already known to be single
+ * words joined by single spaces (join_words' own format) - the inverse of
+ * join_words, needed here since confirm_backup only has the joined string,
+ * not the words[][] array a fresh generation never builds. */
+static bool nth_word(const char* mnemonic, const size_t index, char* out, const size_t out_len)
+{
+    size_t word = 0;
+    const char* start = mnemonic;
+    for (const char* cursor = mnemonic;; ++cursor) {
+        if (*cursor == ' ' || *cursor == '\0') {
+            if (word == index) {
+                const size_t len = (size_t)(cursor - start);
+                if (len + 1 > out_len) {
+                    return false;
+                }
+                memcpy(out, start, len);
+                out[len] = '\0';
+                return true;
+            }
+            if (*cursor == '\0') {
+                return false;
+            }
+            start = cursor + 1;
+            ++word;
+        }
+    }
+}
+
+/* A backup is only as good as its transcription: quizzes one word from every
+ * group of three consecutive words in the mnemonic just shown, against what
+ * was actually generated - catching a copying mistake here rather than the
+ * day it matters, the same re-type-and-compare idea enter_passphrase_once
+ * already uses to confirm a passphrase. The grouping matches Blockstream
+ * Jade's own confirmation step (display_confirm_mnemonic in its
+ * process/mnemonic.c: one word quizzed per run of three, so every word is at
+ * least shown) rather than a flat count regardless of length - 4 checks for
+ * 12 words, 8 for 24, not 3 either way. Unlike Jade, the word picked within
+ * each group is fixed (always the middle one) rather than random: "no
+ * screen in the entry path may depend on the device RNG" (enter_word's own
+ * doc comment) still applies here, and a fixed middle word already reaches
+ * every group at least as well as a random pick within it would. A miss
+ * does not repeat the seed's own generation - the mnemonic already is what
+ * it is, correct or not is moot by the time it's hashed - it only warns,
+ * since the point is to catch the reader's transcription, not to gate a
+ * seed that is already valid. Backspace past the start of a quiz word steps
+ * back to the previous one, same as enter_mnemonic_words - it is not a
+ * wrong answer, and treating it as one is what made this feel like it was
+ * scoring a random keypress instead of asking to go back. Backing out of
+ * the first quiz word leaves confirmation altogether - but unlike most
+ * other optional steps here, that cannot silently fall through to whatever
+ * comes next (the wallet's passphrase prompt): show_generated shows the
+ * words again instead, since back is meant to step back one stage, not skip
+ * forward past confirmation into an unrelated screen. Returns 1 once the
+ * quiz completes (matched or not - a miss only warns, see above), 0 on
+ * backing out of the first word, -1 on timeout, the same three-way contract
+ * every other entry screen here uses. */
+#define CONFIRM_BACKUP_MAX_CHECKS 8 /* 24 words / 3 per group - the longer mnemonic */
+
+static int confirm_backup(const char* mnemonic, const size_t count)
+{
+    const size_t checks = count / 3;
+    bool matched[CONFIRM_BACKUP_MAX_CHECKS] = { false };
+    size_t n = 0;
+    while (n < checks) {
+        const size_t index = n * 3 + 1;
+        char expected[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+        char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+        if (!nth_word(mnemonic, index, expected, sizeof(expected))) {
+            seedtool_zero(expected, sizeof(expected));
+            return -1;
+        }
+        const int result = enter_word(index + 1, count, typed, sizeof(typed));
+        if (result < 0) {
+            seedtool_zero(expected, sizeof(expected));
+            seedtool_zero(typed, sizeof(typed));
+            return -1;
+        }
+        if (result == 0) {
+            seedtool_zero(expected, sizeof(expected));
+            seedtool_zero(typed, sizeof(typed));
+            if (!n) {
+                return 0;
+            }
+            --n;
+            continue;
+        }
+        matched[n] = strcmp(typed, expected) == 0;
+        seedtool_zero(expected, sizeof(expected));
+        seedtool_zero(typed, sizeof(typed));
+        ++n;
+    }
+    bool all_matched = true;
+    for (size_t i = 0; i < checks; ++i) {
+        all_matched = all_matched && matched[i];
+    }
+    (void)acknowledge(all_matched ? "Backup confirmed" : "Backup not confirmed",
+        all_matched ? "Words matched" : "Re-check your words", NULL);
+    return 1;
+}
+
 static void show_generated(seedtool_generated_t* generated)
 {
     char hash[65];
     hexstr(generated->hash, sizeof(generated->hash), hash);
-    if (page_text("Canonical transcript", generated->transcript) && page_text("SHA256", hash)
-        && page_text("BIP39 mnemonic", generated->mnemonic)) {
-        show_wallet_data(generated->mnemonic);
+    if (page_text("Canonical transcript", generated->transcript) && page_text("SHA256", hash)) {
+        /* Backing out of the quiz's first word (confirm_backup's 0) shows
+         * the words again rather than falling through, so back always steps
+         * back one stage instead of skipping past confirmation into the
+         * wallet's passphrase prompt. */
+        while (show_numbered_list(generated->mnemonic, true)) {
+            const int outcome = confirm_backup(generated->mnemonic, generated->words);
+            if (outcome < 0) {
+                break;
+            }
+            if (outcome == 1) {
+                show_wallet_data(generated->mnemonic);
+                break;
+            }
+        }
     }
     seedtool_zero(hash, sizeof(hash));
 }
@@ -1765,8 +1907,13 @@ static int collect_entropy(const int source, const size_t words)
         entropy_quality((seedtool_source_t)source, values, required, &bits, &pattern);
         const bool poor = (size_t)bits + DICE_ENTROPY_TOLERANCE < min_bits;
         bool proceed = true;
+        /* Shown on both the poor-entropy and the looks-good screen below, so
+         * either way the reader sees the number the accept/reject decision
+         * was actually made on, not just the verdict. */
+        char bits_line[24];
+        (void)snprintf(bits_line, sizeof(bits_line), "%d of %u bits", bits, (unsigned)min_bits);
         if (poor) {
-            proceed = acknowledge("Poor entropy!", "Proceed anyway?", NULL);
+            proceed = acknowledge("Poor entropy!", bits_line, "Proceed anyway?");
         }
         if (proceed && pattern) {
             proceed = acknowledge("Pattern detected!", "Proceed anyway?", NULL);
@@ -1775,7 +1922,7 @@ static int collect_entropy(const int source, const size_t words)
             /* The positive case: the bar's outline goes green, the one point in
              * the run where seedtool_progress_t.complete is ever true. */
             const seedtool_progress_t complete = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
-            proceed = dice_confirm(names[source], "Entropy looks good", "Generate mnemonic?", &complete);
+            proceed = dice_confirm(names[source], bits_line, "Generate mnemonic?", &complete);
         }
         if (proceed) {
             break;
