@@ -1063,7 +1063,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
              * analysis loses that bound through the words[][...] parameter
              * decay once inlined this deep - see the identical fix on
              * browse_addresses's snprintf. */
-            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%2u. %.*s", (unsigned)(i + 1),
+            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%02u. %.*s", (unsigned)(i + 1),
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
         }
