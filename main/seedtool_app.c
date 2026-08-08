@@ -2140,7 +2140,8 @@ static void show_settings_menu(void)
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
                 "record entropy independently. Left and right move, both buttons together select. Origo is derived "
                 "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
-                "Blockstream. The entropy quality bar is adapted from Krux (github.com/selfcustody/krux).");
+                "Blockstream. Several UI elements - entropy quality, BBQr export, Compact SeedQR, Zoomed Regions "
+                "and Stackbit 1248 - are adapted from Krux (github.com/selfcustody/krux).");
         }
     }
 }
