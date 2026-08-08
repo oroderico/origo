@@ -809,8 +809,12 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
 }
 
 /* Returns 1 when a whole mnemonic was entered, 0 when the user backed out of the
- * first word or the method menu, -1 on timeout or overflow. */
-static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
+ * first word or the method menu, -1 on timeout or overflow. Fills `words` (a
+ * caller-owned array so restore_mnemonic below can keep reviewing them after
+ * entry finishes) and, if `by_number` is not NULL, reports which entry method
+ * was used - re-entering a single word during review needs the same one. */
+static int enter_mnemonic_words(
+    const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
 {
     const char* methods[] = { "Type the letters", "Enter word numbers", "Back" };
     const int method = choose("Word entry", methods, 3, true);
@@ -820,7 +824,9 @@ static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemo
     if (method == 2) {
         return 0;
     }
-    char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+    if (by_number) {
+        *by_number = method != 0;
+    }
     int outcome = 1;
     size_t index = 0;
     while (index < count) {
@@ -842,19 +848,123 @@ static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemo
         }
         ++index;
     }
+    return outcome;
+}
 
+/* words[0..count) joined with single spaces, the same layout seedtool_generate's
+ * transcript-to-mnemonic conversion and every published BIP39 vector use.
+ * Shared by enter_mnemonic (once, after entry) and review_and_confirm (again
+ * after every edit), so a mid-review fix is checked against the exact string
+ * seedtool_validate_mnemonic will see. */
+static bool join_words(
+    char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
+{
     size_t used = 0;
-    for (size_t i = 0; outcome == 1 && i < count; ++i) {
+    mnemonic[0] = '\0';
+    for (size_t i = 0; i < count; ++i) {
         const size_t n = strlen(words[i]);
         if (used + n + (i ? 1 : 0) + 1 > mnemonic_len) {
-            outcome = -1;
-            break;
+            return false;
         }
         if (i) {
             mnemonic[used++] = ' ';
         }
         memcpy(mnemonic + used, words[i], n + 1);
         used += n;
+    }
+    return true;
+}
+
+static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
+{
+    char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+    int outcome = enter_mnemonic_words(count, words, NULL);
+    if (outcome == 1 && !join_words(words, count, mnemonic, mnemonic_len)) {
+        outcome = -1;
+    }
+    seedtool_zero(words, sizeof(words));
+    return outcome;
+}
+
+static char review_labels[24][32];
+static const char* review_items[24 + 2]; /* + "Continue"/status, + "Back" */
+
+/* Lets the reader jump straight to any already-entered word and fix it,
+ * rather than losing the other 11 or 23 correct ones over a single mistake -
+ * restore_seed used to just discard the whole entry and show "INVALID
+ * CHECKSUM" with no way back in. Shown after every full entry, not only a
+ * failed one, so a word can be double-checked before continuing at all.
+ * `words` is edited in place; `mnemonic` is rejoined from it after every
+ * change so seedtool_validate_mnemonic always grades the current state.
+ * Returns 1 once "Continue" is chosen with a valid checksum, 0 on explicit
+ * Back, -1 on timeout or overflow - the same three-way contract every other
+ * entry screen here uses. */
+static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number,
+    char* mnemonic, const size_t mnemonic_len)
+{
+    size_t cursor = 0;
+    for (;;) {
+        if (!join_words(words, count, mnemonic, mnemonic_len)) {
+            return -1;
+        }
+        const bool valid = seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK;
+        for (size_t i = 0; i < count; ++i) {
+            /* Precision on %s, not a bare conversion: words[i] is genuinely
+             * bounded (SEEDTOOL_MAX_WORD_LEN), but GCC's format-truncation
+             * analysis loses that bound through the words[][...] parameter
+             * decay once inlined this deep - see the identical fix on
+             * browse_addresses's snprintf. */
+            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%2u. %.*s", (unsigned)(i + 1),
+                (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
+            review_items[i] = review_labels[i];
+        }
+        review_items[count] = valid ? "Continue" : "Checksum invalid";
+        review_items[count + 1] = "Back";
+        const int selected
+            = choose_at(valid ? "Review words" : "Review - fix a word", review_items, count + 2, true, cursor);
+        if (selected < 0) {
+            return -1;
+        }
+        if ((size_t)selected == count + 1) {
+            return 0;
+        }
+        if ((size_t)selected == count) {
+            if (valid) {
+                return 1;
+            }
+            /* Nothing to do but keep reviewing - Continue only exits once the
+             * checksum actually passes, since a mnemonic that fails it must
+             * never reach show_wallet_data. */
+            continue;
+        }
+        cursor = (size_t)selected;
+        char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+        const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
+                                      : enter_word(selected + 1, count, word, sizeof(word));
+        if (result == 1) {
+            strcpy(words[selected], word);
+        } else if (result < 0) {
+            seedtool_zero(word, sizeof(word));
+            return -1;
+        }
+        /* result == 0: backed out of re-entering this word, so it is left
+         * exactly as it was and the list is simply shown again. */
+        seedtool_zero(word, sizeof(word));
+    }
+}
+
+/* enter_mnemonic_words, then review_and_confirm on the result: the two-step
+ * restore_seed actually wants. Not folded into enter_mnemonic itself since
+ * complete_checksum also calls that for a still-partial (11 or 23 word)
+ * mnemonic that could never pass seedtool_validate_mnemonic yet - the review
+ * gate belongs only where the mnemonic is meant to be whole and correct. */
+static int restore_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
+{
+    char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+    bool by_number = false;
+    int outcome = enter_mnemonic_words(count, words, &by_number);
+    if (outcome == 1) {
+        outcome = review_and_confirm(words, count, by_number, mnemonic, mnemonic_len);
     }
     seedtool_zero(words, sizeof(words));
     return outcome;
@@ -1630,15 +1740,13 @@ static void restore_seed(void)
             return;
         }
         char mnemonic[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
-        const int outcome = enter_mnemonic(selected ? 24 : 12, mnemonic, sizeof(mnemonic));
-        if (outcome == 1) {
-            if (seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK) {
-                if (acknowledge("Checksum valid", "BIP39 English", "Derivation unlocked")) {
-                    show_wallet_data(mnemonic);
-                }
-            } else {
-                (void)acknowledge("INVALID CHECKSUM", "Addresses are blocked", "Check every word");
-            }
+        /* restore_mnemonic's review step only ever returns 1 with a checksum
+         * that already passed - a reader who fixes a word doesn't lose the
+         * other 11 or 23, and one who can't gets to keep trying instead of
+         * being dropped straight back to "12 words / 24 words / Back". */
+        const int outcome = restore_mnemonic(selected ? 24 : 12, mnemonic, sizeof(mnemonic));
+        if (outcome == 1 && acknowledge("Checksum valid", "BIP39 English", "Derivation unlocked")) {
+            show_wallet_data(mnemonic);
         }
         seedtool_zero(mnemonic, sizeof(mnemonic));
         if (outcome != 0) {
