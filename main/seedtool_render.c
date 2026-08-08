@@ -751,6 +751,31 @@ void seedtool_render_stackbit_physical_screen(
     draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
 }
 
+/* Scale/extent/position math shared by every screen that draws a square,
+ * height-bound grid of `modules` cells with a title column to its right:
+ * draw_qr and seedtool_render_qr_bytes_map both pass the QR's own size plus
+ * its 2-module quiet zone, draw_qr_region passes a zoomed region's own
+ * (quiet-zone-free) size - same shape at a different cell count either way,
+ * so one computation serves all three instead of each re-deriving it. */
+typedef struct {
+    int scale;
+    int extent;
+    int top;
+    int title_x;
+    int title_width;
+} qr_geometry_t;
+
+static qr_geometry_t qr_geometry(const int modules)
+{
+    qr_geometry_t g;
+    g.scale = SEEDTOOL_DISPLAY_HEIGHT / modules;
+    g.extent = modules * g.scale;
+    g.top = (SEEDTOOL_DISPLAY_HEIGHT - g.extent) / 2;
+    g.title_x = QR_LEFT + g.extent + 5;
+    g.title_width = SEEDTOOL_DISPLAY_WIDTH - g.title_x - 3;
+    return g;
+}
+
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
  * `qr`'s modules are populated, whichever encoder filled them. `modules` is
  * only needed back to zero it once drawn — it held whatever the mnemonic or
@@ -765,11 +790,12 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
      * than the display is wide — so a smaller QR (Compact SeedQR's version 1
      * or 2) fills as much of the screen as it can rather than sitting at the
      * scale version 6 happens to need. */
-    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (qr->size + 2);
-    const int extent = (qr->size + 2) * scale;
-    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
-    const int title_x = QR_LEFT + extent + 5;
-    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
+    const qr_geometry_t g = qr_geometry(qr->size + 2);
+    const int scale = g.scale;
+    const int extent = g.extent;
+    const int top = g.top;
+    const int title_x = g.title_x;
+    const int title_width = g.title_width;
     seedtool_render_clear();
     fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr->size; ++y) {
@@ -889,11 +915,12 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
     }
     const size_t region_size = qr_region_size(qr.size);
     const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (qr.size + 2);
-    const int extent = (qr.size + 2) * scale;
-    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
-    const int title_x = QR_LEFT + extent + 5;
-    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
+    const qr_geometry_t g = qr_geometry(qr.size + 2);
+    const int scale = g.scale;
+    const int extent = g.extent;
+    const int top = g.top;
+    const int title_x = g.title_x;
+    const int title_width = g.title_width;
     /* The code's own top-left corner, one quiet-zone module in from the white
      * fill's corner: where the boundary grid and the region labels are drawn
      * relative to, since the quiet zone itself has no region to divide. */
@@ -949,11 +976,12 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
 {
     const size_t row = region_index / columns;
     const size_t column = region_index % columns;
-    const int scale = SEEDTOOL_DISPLAY_HEIGHT / (int)region_size;
-    const int extent = (int)region_size * scale;
-    const int top = (SEEDTOOL_DISPLAY_HEIGHT - extent) / 2;
-    const int title_x = QR_LEFT + extent + 5;
-    const int title_width = SEEDTOOL_DISPLAY_WIDTH - title_x - 3;
+    const qr_geometry_t g = qr_geometry((int)region_size);
+    const int scale = g.scale;
+    const int extent = g.extent;
+    const int top = g.top;
+    const int title_x = g.title_x;
+    const int title_width = g.title_width;
     seedtool_render_clear();
     for (size_t y = 0; y < region_size; ++y) {
         for (size_t x = 0; x < region_size; ++x) {
