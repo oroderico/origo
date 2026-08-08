@@ -30,8 +30,17 @@
 #define ADDRESS_LIST_ROWS (SEEDTOOL_MAX_ADDRESS_INDEX + 1)
 #define ADDRESS_LABEL_LEN (8 + SEEDTOOL_MAX_ADDRESS_LEN)
 
-#define NAV_FOOTER "L/R move   BOTH select"
-#define ACK_FOOTER "BOTH continue   L/R back"
+/* "Up/Down" rather than "L/R": the two buttons sit one above the other on
+ * the board's left edge, not side by side, so the left button (KEY_PREV)
+ * reads physically as "up" and the right (KEY_NEXT) as "down" - see the
+ * numeric carousel's own reasoning in enter_value, which already treats
+ * left as "up" for exactly this reason. Spelled out rather than an arrow
+ * glyph: the fonts are 95-character ASCII with no arrow, and there is no
+ * font-generation tool in this repo to add one - a hand-drawn icon (the
+ * backspace key's own fix for the same gap) would mean the footer stops
+ * being plain text, which every screen that draws one currently assumes. */
+#define NAV_FOOTER "Up/Down move   BOTH select"
+#define ACK_FOOTER "BOTH continue   Up/Down back"
 
 /* Word entry keyboard: the letters plus backspace. */
 #define WORD_LAYOUT SEEDTOOL_WORD_LAYOUT
@@ -134,7 +143,7 @@ static seedtool_key_t wait_key(void)
             return key;
         }
     }
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   L/R erase");
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
     /* The warning has replaced the caller's screen, so an extended session must
      * repaint it rather than let the next press act on what is no longer shown. */
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
@@ -161,7 +170,7 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
         }
         return key;
     }
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   L/R erase");
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
@@ -2144,8 +2153,9 @@ static void show_settings_menu(void)
         } else {
             (void)page_text("Safety",
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
-                "record entropy independently. Left and right move, both buttons together select. Origo is derived "
-                "from parts of Blockstream Jade (github.com/Blockstream/Jade), not affiliated with or endorsed by "
+                "record entropy independently. The two buttons sit one above the other; top and bottom move, both "
+                "together select. Origo is derived from parts of Blockstream Jade (github.com/Blockstream/Jade), "
+                "not affiliated with or endorsed by "
                 "Blockstream. Several UI elements - entropy quality, BBQr export, Compact SeedQR, Zoomed Regions "
                 "and Stackbit 1248 - are adapted from Krux (github.com/selfcustody/krux).");
         }
