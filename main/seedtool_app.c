@@ -907,64 +907,56 @@ static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemo
     return outcome;
 }
 
-/* Lets the reader step sideways through every already-entered word and fix
- * any of them, rather than losing the other 11 or 23 correct ones over a
- * single mistake - restore_seed used to just discard the whole entry and
- * show "INVALID CHECKSUM" with no way back in. A carousel (L/R steps between
- * words, BOTH acts on the one shown), not a scrolling list: the same shape
- * show_stackbit and the QR screens already step through their own frames
- * with, one word at a time rather than several rows at once. Two extra steps
- * past the last word - Continue (or the checksum's current verdict) and Back
- * - ride the same carousel instead of a separate menu, the way the Compact
- * SeedQR carousel already mixes its map and zoomed tiles in with the plain
- * code. Shown after every full entry, not only a failed one, so a word can
- * be double-checked before continuing at all. `words` is edited in place;
- * `mnemonic` is rejoined from it after every change so
+static char review_labels[24][32];
+static const char* review_items[24 + 2]; /* + "Continue"/status, + "Back" */
+
+/* Lets the reader jump straight to any already-entered word and fix it,
+ * rather than losing the other 11 or 23 correct ones over a single mistake -
+ * restore_seed used to just discard the whole entry and show "INVALID
+ * CHECKSUM" with no way back in. A scrolling list (choose_at, cursor
+ * persisted across edits), the same widget and pattern the address list
+ * already uses to pick one item out of several to inspect or act on -
+ * coherence with the rest of the app mattered more here than the carousel's
+ * one-item-at-a-time feel, since this is fundamentally "pick which of these
+ * to fix," not "read through them in order." "Continue" (or the checksum's
+ * current verdict) and "Back" ride the same list as two more rows, past the
+ * last word. Shown after every full entry, not only a failed one, so a word
+ * can be double-checked before continuing at all. `words` is edited in
+ * place; `mnemonic` is rejoined from it after every change so
  * seedtool_validate_mnemonic always grades the current state. Returns 1 once
- * Continue is chosen with a valid checksum, 0 on Back, -1 on timeout or
- * overflow - the same three-way contract every other entry screen here
- * uses. */
+ * Continue is chosen with a valid checksum, 0 on explicit Back, -1 on
+ * timeout or overflow - the same three-way contract every other entry
+ * screen here uses. */
 static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number,
     char* mnemonic, const size_t mnemonic_len)
 {
-    const size_t steps = count + 2; /* every word, then Continue, then Back */
-    size_t selected = 0;
+    size_t cursor = 0;
     for (;;) {
         if (!join_words(words, count, mnemonic, mnemonic_len)) {
             return -1;
         }
         const bool valid = seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK;
-        char footer[16];
-        (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)steps);
-        if (selected < count) {
-            char title[24];
-            (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)(selected + 1), (unsigned)count);
-            screen_text(title, words[selected], valid ? "Checksum valid" : "Checksum invalid", footer);
-        } else if (selected == count) {
-            screen_text(valid ? "Continue" : "Checksum invalid", valid ? "Derivation unlocked" : "Fix a word first",
-                NULL, footer);
-        } else {
-            screen_text("Back", "Discard this entry", NULL, footer);
+        for (size_t i = 0; i < count; ++i) {
+            /* Precision on %s, not a bare conversion: words[i] is genuinely
+             * bounded (SEEDTOOL_MAX_WORD_LEN), but GCC's format-truncation
+             * analysis loses that bound through the words[][...] parameter
+             * decay once inlined this deep - see the identical fix on
+             * browse_addresses's snprintf. */
+            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%2u. %.*s", (unsigned)(i + 1),
+                (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
+            review_items[i] = review_labels[i];
         }
-        const seedtool_key_t key = wait_key();
-        if (key == KEY_REDRAW) {
-            continue;
-        }
-        if (key == KEY_PREV) {
-            selected = selected == 0 ? steps - 1 : selected - 1;
-            continue;
-        }
-        if (key == KEY_NEXT) {
-            selected = selected == steps - 1 ? 0 : selected + 1;
-            continue;
-        }
-        if (key != KEY_SELECT) {
+        review_items[count] = valid ? "Continue" : "Checksum invalid";
+        review_items[count + 1] = "Back";
+        const int selected
+            = choose_at(valid ? "Review words" : "Review - fix a word", review_items, count + 2, true, cursor);
+        if (selected < 0) {
             return -1;
         }
-        if (selected == count + 1) {
+        if ((size_t)selected == count + 1) {
             return 0;
         }
-        if (selected == count) {
+        if ((size_t)selected == count) {
             if (valid) {
                 return 1;
             }
@@ -973,6 +965,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
              * never reach show_wallet_data. */
             continue;
         }
+        cursor = (size_t)selected;
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
         const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
                                       : enter_word(selected + 1, count, word, sizeof(word));
@@ -983,7 +976,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
             return -1;
         }
         /* result == 0: backed out of re-entering this word, so it is left
-         * exactly as it was and the carousel just shows it again. */
+         * exactly as it was and the list is simply shown again. */
         seedtool_zero(word, sizeof(word));
     }
 }
