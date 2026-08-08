@@ -1243,31 +1243,15 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
 /* One address type's worth of the wallet viewer: its account key, in whichever
  * format was asked for, and its addresses. SLIP-132 defines no taproot version
  * prefix, so BIP86 never offers a format choice, only BIP84 does. */
-static void show_type_menu(
-    const char* mnemonic, const char* passphrase, const char* fphex, const seedtool_address_type_t type)
+static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const uint32_t account)
 {
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
-    /* m/type'/0'/account': lives for this menu's whole visit, not just one
-     * pick of "Account key" or "Addresses", so switching to account 1 and
-     * then checking both its key and its addresses does not mean reselecting
-     * it twice. Resets to 0 on the next visit rather than persisting further
-     * - there is nowhere session-scoped to keep it that would not also have
-     * to survive a device restart, which this firmware never does. */
-    uint32_t account = 0;
     for (;;) {
-        char account_item[16];
-        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
-        const char* items[] = { "Account key", "Addresses", account_item, "Back" };
-        const int selected = choose(title, items, 4, true);
-        if (selected < 0 || selected == 3) {
+        const char* items[] = { "Account key", "Addresses", "Back" };
+        const int selected = choose(title, items, 3, true);
+        if (selected < 0 || selected == 2) {
             return;
-        }
-        if (selected == 2) {
-            uint32_t chosen_account = account;
-            if (enter_account(&chosen_account) == 1) {
-                account = chosen_account;
-            }
-            continue;
         }
         if (selected == 0) {
             seedtool_key_format_t format = SEEDTOOL_XPUB;
@@ -1515,20 +1499,34 @@ static void show_wallet_data(const char* mnemonic)
     }
     hexstr(fp, sizeof(fp), fphex);
 
+    /* m/type'/0'/account': lives for the whole wallet-viewing session, not
+     * one visit to Native SegWit or Taproot, so checking account 2 under
+     * both means setting it once - not resetting to 0 on the way from one
+     * type to the other. Neither Master fingerprint (always the root's, account-
+     * independent) nor Backup (about the mnemonic itself, not a derivation)
+     * reads it. */
+    uint32_t account = 0;
     for (;;) {
-        const char* menu[]
-            = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)", "Backup", "Done / erase" };
+        char account_item[16];
+        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
+        const char* menu[] = { "Master fingerprint", account_item, "Native SegWit (BIP84)", "Taproot (BIP86)",
+            "Backup", "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
-        if (selected < 0 || selected == 4) {
+        if (selected < 0 || selected == 5) {
             break;
         }
         if (selected == 0) {
             (void)acknowledge(
                 "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
-        } else if (selected == 3) {
+        } else if (selected == 1) {
+            uint32_t chosen_account = account;
+            if (enter_account(&chosen_account) == 1) {
+                account = chosen_account;
+            }
+        } else if (selected == 4) {
             show_backup_menu(mnemonic);
         } else {
-            show_type_menu(mnemonic, passphrase, fphex, selected == 1 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86);
+            show_type_menu(mnemonic, passphrase, fphex, selected == 2 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86, account);
         }
     }
 done:
