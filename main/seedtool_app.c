@@ -625,6 +625,18 @@ static size_t nearest_enabled(const bool* enabled, const size_t count, const siz
     return index % count;
 }
 
+/* Position of `target` in `layout`, or `count` if it is not one of its keys. */
+static size_t layout_key_index(const char* layout, const char target)
+{
+    const size_t count = seedtool_layout_keys(layout);
+    for (size_t i = 0; i < count; ++i) {
+        if (seedtool_layout_key(layout, i) == target) {
+            return i;
+        }
+    }
+    return count;
+}
+
 /* One BIP39 word. Returns 1 when a word was chosen, 0 when the user deleted
  * back out of this word, and -1 on timeout or overflow. Only letters that can
  * still lead to a word are reachable, and once ten or fewer words match the
@@ -736,6 +748,7 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
     char digits[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
     size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
+    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
     char title[24];
     (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)position, (unsigned)total);
 
@@ -750,7 +763,15 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
                 : key == SEEDTOOL_KEY_ACCEPT           ? number != 0
                                                        : reachable[key - '0'];
         }
-        selected = nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
+        /* Once the typed digits are themselves a complete valid number and
+         * cannot be extended any further, every digit key goes dark at once
+         * and the cursor has to land somewhere. nearest_enabled's ring
+         * distance to Accept vs. Backspace from here depends on exactly
+         * which key the reader was last on - circumstantial, and it lands on
+         * Backspace as often as not. Accept is the deliberate target
+         * whenever it's actually reachable; only fall back to the generic
+         * search when it isn't (still mid-prefix, no complete number yet). */
+        selected = !enabled[selected] && number ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
             seedtool_display_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected);
