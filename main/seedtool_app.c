@@ -1108,13 +1108,27 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
  * restore_seed actually wants. Not folded into enter_mnemonic itself since
  * complete_checksum also calls that for a still-partial (11 or 23 word)
  * mnemonic that could never pass seedtool_validate_mnemonic yet - the review
- * gate belongs only where the mnemonic is meant to be whole and correct. */
+ * gate belongs only where the mnemonic is meant to be whole and correct.
+ * join_words and seedtool_validate_mnemonic are the same pair review_and_
+ * confirm itself calls every time it redraws; reused once more here, before
+ * the first draw, so an invalid checksum is announced up front rather than
+ * only implied by "Review words" silently reading "Review - fix a word"
+ * instead - the inert "Checksum invalid" row this screen used to carry (see
+ * "Drop the inert 'Checksum invalid' row from word review") was removed for
+ * being a dead click, not because the reader shouldn't be told; a one-shot
+ * acknowledge, the same widget restore_seed's own "Checksum valid" already
+ * uses for the opposite verdict, says it without adding a row that does
+ * nothing when picked. */
 static int restore_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
 {
     char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
     bool by_number = false;
     int outcome = enter_mnemonic_words(count, words, &by_number);
     if (outcome == 1) {
+        if (join_words(words, count, mnemonic, mnemonic_len)
+            && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
+            (void)acknowledge("Invalid checksum", "Check your words", "Fix one to continue");
+        }
         outcome = review_and_confirm(words, count, by_number, mnemonic, mnemonic_len);
     }
     seedtool_zero(words, sizeof(words));
