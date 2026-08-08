@@ -1650,24 +1650,23 @@ done:
  * each group is fixed (always the middle one) rather than random: "no
  * screen in the entry path may depend on the device RNG" (enter_word's own
  * doc comment) still applies here, and a fixed middle word already reaches
- * every group at least as well as a random pick within it would. A miss
- * does not repeat the seed's own generation - the mnemonic already is what
- * it is, correct or not is moot by the time it's hashed - it only warns,
- * since the point is to catch the reader's transcription, not to gate a
- * seed that is already valid. Backspace past the start of a quiz word steps
- * back to the previous one, same as enter_mnemonic_words - it is not a
- * wrong answer, and treating it as one is what made this feel like it was
- * scoring a random keypress instead of asking to go back. Backing out of
- * the first quiz word leaves confirmation altogether - but unlike most
- * other optional steps here, that cannot silently fall through to whatever
- * comes next (the wallet's passphrase prompt): show_generated shows the
- * words again instead, since back is meant to step back one stage, not skip
- * forward past confirmation into an unrelated screen. Returns 1 once the
- * quiz completes (matched or not - a miss only warns, see above), 0 on
- * backing out of the first word, -1 on timeout, the same three-way contract
- * every other entry screen here uses. */
-#define CONFIRM_BACKUP_MAX_CHECKS 8 /* 24 words / 3 per group - the longer mnemonic */
-
+ * every group at least as well as a random pick within it would. A wrong
+ * word restarts the whole quiz from the first group, the same as Jade's own
+ * display_confirm_mnemonic - a soft warn-and-proceed version of this was
+ * tried first, but let a reader who mistyped a word straight through to the
+ * wallet having been told and then ignored, which defeats the point of
+ * asking. Backspace past the start of a quiz word steps back to the
+ * previous one, same as enter_mnemonic_words - it is not a wrong answer,
+ * and treating it as one is what made this feel like it was scoring a
+ * random keypress instead of asking to go back. Backing out of the first
+ * quiz word of a pass, or declining the try-again prompt after a miss,
+ * leaves confirmation altogether - but unlike most other optional steps
+ * here, that cannot silently fall through to whatever comes next (the
+ * wallet's passphrase prompt): show_generated shows the words again
+ * instead, since back is meant to step back one stage, not skip forward
+ * past confirmation into an unrelated screen. Returns 1 once a full pass
+ * matches, 0 on giving up (either way above), -1 on timeout, the same
+ * three-way contract every other entry screen here uses. */
 static int confirm_backup(const char* mnemonic, const size_t count)
 {
     /* The canonical parser (also show_numbered_list's), not a hand-rolled
@@ -1680,39 +1679,46 @@ static int confirm_backup(const char* mnemonic, const size_t count)
         return -1;
     }
     const size_t checks = count / 3;
-    bool matched[CONFIRM_BACKUP_MAX_CHECKS] = { false };
-    size_t n = 0;
-    while (n < checks) {
-        const size_t index = n * 3 + 1;
-        const char* const expected = seedtool_word(numbers[index] - 1);
-        char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        const int result = enter_word(index + 1, count, typed, sizeof(typed));
-        if (result < 0) {
-            seedtool_zero(typed, sizeof(typed));
-            seedtool_zero(numbers, sizeof(numbers));
-            return -1;
-        }
-        if (result == 0) {
-            seedtool_zero(typed, sizeof(typed));
-            if (!n) {
+    for (;;) {
+        bool wrong = false;
+        size_t n = 0;
+        while (n < checks) {
+            const size_t index = n * 3 + 1;
+            const char* const expected = seedtool_word(numbers[index] - 1);
+            char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+            const int result = enter_word(index + 1, count, typed, sizeof(typed));
+            if (result < 0) {
+                seedtool_zero(typed, sizeof(typed));
                 seedtool_zero(numbers, sizeof(numbers));
-                return 0;
+                return -1;
             }
-            --n;
-            continue;
+            if (result == 0) {
+                seedtool_zero(typed, sizeof(typed));
+                if (!n) {
+                    seedtool_zero(numbers, sizeof(numbers));
+                    return 0;
+                }
+                --n;
+                continue;
+            }
+            const bool matched = strcmp(typed, expected) == 0;
+            seedtool_zero(typed, sizeof(typed));
+            if (!matched) {
+                wrong = true;
+                break;
+            }
+            ++n;
         }
-        matched[n] = strcmp(typed, expected) == 0;
-        seedtool_zero(typed, sizeof(typed));
-        ++n;
+        if (!wrong) {
+            seedtool_zero(numbers, sizeof(numbers));
+            (void)acknowledge("Backup confirmed", "Words matched", NULL);
+            return 1;
+        }
+        if (!acknowledge("Word doesn't match", "Check your backup", "Try again")) {
+            seedtool_zero(numbers, sizeof(numbers));
+            return 0;
+        }
     }
-    seedtool_zero(numbers, sizeof(numbers));
-    bool all_matched = true;
-    for (size_t i = 0; i < checks; ++i) {
-        all_matched = all_matched && matched[i];
-    }
-    (void)acknowledge(all_matched ? "Backup confirmed" : "Backup not confirmed",
-        all_matched ? "Words matched" : "Re-check your words", NULL);
-    return 1;
 }
 
 static void show_generated(seedtool_generated_t* generated)
