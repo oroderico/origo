@@ -8,6 +8,10 @@
 
 #define SEEDTOOL_DISPLAY_BRIGHTNESS_MIN 1
 #define SEEDTOOL_DISPLAY_BRIGHTNESS_MAX 5
+/* What the backlight opens at, and what seedtool_app.c's own backlight_level
+ * must start at too - the two have to agree, or the Settings screen would
+ * show a level the hardware isn't actually at. */
+#define SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT 3
 
 /* Shared by every seedtool_display_set_brightness backend, so each platform
  * does not carry its own copy of the same bounds check. */

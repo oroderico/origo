@@ -177,7 +177,7 @@ void seedtool_display_init(void)
     lcd_command(LCD_CMD_RAMCTRL, ram_control, sizeof(ram_control));
     lcd_command(LCD_CMD_INVON, NULL, 0);
     lcd_command(LCD_CMD_DISPON, NULL, 0);
-    seedtool_display_set_brightness(SEEDTOOL_DISPLAY_BRIGHTNESS_MAX);
+    seedtool_display_set_brightness(SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT);
     seedtool_render_clear();
     flush();
 }

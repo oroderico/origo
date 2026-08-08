@@ -69,10 +69,10 @@ static uint64_t last_action;
 static bool chord_learned;
 
 /* Session-only display settings: like chord_learned, these live only in RAM
- * and reset to their defaults (unflipped, full brightness) every boot -
- * Origo has no persistence to save them to. */
+ * and reset to their defaults (unflipped, SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT)
+ * every boot - Origo has no persistence to save them to. */
 static bool orientation_flipped;
-static unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_MAX;
+static unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT;
 
 static const char* nav_hint(void) { return chord_learned ? "" : "   " NAV_FOOTER; }
 
@@ -1446,21 +1446,23 @@ static void export_seed_qr(const char* mnemonic)
                 (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
             }
-            const seedtool_key_t key = wait_key();
-            if (key == KEY_REDRAW) {
-                continue;
-            }
-            if (key == KEY_PREV) {
-                selected = selected == 0 ? steps - 1 : selected - 1;
-            } else if (key == KEY_NEXT) {
-                selected = selected == steps - 1 ? 0 : selected + 1;
-            } else {
+            switch (wait_key()) {
+            case KEY_PREV:
+                selected = (selected + steps - 1) % steps;
                 break;
+            case KEY_NEXT:
+                selected = (selected + 1) % steps;
+                break;
+            case KEY_REDRAW:
+                break;
+            default:
+                goto done;
             }
         }
     } else {
         (void)acknowledge("Error", "Could not derive entropy", NULL);
     }
+done:
     seedtool_zero(entropy, sizeof(entropy));
 }
 
