@@ -829,6 +829,33 @@ static bool dice_progress_bar_is_bounded(void)
     return count_pixel_color(go_color) != 0;
 }
 
+/* Line 2 of a dice/card entry screen sits just above the quality bar (see
+ * seedtool_render.c's DICE_BAR_Y, kept in sync with the 90..104 checked
+ * below), with no margin to spare for a second wrapped line. "Return card,
+ * reshuffle each draw" shipped long enough to wrap there, landing its second
+ * line inside the bar instead of above it - checked here against every hint
+ * the app actually shows, copied from collect_entropy() in seedtool_app.c,
+ * so a future hint that grows past one line fails this instead of shipping. */
+static bool dice_screen_hints_clear_the_bar(void)
+{
+    static const char* const hints[]
+        = { "Red bar = non-random", "Return & reshuffle each card", "Looks good - generate?" };
+    const char* const footer = "BOTH continue   Up/Down back";
+    const seedtool_progress_t empty = { 0 };
+    for (size_t i = 0; i < sizeof(hints) / sizeof(hints[0]); ++i) {
+        seedtool_render_dice_screen("Title", "99 cards needed", hints[i], footer, &empty);
+        const uint16_t* const pixels = seedtool_render_pixels();
+        for (int y = 90; y < 104; ++y) {
+            for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+                if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0xffff) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 /* Known-good vectors straight from Krux's own base32 test suite
  * (tests/test_bbqr.py, B32_TEST_BYTES/B32_ENCODED_STRINGS, unpadded form):
  * proof this encoder produces byte-for-byte the same output a BBQr-reading
@@ -1065,6 +1092,10 @@ static int self_test(void)
     }
     if (!dice_progress_bar_is_bounded()) {
         fputs("Origo dice progress bar self-test failed\n", stderr);
+        return 1;
+    }
+    if (!dice_screen_hints_clear_the_bar()) {
+        fputs("Origo dice screen hint self-test failed\n", stderr);
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key

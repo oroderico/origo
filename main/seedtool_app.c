@@ -1854,9 +1854,11 @@ static int collect_entropy(const int source, const size_t words)
         /* One deck can't reach 256 bits without replacement (see
          * SEEDTOOL_CARDS_REPLACE's doc comment), so this is the one source
          * whose upfront screen has a physical process to explain rather
-         * than just a red-bar hint. */
+         * than just a red-bar hint. Kept to one line at this font/width -
+         * the longer phrasing wrapped its second line down into the quality
+         * bar drawn right below. */
         const char* const hint
-            = source == SEEDTOOL_CARDS_REPLACE ? "Return card, reshuffle each draw" : "Red bar = non-random";
+            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
         const seedtool_progress_t empty = { 0 };
         if (!dice_confirm(names[source], needed, hint, &empty)) {
             outcome = 0;
