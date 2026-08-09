@@ -157,6 +157,27 @@ static bool layouts_are_complete(void)
             return false;
         }
     }
+    /* The number keyboard's characters, not just its key count. enter_word_number
+     * indexes reachable[key - '0'] for every key that is neither backspace nor
+     * accept (seedtool_app.c), so a non-digit smuggled into this layout reads
+     * off the end of a ten-element stack array. The letter layout above has
+     * always had its characters checked; this one had only its length. */
+    memset(seen, 0, sizeof(seen));
+    for (size_t i = 0; i < seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT); ++i) {
+        const unsigned char key = (unsigned char)seedtool_layout_key(SEEDTOOL_WORD_NUMBER_LAYOUT, i);
+        if (key != SEEDTOOL_KEY_BACKSPACE && key != SEEDTOOL_KEY_ACCEPT && (key < '0' || key > '9')) {
+            return false;
+        }
+        if (seen[key]) {
+            return false;
+        }
+        seen[key] = true;
+    }
+    for (unsigned char digit = '0'; digit <= '9'; ++digit) {
+        if (!seen[digit]) {
+            return false;
+        }
+    }
     /* The passphrase pages together must still reach all 95 printable ASCII
      * characters, or a passphrase typed on an older build could not be retyped
      * on this one. Space repeats on every page on purpose. */
@@ -702,6 +723,73 @@ static bool honest_runs_report_at_least_the_minimum(void)
     return true;
 }
 
+#define COLLECTION_ARRAY_LEN 256 /* values[] and faces[] in main/seedtool_app.c */
+
+/* Both Monte-Carlo checks above bound the honest case: how often a good run is
+ * wrongly flagged, and how often it reads short. Neither would notice a gate
+ * that had stopped flagging anything at all. This is the other direction - a
+ * source degraded far enough that its run genuinely carries fewer bits than
+ * the seed needs must be caught.
+ *
+ * "Genuinely" is the load-bearing word, and getting it wrong is easy: a die
+ * stuck on five of six faces still yields log2(5) = 2.32 bits a roll, so at
+ * sixty rolls it carries 139 bits and passing it is the correct answer, not a
+ * miss. Each case below is therefore chosen so the true entropy, `count *
+ * log2(usable)`, falls below the minimum even before the estimator's error -
+ * and the expected verdict is computed from that rather than written down. */
+static bool insufficient_runs_are_flagged(void)
+{
+    static const struct {
+        seedtool_source_t source;
+        size_t usable; /* distinct values the degraded source can produce */
+        size_t words;
+    } cases[] = {
+        { SEEDTOOL_D6, 3, 12 }, /* 60 * log2(3) = 95 bits against 128 */
+        { SEEDTOOL_D6, 4, 12 }, /* 60 * 2 = 120 against 128 */
+        { SEEDTOOL_D6, 4, 24 }, /* 120 * 2 = 240 against 256 */
+        { SEEDTOOL_D20, 8, 12 }, /* 36 * 3 = 108 against 128 */
+        { SEEDTOOL_D20, 8, 24 }, /* 68 * 3 = 204 against 256 */
+        { SEEDTOOL_COIN, 1, 12 }, /* a two-headed coin: 0 bits */
+        { SEEDTOOL_CARDS_REPLACE, 8, 24 }, /* 50 * 3 = 150 against 256 */
+    };
+    const int dice_entropy_tolerance = 4; /* DICE_ENTROPY_TOLERANCE in main/seedtool_app.c */
+    const size_t trials = 500;
+    const double min_detection_rate = 0.99;
+
+    uint32_t state = 13579;
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+        const size_t required = seedtool_required_events(cases[c].source, cases[c].words);
+        if (!required) {
+            return false; /* every case above is a combination the app offers */
+        }
+        const int min_bits = (int)seedtool_min_entropy_bits(cases[c].words);
+        /* Refuse to test a case that is not actually insufficient - that would
+         * be asserting the gate flags a run it ought to pass. */
+        if ((double)required * log2((double)cases[c].usable) >= (double)min_bits) {
+            return false;
+        }
+        const double bias = seedtool_dice_entropy_bias_bits(cases[c].source);
+        size_t flagged = 0;
+        for (size_t t = 0; t < trials; ++t) {
+            uint8_t values[COLLECTION_ARRAY_LEN];
+            for (size_t i = 0; i < required; ++i) {
+                values[i] = (uint8_t)(xorshift32(&state) % cases[c].usable) + 1;
+            }
+            int bits = 0;
+            if (seedtool_dice_entropy_bits(cases[c].source, values, required, &bits) != SEEDTOOL_OK) {
+                return false;
+            }
+            if (bits + (int)lround(bias) + dice_entropy_tolerance < min_bits) {
+                ++flagged;
+            }
+        }
+        if ((double)flagged / (double)trials < min_detection_rate) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* collect_entropy() gathers a run into values[256], entropy_quality() copies
  * it into faces[256], and seedtool_generate() renders it into the
  * SEEDTOOL_MAX_TRANSCRIPT_LEN-wide transcript field of seedtool_generated_t.
@@ -716,7 +804,12 @@ static bool honest_runs_report_at_least_the_minimum(void)
  * Both ceilings are exercised, because they bind different sources: the event
  * count limits coin, while the rendered length limits D20, which spends three
  * characters on a roll that costs the array one byte. */
-#define COLLECTION_ARRAY_LEN 256 /* values[] and faces[] in main/seedtool_app.c */
+/* seedtool_required_events' returns are not constant expressions, so the
+ * ceiling cannot be asserted at compile time; what can is that the transcript
+ * buffer never outgrows the arrays that feed it, which is the half of the
+ * relationship a C compiler can see. */
+_Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= COLLECTION_ARRAY_LEN,
+    "a transcript must be able to hold one character per collected event");
 
 static bool required_events_fit_the_collection_buffers(void)
 {
@@ -1350,6 +1443,10 @@ static int self_test(void)
     }
     if (!honest_runs_report_at_least_the_minimum()) {
         fputs("Origo honest-run short-read self-test failed\n", stderr);
+        return 1;
+    }
+    if (!insufficient_runs_are_flagged()) {
+        fputs("Origo insufficient-run detection self-test failed\n", stderr);
         return 1;
     }
     if (!required_events_fit_the_collection_buffers()) {

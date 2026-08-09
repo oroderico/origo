@@ -86,6 +86,18 @@ bool seedtool_bbqr_part(const uint8_t* data, const size_t len, const char encodi
         return false;
     }
     const size_t this_len = part_index + 1 == part_count ? len - offset : size;
+    /* The one place a length was taken on trust rather than checked.
+     * part_size_bytes rounds the average part up to a multiple of five, so a
+     * `part_count` that did not come from seedtool_bbqr_part_count can leave
+     * `size` too large for the tail: at len=7 and part_count=3 the size is 5,
+     * and part 1 would read data[5..9] - three bytes past the buffer, encoded
+     * straight into a QR on screen. Every caller does derive the count from
+     * seedtool_bbqr_part_count, so this was never reachable, but the function
+     * is exported and reads a caller's buffer, so it verifies its own
+     * arithmetic rather than inheriting the guarantee. */
+    if (this_len > len - offset) {
+        return false;
+    }
     const size_t payload_chars = seedtool_bbqr_base32_len(this_len);
     if (out_len < SEEDTOOL_BBQR_HEADER_LEN + payload_chars + 1) {
         return false;
