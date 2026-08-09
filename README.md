@@ -142,9 +142,23 @@ rolls could carry at most 129.2 and 255.9 bits, so on a simulation of 20000
 honest runs 21.9% and 36.6% respectively reported fewer bits than the seed
 needs. Almost all still generated, absorbed by the four-bit tolerance, but a
 tool whose whole claim is not overstating entropy should not routinely show a
-number that reads short. Coin flips are the exception that stays: one flip is
-exactly one bit, so 128 and 256 flips are both the theoretical minimum and
-the whole of the transcript buffer, and there is no room to pad them.
+number that reads short. Coin flips are the exception that stays, and the
+figure is published rather than buried: about a quarter of honest coin runs
+still report a bit short, at both lengths. One flip is exactly one bit, so 128
+and 256 flips are simultaneously the theoretical minimum and the whole of the
+transcript buffer — padding them would mean widening a field inside the
+generated-seed struct, which is a larger change than the counts above.
+
+These counts are therefore no longer Krux's, which is where they started:
+Krux asks for at least 50 and 99 D6 rolls, or 30 and 60 D20, and Origo now
+asks for 60/120 and 36/68. Krux's own source calls its minimum a count that
+"hardly will reach min. entropy according to Shannon's index" and absorbs
+that two ways Origo cannot — its counts are floors the user may keep rolling
+past, and it grades with a 2-bit tolerance. A fixed-length run has neither
+escape, so Origo buys the same margin in rolls. The consequence is that a
+seed generated on Krux at its own minimum cannot be reproduced here by
+entering the same rolls; the transcript format, hash and BIP39 encoding are
+unchanged, so a Krux run of matching length still reproduces exactly.
 
 Checksum completion consumes 11 BIP39 words plus exactly 7 coin flips, or 23
 words plus exactly 3 flips. Those flips are the missing entropy bits and lead
@@ -210,7 +224,7 @@ it steps back exactly one stage rather than abandoning the flow. Menus carry a
 `Back` row; the word list carries `[delete]`; deleting past the start of a word
 returns to the previous word, and past the first word to the menu before it. The
 numeric carousel carries `[back]` one step below its lowest value, so a misread
-roll 29 of 50 is corrected by stepping back to it rather than by waiting out the
+roll 29 of 60 is corrected by stepping back to it rather than by waiting out the
 session timeout and starting the transcript again. Coin flips are the one
 exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead

@@ -92,7 +92,17 @@ class SeedToolVerifierTests(unittest.TestCase):
             f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/0/*)#wc3n3van",
         )
 
-    def test_krux_compatible_d6_transcript_vector(self):
+    def test_d6_transcript_pipeline_against_a_krux_vector(self):
+        # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
+        # against a run Krux produces the same mnemonic from, which is what
+        # makes this vector worth keeping. It does NOT pin device interop:
+        # Origo asks for exactly 60 D6 rolls for 12 words where Krux asks for
+        # at least 50, so the 50-roll run below is one the device will no
+        # longer accept. That divergence is deliberate (see the entropy
+        # section of README.md) - Krux can absorb a marginal count by letting
+        # the user keep rolling and by grading with a 2-bit tolerance, and
+        # Origo, whose runs are fixed length, pays for the margin in rolls
+        # instead. The count is passed explicitly here for that reason.
         entries = list("123456" * 8 + "12")
         text = verify.transcript("d6", entries, 50)
         self.assertEqual(text, "12345612345612345612345612345612345612345612345612")

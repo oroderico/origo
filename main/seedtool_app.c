@@ -300,7 +300,7 @@ static void format_progress_heading(char* heading, const size_t heading_len, con
  * -1 on timeout — the same contract as enter_word(). Left and right are spending
  * their two gestures on the value itself, so backing out has to be a position in
  * the ring rather than a key, exactly as `[delete]` is in the word list. Without
- * it a mistake on roll 29 of 50 could only be escaped by waiting out the session
+ * it a mistake on roll 29 of 60 could only be escaped by waiting out the session
  * timeout and starting the whole transcript again. */
 static int enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
     const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history,
@@ -1781,11 +1781,12 @@ static void show_generated(seedtool_generated_t* generated)
              * and no warning that the words were about to leave the screen.
              * The quiz's own "word N of M" title says which word it wants but
              * never why it is asking, so the count is named here instead,
-             * before the words go away rather than after. */
-            /* Sized for the format's worst case rather than its real one: the
-             * counts are 4/12 or 8/24, but %u lets the compiler assume ten
-             * digits apiece, and -Wformat-truncation in the firmware build is
-             * an error. */
+             * before the words go away rather than after.
+             *
+             * `intro` is sized for the format's worst case rather than its
+             * real one: the counts are 4/12 or 8/24, but %u lets the compiler
+             * assume ten digits apiece, and -Wformat-truncation is an error in
+             * the firmware build even though the host build lets it pass. */
             char intro[48];
             (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
                 (unsigned)generated->words);

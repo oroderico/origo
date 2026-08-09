@@ -601,9 +601,10 @@ static bool dice_entropy_false_positive_rate_is_bounded(void)
      * carry, a known, accepted trade-off): this is the empirical check that
      * its false-positive rate still lands under the same bound, not just
      * the back-of-envelope estimate that motivated accepting it. Same for
-     * SEEDTOOL_CARDS_REPLACE at its chosen 48 draws (12-word is skipped
-     * below - seedtool_required_events returns 0 for it, since 24-word
-     * SEEDTOOL_CARDS already covers that case without needing replacement). */
+     * SEEDTOOL_CARDS_REPLACE at whatever count it currently asks for, read
+     * from seedtool_required_events below rather than named here (12-word is
+     * skipped - that returns 0, since 24-word SEEDTOOL_CARDS already covers
+     * the case without needing replacement). */
     const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS_REPLACE };
     const size_t sides[] = { 6, 20, 2, 52 };
     const size_t words[] = { 12, 24 };
