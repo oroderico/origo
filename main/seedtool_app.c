@@ -262,6 +262,31 @@ static unsigned step_value(
     return current;
 }
 
+/* The "N/M" position counter every entry screen's title carries, with the
+ * bits collected so far appended when `progress` has them (min_bits is 0 on
+ * the default-initialised structs elsewhere in this file that only draw a
+ * bar, and NULL on the checksum-completion flips, which are not graded at
+ * all - see seedtool_progress_t's doc comment). Kept to one helper so the
+ * dice/card and coin-flip screens can't drift into two different formats
+ * for the same thing.
+ *
+ * The running count alone, not "bits of minimum": the minimum is already
+ * said three times over - the opening screen names it, the bar's lower
+ * segment fills against it, and the end-of-run screen spells out "X of Y
+ * bits" - and repeating it here cost the width that matters. A coin's
+ * counters are the worst of both: one flip is one bit, so "256/256
+ * 257/256b" reads as a typo of itself and left 5px of margin on a 240px
+ * screen, where the count alone leaves 24px. */
+static void format_progress_heading(char* heading, const size_t heading_len, const char* title,
+    const unsigned position, const unsigned total, const seedtool_progress_t* progress)
+{
+    if (progress && progress->min_bits > 0) {
+        (void)snprintf(heading, heading_len, "%s %u/%u %db", title, position, total, progress->bits);
+    } else {
+        (void)snprintf(heading, heading_len, "%s  %u/%u", title, position, total);
+    }
+}
+
 /* Numeric carousel. `allowed` is optional and indexed from `min`; disallowed
  * values are skipped, which is how already-drawn cards are kept out of reach.
  * A `total` of zero means this is a one-off value rather than one of a run.
@@ -285,7 +310,7 @@ static int enter_value(const char* title, const unsigned position, const unsigne
     for (;;) {
         char heading[48], shown[48];
         if (total) {
-            (void)snprintf(heading, sizeof(heading), "%s  %u/%u", title, position, total);
+            format_progress_heading(heading, sizeof(heading), title, position, total, progress);
         } else {
             (void)snprintf(heading, sizeof(heading), "%s  %u-%u", title, min, max);
         }
@@ -369,7 +394,7 @@ static int enter_coin_flip(const char* title, const unsigned position, const uns
     const char* history, const seedtool_progress_t* progress)
 {
     char heading[48];
-    (void)snprintf(heading, sizeof(heading), "%s  %u/%u", title, position, total);
+    format_progress_heading(heading, sizeof(heading), title, position, total, progress);
     for (;;) {
         seedtool_display_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
         switch (wait_key()) {
@@ -1823,6 +1848,8 @@ static seedtool_progress_t entropy_progress(const seedtool_source_t source, cons
         .entropy_pct = (int)((size_t)capped_bits * 100 / min_bits),
         .warn = pattern,
         .complete = false, /* only called for count < required, so never yet */
+        .bits = bits,
+        .min_bits = (int)min_bits,
     };
     return progress;
 }

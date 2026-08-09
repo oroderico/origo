@@ -829,6 +829,100 @@ static bool dice_progress_bar_is_bounded(void)
     return count_pixel_color(go_color) != 0;
 }
 
+/* The widest a title can be for one source at one word count: its longest
+ * position counter (both numbers at seedtool_required_events' maximum) beside
+ * the largest bit count that run can ever report. The bit ceiling is computed
+ * from the same core functions the app grades with rather than written down
+ * here, so a change to the estimator or to its Miller-Madow correction moves
+ * this check with it instead of leaving it asserting a stale number. */
+static bool title_fits(const seedtool_source_t source, const size_t sides, const size_t words, const char* label)
+{
+    const size_t required = seedtool_required_events(source, words);
+    if (!required) {
+        return true; /* this source/word-count combination is not offered */
+    }
+    int bits = 0;
+    if (source == SEEDTOOL_CARDS) {
+        /* Exact, not estimated, and the same for any draw of that length. */
+        if (seedtool_card_entropy_bits(required, &bits) != SEEDTOOL_OK) {
+            return false;
+        }
+    } else {
+        /* The most uniform run possible at this length maximises the plug-in
+         * estimator, and the bias correction the app adds is a constant. */
+        uint8_t values[256];
+        for (size_t i = 0; i < required; ++i) {
+            values[i] = (uint8_t)(i % sides) + 1;
+        }
+        if (seedtool_dice_entropy_bits(source, values, required, &bits) != SEEDTOOL_OK) {
+            return false;
+        }
+        bits += (int)lround(seedtool_dice_entropy_bias_bits(source));
+    }
+
+    char title[48];
+    /* Format copied from format_progress_heading() in seedtool_app.c. */
+    (void)snprintf(title, sizeof(title), "%s %u/%u %db", label, (unsigned)required, (unsigned)required, bits);
+    seedtool_render_dice_screen(title, "3", "123456", "L/R move   BOTH select", &(seedtool_progress_t) { 0 });
+
+    /* Measured, not just tested for clipping: a title that merely reaches the
+     * glass is already too wide to read at arm's length, and the version of
+     * this heading that carried the minimum as well ("Coin flips 256/256
+     * 257/256b") cleared the edge by five pixels while looking wedged against
+     * it. The bar this title labels insets itself by DICE_BAR_MARGIN
+     * (seedtool_render.c, kept in sync with the 20 below), so the title is
+     * held to the same inset: no wider than the thing it describes. */
+    const uint16_t* const pixels = seedtool_render_pixels();
+    int leftmost = SEEDTOOL_DISPLAY_WIDTH, rightmost = -1;
+    /* The 16px title face sits at y=5..~21; scanned a little wide either way. */
+    for (int y = 0; y < 24; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                if (x < leftmost) {
+                    leftmost = x;
+                }
+                if (x > rightmost) {
+                    rightmost = x;
+                }
+            }
+        }
+    }
+    if (rightmost < 0) {
+        return false; /* nothing drawn at all - the title never reached the screen */
+    }
+    return leftmost >= 20 && rightmost <= SEEDTOOL_DISPLAY_WIDTH - 1 - 20;
+}
+
+/* format_progress_heading in seedtool_app.c appends the bits collected so far
+ * to the entry screen's title, drawn at the 16px face - a different font from
+ * the small one the line-2 hints below are checked against, so it gets its
+ * own edge check rather than reusing theirs. Every label the app can put
+ * there is covered: the four source names collect_entropy() passes, plus the
+ * two the card screens substitute for them - enter_card titles its carousels
+ * "Suit" and then the suit's own name, so a card run never shows "Cards" at
+ * all, and "Diamonds" is the widest title either card mode can produce. */
+static bool dice_screen_titles_clear_the_edges(void)
+{
+    static const size_t word_counts[] = { 12, 24 };
+    for (size_t w = 0; w < sizeof(word_counts) / sizeof(word_counts[0]); ++w) {
+        const size_t words = word_counts[w];
+        if (!title_fits(SEEDTOOL_D6, 6, words, "D6 dice") || !title_fits(SEEDTOOL_D20, 20, words, "D20 dice")
+            || !title_fits(SEEDTOOL_COIN, 2, words, "Coin flips")) {
+            return false;
+        }
+        /* CARD_SUIT_NAMES in seedtool_app.c, plus the suit carousel's own
+         * title - copied here for the same reason the hints below are. */
+        static const char* const card_labels[] = { "Suit", "Clubs", "Diamonds", "Hearts", "Spades" };
+        for (size_t i = 0; i < sizeof(card_labels) / sizeof(card_labels[0]); ++i) {
+            if (!title_fits(SEEDTOOL_CARDS, 52, words, card_labels[i])
+                || !title_fits(SEEDTOOL_CARDS_REPLACE, 52, words, card_labels[i])) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /* Line 2 of a dice/card entry screen sits just above the quality bar (see
  * seedtool_render.c's DICE_BAR_Y, kept in sync with the 90..104 checked
  * below), with no margin to spare for a second wrapped line. "Return card,
@@ -1096,6 +1190,10 @@ static int self_test(void)
     }
     if (!dice_screen_hints_clear_the_bar()) {
         fputs("Origo dice screen hint self-test failed\n", stderr);
+        return 1;
+    }
+    if (!dice_screen_titles_clear_the_edges()) {
+        fputs("Origo dice screen title self-test failed\n", stderr);
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key
