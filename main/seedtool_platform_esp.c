@@ -28,10 +28,18 @@ static bool pressed(const gpio_num_t pin) { return gpio_get_level(pin) == 0; }
 
 void seedtool_platform_init(void)
 {
+    /* Both buttons are wired to ground, so an idle pin has to be held high from
+     * somewhere. GPIO0 is a strapping pin: the ROM leaves its internal pull-up
+     * on, which is why boot and the splash are fine, but configuring the pin
+     * without asking for that pull-up takes it away and leaves GPIO0 floating
+     * down to ground, reading as a button held down forever. GPIO35 is
+     * input-only and has no internal pull resistors at all, so it keeps
+     * depending on the board's external pull-up; asking for one here is a no-op
+     * on that pin. */
     const gpio_config_t buttons
         = { .pin_bit_mask = (UINT64_C(1) << BUTTON_LEFT_GPIO) | (UINT64_C(1) << BUTTON_RIGHT_GPIO),
               .mode = GPIO_MODE_INPUT,
-              .pull_up_en = GPIO_PULLUP_DISABLE,
+              .pull_up_en = GPIO_PULLUP_ENABLE,
               .pull_down_en = GPIO_PULLDOWN_DISABLE };
     ESP_ERROR_CHECK(gpio_config(&buttons));
     seedtool_display_init();
