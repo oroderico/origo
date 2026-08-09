@@ -384,7 +384,7 @@ static bool full_entropy_events_generate(void)
     static const seedtool_source_t sources[]
         = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
     static const size_t word_counts[] = { 12, 24 };
-    uint8_t values[256];
+    uint8_t values[SEEDTOOL_MAX_EVENTS];
     for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
         for (size_t w = 0; w < sizeof(word_counts) / sizeof(word_counts[0]); ++w) {
             const size_t words = word_counts[w];
@@ -644,7 +644,7 @@ static bool dice_entropy_false_positive_rate_is_bounded(void)
             const size_t min_bits = seedtool_min_entropy_bits(words[w]);
             size_t flagged = 0;
             for (size_t t = 0; t < trials; ++t) {
-                uint8_t values[256];
+                uint8_t values[SEEDTOOL_MAX_EVENTS];
                 for (size_t i = 0; i < required; ++i) {
                     values[i] = (uint8_t)(xorshift32(&state) % sides[s]) + 1;
                 }
@@ -703,7 +703,7 @@ static bool honest_runs_report_at_least_the_minimum(void)
             const int min_bits = (int)seedtool_min_entropy_bits(words[w]);
             size_t short_reads = 0;
             for (size_t t = 0; t < trials; ++t) {
-                uint8_t values[256];
+                uint8_t values[SEEDTOOL_MAX_EVENTS];
                 for (size_t i = 0; i < required; ++i) {
                     values[i] = (uint8_t)(xorshift32(&state) % sides[s]) + 1;
                 }
@@ -722,8 +722,6 @@ static bool honest_runs_report_at_least_the_minimum(void)
     }
     return true;
 }
-
-#define COLLECTION_ARRAY_LEN 256 /* values[] and faces[] in main/seedtool_app.c */
 
 /* Both Monte-Carlo checks above bound the honest case: how often a good run is
  * wrongly flagged, and how often it reads short. Neither would notice a gate
@@ -771,7 +769,7 @@ static bool insufficient_runs_are_flagged(void)
         const double bias = seedtool_dice_entropy_bias_bits(cases[c].source);
         size_t flagged = 0;
         for (size_t t = 0; t < trials; ++t) {
-            uint8_t values[COLLECTION_ARRAY_LEN];
+            uint8_t values[SEEDTOOL_MAX_EVENTS];
             for (size_t i = 0; i < required; ++i) {
                 values[i] = (uint8_t)(xorshift32(&state) % cases[c].usable) + 1;
             }
@@ -804,13 +802,11 @@ static bool insufficient_runs_are_flagged(void)
  * Both ceilings are exercised, because they bind different sources: the event
  * count limits coin, while the rendered length limits D20, which spends three
  * characters on a roll that costs the array one byte. */
-/* seedtool_required_events' returns are not constant expressions, so the
- * ceiling cannot be asserted at compile time; what can is that the transcript
- * buffer never outgrows the arrays that feed it, which is the half of the
- * relationship a C compiler can see. */
-_Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= COLLECTION_ARRAY_LEN,
-    "a transcript must be able to hold one character per collected event");
-
+/* The compile-time half of this lives in seedtool_core.h, beside
+ * SEEDTOOL_MAX_EVENTS itself, so it binds the firmware rather than only this
+ * test binary. What is left for runtime is the half a C compiler cannot see:
+ * seedtool_required_events' returns are function results, not constant
+ * expressions, so every source and word count has to be asked. */
 static bool required_events_fit_the_collection_buffers(void)
 {
     const seedtool_source_t sources[]
@@ -822,13 +818,13 @@ static bool required_events_fit_the_collection_buffers(void)
             if (!required) {
                 continue;
             }
-            if (required > COLLECTION_ARRAY_LEN) {
+            if (required > SEEDTOOL_MAX_EVENTS) {
                 return false;
             }
             /* The widest transcript the source can print at that length: the
              * highest face of a die, and distinct cards for the deck that
              * rejects a repeat. */
-            uint8_t values[COLLECTION_ARRAY_LEN];
+            uint8_t values[SEEDTOOL_MAX_EVENTS];
             for (size_t i = 0; i < required; ++i) {
                 values[i] = sources[s] == SEEDTOOL_D6 ? 6
                     : sources[s] == SEEDTOOL_D20      ? 20
@@ -1051,7 +1047,7 @@ static bool title_fits(const seedtool_source_t source, const size_t sides, const
     } else {
         /* The most uniform run possible at this length maximises the plug-in
          * estimator, and the bias correction the app adds is a constant. */
-        uint8_t values[256];
+        uint8_t values[SEEDTOOL_MAX_EVENTS];
         for (size_t i = 0; i < required; ++i) {
             values[i] = (uint8_t)(i % sides) + 1;
         }

@@ -1882,7 +1882,7 @@ static void entropy_quality(
      * -O2's constant propagation, but a real bare array here would leave
      * bytes past count genuinely uninitialized if anything ever read past
      * it. */
-    uint8_t faces[256] = { 0 };
+    uint8_t faces[SEEDTOOL_MAX_EVENTS] = { 0 };
     const uint8_t* faces_ptr = values;
     if (source == SEEDTOOL_COIN || source == SEEDTOOL_CARDS_REPLACE) {
         for (size_t i = 0; i < count; ++i) {
@@ -1945,7 +1945,7 @@ static int collect_entropy(const int source, const size_t words)
     const unsigned max = source == SEEDTOOL_D6 ? 6 : 20;
     const size_t min_bits = seedtool_min_entropy_bits(words);
 
-    uint8_t values[256] = { 0 };
+    uint8_t values[SEEDTOOL_MAX_EVENTS] = { 0 };
     bool available[52];
     char history[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1] = { 0 };
     seedtool_generated_t generated;

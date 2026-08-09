@@ -16,6 +16,24 @@
  * then surfaced as "Could not generate seed" only after every event had
  * already been collected. */
 #define SEEDTOOL_MAX_TRANSCRIPT_LEN 256
+
+/* The most events any source can ask for, and the size every buffer that
+ * collects a run is cut to. seedtool_required_events' largest return is a
+ * coin's 256 flips for 24 words, and the collection loop is bounded only by
+ * that return - `while (i < required)`, no check of its own - so raising a
+ * count past this silently writes off the end of the arrays in
+ * collect_entropy() and entropy_quality() while a seed is live in memory.
+ * Naming it here is what lets those arrays be declared from one number
+ * instead of three copies of 256, and what gives the static assertion below
+ * something to stand on; the self-test walks every source and word count
+ * against it, since the function's returns are not constant expressions. */
+#define SEEDTOOL_MAX_EVENTS 256
+
+/* A coin spends one transcript character per flip, so the transcript can
+ * never be the smaller of the two. */
+_Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
+    "a transcript must hold at least one character per collected event");
+
 #define SEEDTOOL_MAX_MNEMONIC_LEN 240
 #define SEEDTOOL_MAX_PASSPHRASE_LEN 100
 #define SEEDTOOL_MAX_ADDRESS_LEN 96

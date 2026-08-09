@@ -471,6 +471,16 @@ seedtool_result_t seedtool_mnemonic_word_numbers(
     if (ret != SEEDTOOL_OK) {
         return ret;
     }
+    /* A string of nothing but spaces is long enough to clear
+     * mnemonic_indices' length check and yields no strtok_r tokens, so it
+     * reports success with a count of zero. Callers step through the words
+     * with `% count`, which is a division by zero on that input. Every caller
+     * today passes a mnemonic that already validated, so this was never
+     * reachable - but "no words" is not a successful parse of a mnemonic
+     * under any reading, and the callers should not each have to know that. */
+    if (!*count_out) {
+        return SEEDTOOL_EINVAL;
+    }
     for (size_t i = 0; i < *count_out; ++i) {
         numbers[i] = (uint16_t)(numbers[i] + 1);
     }

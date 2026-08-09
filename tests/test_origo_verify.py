@@ -285,6 +285,38 @@ class SeedToolVerifierTests(unittest.TestCase):
         # call with a prefix that happens to be empty.
         self.assertEqual(verify.derive(node, []), node)
 
+    def test_segwit_encoding_uses_the_right_constant_per_witness_version(self):
+        # bech32 and bech32m differ only in the constant xored into the
+        # checksum, and using v0's for a v1 program is the classic way to
+        # produce an address wallets reject. The published BIP84/BIP86 vectors
+        # elsewhere in this file already pin one address of each kind; this
+        # pins the rule they are instances of, for programs those vectors do
+        # not cover.
+        program20, program32 = bytes(range(20)), bytes(range(32))
+        v0 = verify.segwit(program20, 0)
+        v1 = verify.segwit(program32, 1)
+        self.assertTrue(v0.startswith("bc1q"))
+        self.assertTrue(v1.startswith("bc1p"))
+        # The same program at two versions must not share a checksum, which is
+        # what a single hard-coded constant would produce.
+        a = verify.segwit(program32, 0)
+        b = verify.segwit(program32, 1)
+        self.assertNotEqual(a[-6:], b[-6:])
+
+    def test_convertbits_pads_the_final_group(self):
+        # 8-to-5 regrouping leaves a remainder unless the input is a multiple
+        # of five bytes; the leftover bits must be left-shifted into a final
+        # group rather than dropped. A 20-byte hash160 is 160 bits = exactly
+        # 32 groups, but a 32-byte taproot key is 256 bits = 51 groups plus
+        # one bit, and losing that bit changes the address.
+        self.assertEqual(len(verify.convertbits(bytes(20))), 32)
+        self.assertEqual(len(verify.convertbits(bytes(32))), 52)
+        # The trailing bit really is carried, not zeroed by accident: a
+        # program differing only in its last bit must convert differently.
+        low = verify.convertbits(bytes(31) + bytes([0x00]))
+        high = verify.convertbits(bytes(31) + bytes([0x01]))
+        self.assertNotEqual(low, high)
+
     def test_descriptor_checksum_catches_a_single_character_change(self):
         # The BIP380 checksum exists to catch transcription slips, so rather
         # than pin a second literal it is checked for the property it is for:
