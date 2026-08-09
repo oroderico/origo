@@ -15,6 +15,19 @@ only once to blind libsecp256k1's context against side-channel analysis. The
 seed-generation functions have no RNG input and produce the same result if the
 device RNG is stubbed.
 
+**Contents.** [What it replaces](#what-it-replaces) ·
+[Why](#why) ·
+[Entropy transcripts](#entropy-transcripts) ·
+[Controls](#controls) ·
+[Entering words and passphrases](#entering-words-and-passphrases) ·
+[Restore and inspect](#restore-and-inspect) ·
+[Backup export](#backup-export) ·
+[Run on a PC](#run-on-a-pc) ·
+[The splash screen and its artwork](#the-splash-screen-and-its-artwork) ·
+[Build and flash](#build-and-flash) ·
+[Independent verification](#independent-verification) ·
+[Safety boundaries](#safety-boundaries)
+
 ## What it replaces
 
 Almost everything a seed needs done to it is arithmetic. Turning dice into
@@ -87,6 +100,8 @@ and Origo generates the identical mnemonic.
 
 ## Entropy transcripts
 
+### Recording one
+
 The transcript is shown before its full SHA256 and mnemonic. Record it so the
 calculation can be reproduced independently.
 
@@ -115,6 +130,8 @@ drawing the next, so a repeat is expected and valid there - the encoding is
 otherwise identical, just longer and, being drawn with replacement, graded
 the same estimated way as dice and coins (see below) rather than the exact
 count 12-word cards uses.
+
+### From transcript to mnemonic
 
 Turning that transcript into words is three mechanical steps, always in this
 order, and nothing else touches them: no RNG, no timestamp, no per-device
@@ -145,11 +162,15 @@ full BIP39 checksum would otherwise occupy. That buffer is handed to the same
 picks whichever one final word makes it valid. The coin flips are the only
 literal randomness this path needs, and they must be exactly as many bits as
 are missing — one too few or too many and the call is rejected outright rather
-than guessing.
+than guessing. Those flips are the missing entropy bits and lead to one
+checksum-valid final word: the firmware never randomly selects from the 128 or
+8 otherwise-valid endings.
 
 Neither path ever reads the device RNG. The entropy quality bar described
 next grades what has already been typed; it cannot add or remove a single bit
 from what gets hashed.
+
+### The quality bar
 
 Every source's run opens on a screen naming how many rolls, flips or cards it
 needs and what the bar below is about, with that bar already in place but
@@ -181,6 +202,8 @@ small (empirically under 1%, at the 50 draws that mode asks for) chance of
 an honest run tripping "poor entropy" once. Adapted from Krux's dice-roll
 entropy screen (github.com/selfcustody/krux).
 
+### How the counts were chosen
+
 Dice and card counts are set so that an honest run does not merely pass the
 gate but reads at or above the minimum on screen: D6 at its old 50 and 99
 rolls could carry at most 129.2 and 255.9 bits, so on a simulation of 20000
@@ -205,30 +228,6 @@ seed generated on Krux at its own minimum cannot be reproduced here by
 entering the same rolls; the transcript format, hash and BIP39 encoding are
 unchanged, so a Krux run of matching length still reproduces exactly.
 
-Checksum completion consumes 11 BIP39 words plus exactly 7 coin flips, or 23
-words plus exactly 3 flips. Those flips are the missing entropy bits and lead
-to one checksum-valid final word; the firmware never randomly selects from the
-128 or 8 otherwise-valid endings.
-
-The opening screen shows the logo as drawn — mark, wordmark and tagline in one
-picture — for a couple of seconds and then gives way to the menu on its own.
-Presses are discarded while it is up: it is where the user is still learning that
-both buttons together mean select, and a screen that offers no choice must not
-turn a stray press into one.
-
-That artwork is the only picture in the firmware: a 98x110 array of sixteen
-palette entries at two pixels per byte, about 5.4 KiB, written straight into the
-framebuffer by indexing that palette. It is deliberately not compressed. Deflate
-would take it to roughly 2 KiB, but the decompressor is one of the components the
-audit rejects by name, and trading an audited absence for two kilobytes in an
-image that already has twelve to spare is a bad exchange. Sixteen colours are the
-compression: they differ from full RGB565 by well under one percent on this
-artwork, which is drawn with a limited palette to begin with.
-
-`tools/make_logo.py` regenerates `main/seedtool_logo.c` from `assets/logo.png`
-and is the one place Pillow is used; the firmware, the verifier and the tests
-stay dependency-free.
-
 ## Controls
 
 The board has two buttons and no select button. In a list, the left button
@@ -249,6 +248,8 @@ its position counter alone. The two footers that name a consequence rather
 than a gesture — `BOTH continue   L/R back`, and the timeout's `BOTH extend
 L/R erase` — are always shown, because guessing wrong there costs a session.
 
+### Carousels: dice, coins and cards
+
 Coin flips are a direct choice rather than a carousel position: left picks
 Heads, right picks Tails, one press per flip. With a run as long as 128 or 256
 flips, halving the presses per flip halves the whole entry. Both buttons
@@ -263,6 +264,8 @@ off the rank carousel returns to the suit carousel for the same card, one
 stage back as everywhere else; only stepping back off the suit carousel
 undoes the card before it.
 
+### Going back
+
 Three gestures is all two buttons afford, and all three are spoken for, so going
 back cannot be a button: it is a place on the screen. Every screen has one, and
 it steps back exactly one stage rather than abandoning the flow. Menus carry a
@@ -275,12 +278,16 @@ exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
 of a screen position, since a direct choice has nothing left to confirm.
 
+### Settings
+
 The main menu's `Settings` entry carries `About` (the safety disclaimer),
 `Flip Orientation`, which toggles the panel 180 degrees in place, and
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted. The display settings are session-only - like every other
 piece of UI state, they reset to their defaults (unflipped, full brightness)
 on the next boot, since Origo has nothing to save them to.
+
+### Lists and scrolling
 
 Every choice is a list showing three options at once with the selection
 highlighted, so an option is always read alongside its neighbours. Three rather
@@ -302,6 +309,8 @@ return to is the main menu itself: there is no `Back` row there, and the
 session-timeout wipe (`BOTH extend   L/R erase`) is the only way out of it
 short of the board's own physical reset.
 
+## Entering words and passphrases
+
 Entering a mnemonic asks first whether the words will be typed as letters or as
 word numbers, and every word of that mnemonic is then entered the chosen way.
 
@@ -318,6 +327,8 @@ mind. `tools/origo_verify.py inspect` prints the same one-based numbers for a
 mnemonic, and the self-test requires all 2048 of them to be typeable both plainly
 and padded to four digits.
 
+### The keyboards
+
 The keyboards are QWERTY. The cursor opens on the middle key of the middle row —
 `g` on the letter keyboards, `5` on the number one — because on a ring of thirty
 keys walked with two buttons the corner is the furthest possible place to start
@@ -329,6 +340,8 @@ the nearest key that still does.
 The suggestion order, the initially selected key and where a list has scrolled to
 are pure functions of what has been typed and chosen. None is randomised: no
 screen in the entry path may depend on the device RNG.
+
+### Passphrase
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
 four-page keyboard covering the whole printable range, entered twice, and exists
@@ -487,6 +500,27 @@ account-key and address QR codes use.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
+
+## The splash screen and its artwork
+
+The opening screen shows the logo as drawn — mark, wordmark and tagline in one
+picture — for a couple of seconds and then gives way to the menu on its own.
+Presses are discarded while it is up: it is where the user is still learning that
+both buttons together mean select, and a screen that offers no choice must not
+turn a stray press into one.
+
+That artwork is the only picture in the firmware: a 98x110 array of sixteen
+palette entries at two pixels per byte, about 5.4 KiB, written straight into the
+framebuffer by indexing that palette. It is deliberately not compressed. Deflate
+would take it to roughly 2 KiB, but the decompressor is one of the components the
+audit rejects by name, and trading an audited absence for two kilobytes in an
+image that already has twelve to spare is a bad exchange. Sixteen colours are the
+compression: they differ from full RGB565 by well under one percent on this
+artwork, which is drawn with a limited palette to begin with.
+
+`tools/make_logo.py` regenerates `main/seedtool_logo.c` from `assets/logo.png`
+and is the one place Pillow is used; the firmware, the verifier and the tests
+stay dependency-free.
 
 ## Build and flash
 
