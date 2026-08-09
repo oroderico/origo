@@ -365,8 +365,18 @@ def child_private(node, index):
     secret, chain, depth, _, _ = node
     data = b"\0" + secret.to_bytes(32, "big") if index & H else pubkey(secret)
     digest = hmac.new(chain, data + index.to_bytes(4, "big"), hashlib.sha512).digest()
-    child = (secret + int.from_bytes(digest[:32], "big")) % N
-    if not child:
+    tweak = int.from_bytes(digest[:32], "big")
+    child = (secret + tweak) % N
+    # BIP32 invalidates a child on either condition, and the device rejects
+    # both: libwally reaches secp256k1_ec_seckey_tweak_add, which fails on the
+    # scalar overflow as well as on a zero result (see the "seckey_tweak_add
+    # checks both conditions" note in libwally's bip32.c). Checking only for
+    # zero here meant that on a tweak at or above the curve order the device
+    # would refuse to derive while this tool quietly returned a key - the two
+    # disagreeing is the one failure a verifier must not have. Roughly a
+    # 2**-128 event per derivation, so this is about the implementations
+    # matching, not about anyone hitting it.
+    if tweak >= N or not child:
         raise ValueError("invalid BIP32 child key")
     return child, digest[32:], depth + 1, hash160(pubkey(secret))[:4], index
 

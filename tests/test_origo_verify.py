@@ -225,6 +225,84 @@ class SeedToolVerifierTests(unittest.TestCase):
                 results.add(mnemonic.split()[-1])
             self.assertEqual(len(results), 1 << missing)
 
+    def test_pubkey_pads_a_short_x_coordinate(self):
+        # The compressed form is a parity byte and exactly 32 bytes of x. An
+        # x that happens to fit in 31 needs a leading zero, and dropping it
+        # yields a 32-byte key that hashes to a different address than the
+        # device derives. secret=153 is the first such key, found by search
+        # rather than picked: its x is 31 bytes.
+        x, _ = verify.mul(153)
+        self.assertEqual((x.bit_length() + 7) // 8, 31)
+        encoded = verify.pubkey(153)
+        self.assertEqual(len(encoded), 33)
+        self.assertEqual(encoded[1], 0)
+        # Every key serialises to 33 bytes, short x or not.
+        for secret in (1, 153, 2**160, verify.N - 1):
+            self.assertEqual(len(verify.pubkey(secret)), 33)
+
+    def test_child_derivation_rejects_a_tweak_at_the_curve_order(self):
+        # BIP32 invalidates a child when parse256(IL) >= n as well as when the
+        # result is zero, and libwally enforces both through
+        # secp256k1_ec_seckey_tweak_add. Only the zero case was checked here,
+        # so the device would have refused to derive while this tool returned
+        # a key. The HMAC output has to be forced: no reachable input produces
+        # such a tweak on purpose.
+        node = verify.master(self.MNEMONIC, "")
+        real_hmac_new = verify.hmac.new
+
+        class ForcedDigest:
+            def __init__(self, head):
+                self._head = head
+
+            def digest(self):
+                return self._head + bytes(32)
+
+        for head, expected in (
+            (verify.N.to_bytes(32, "big"), "at the order"),
+            ((verify.N + 1).to_bytes(32, "big"), "above the order"),
+        ):
+            with self.subTest(tweak=expected):
+                verify.hmac.new = lambda *a, _h=head, **k: ForcedDigest(_h)
+                try:
+                    with self.assertRaises(ValueError):
+                        verify.child_private(node, 0)
+                finally:
+                    verify.hmac.new = real_hmac_new
+        # The real HMAC still derives normally afterwards.
+        self.assertEqual(len(verify.pubkey(verify.child_private(node, 0)[0])), 33)
+
+    def test_hardened_and_unhardened_indices_are_distinct_at_the_boundary(self):
+        # 0x7fffffff is the last unhardened index and 0x80000000 the first
+        # hardened one. They differ in which data the HMAC is fed - the
+        # private key for hardened, the public point otherwise - so the two
+        # must not derive the same child.
+        node = verify.master(self.MNEMONIC, "")
+        last_normal = verify.child_private(node, 0x7FFFFFFF)
+        first_hardened = verify.child_private(node, 0x80000000)
+        self.assertNotEqual(last_normal[0], first_hardened[0])
+        self.assertNotEqual(last_normal[1], first_hardened[1])
+        # An empty path is the identity, which is what makes derive() safe to
+        # call with a prefix that happens to be empty.
+        self.assertEqual(verify.derive(node, []), node)
+
+    def test_descriptor_checksum_catches_a_single_character_change(self):
+        # The BIP380 checksum exists to catch transcription slips, so rather
+        # than pin a second literal it is checked for the property it is for:
+        # no single-character edit anywhere in the descriptor may leave the
+        # checksum unchanged.
+        fingerprint, _, accounts = verify.addresses(self.MNEMONIC, "", 0)
+        desc = verify.descriptor(fingerprint, 84, accounts[84])
+        body, _, checksum = desc.rpartition("#")
+        self.assertEqual(len(checksum), 8)
+        for i, original in enumerate(body):
+            replacement = "0" if original != "0" else "1"
+            if replacement not in verify.DESCRIPTOR_INPUT_CHARSET:
+                continue
+            mutated = body[:i] + replacement + body[i + 1 :]
+            self.assertNotEqual(
+                verify.descriptor_checksum(mutated), checksum, f"undetected edit at index {i}"
+            )
+
     def test_verifier_event_counts_match_the_firmware(self):
         # The verifier exists to check the device without trusting it, and
         # transcript() refuses any count but the expected one - so a table
