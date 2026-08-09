@@ -41,9 +41,13 @@ jobs:
       - name: Run verifier tests
         run: python3 -m unittest discover -s tests -v
 
+      # No -DLOCK_VERSION: the firmware does not define it either, so qrcode.h's
+      # default of 0 applies and the encoder's internal version guards compile
+      # out. Building the test with -DLOCK_VERSION=5 used to make it assert a
+      # rejection the shipped encoder does not perform.
       - name: Run QR host smoke test
         run: |
-          cc -std=c11 -Wall -Wextra -Werror -DLOCK_VERSION=5 -Imain \
+          cc -std=c11 -Wall -Wextra -Werror -Imain \
             main/qrcode.c tests/qrcode_smoke.c -o /tmp/origo-qrcode-smoke
           /tmp/origo-qrcode-smoke
 
