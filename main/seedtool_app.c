@@ -513,8 +513,15 @@ static bool page_text(const char* title, const char* text)
     }
     const size_t pages = (lines + 2) / 3;
     size_t page = 0;
+    bool advanced;
+    /* Hoisted out of the loop so the single exit below can wipe them: what
+     * these three hold is whatever the caller is paging, and the callers page
+     * the canonical transcript, its SHA256 and the mnemonic itself. `start`
+     * and `length` are offsets into the caller's own string and carry nothing
+     * on their own. */
+    char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1];
     for (;;) {
-        char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1], footer[48];
+        char footer[48];
         const size_t first = page * 3;
         memcpy(line1, text + start[first], length[first]);
         line1[length[first]] = '\0';
@@ -532,25 +539,34 @@ static bool page_text(const char* title, const char* text)
         screen_text3(title, line1, line2, line3, footer);
         switch (wait_key()) {
         case KEY_SELECT:
-            return true;
+            advanced = true;
+            goto done;
         case KEY_NEXT:
             if (page + 1 >= pages) {
-                return true;
+                advanced = true;
+                goto done;
             }
             ++page;
             break;
         case KEY_PREV:
             if (!page) {
-                return false;
+                advanced = false;
+                goto done;
             }
             --page;
             break;
         case KEY_REDRAW:
             break;
         default:
-            return false;
+            advanced = false;
+            goto done;
         }
     }
+done:
+    seedtool_zero(line1, sizeof(line1));
+    seedtool_zero(line2, sizeof(line2));
+    seedtool_zero(line3, sizeof(line3));
+    return advanced;
 }
 
 /* The account key carries its key origin, so a scan does not have to be told
@@ -1096,9 +1112,20 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
     char* mnemonic, const size_t mnemonic_len)
 {
     size_t cursor = 0;
+    int outcome;
+    /* Cleared at both ends, exactly as browse_addresses does with
+     * address_labels: these rows are the mnemonic in plain text, one word
+     * each, and they live in .bss rather than on a stack frame that the next
+     * screen would overwrite anyway. Leaving them behind kept a restored seed
+     * readable in RAM for the rest of the session - past "Done / erase" and
+     * past the session-timeout screen, which erases nothing here. Clearing on
+     * entry as well as exit keeps a 12-word restore from leaving rows 12..23
+     * of a previous 24-word one on show. */
+    seedtool_zero(review_labels, sizeof(review_labels));
     for (;;) {
         if (!join_words(words, count, mnemonic, mnemonic_len)) {
-            return -1;
+            outcome = -1;
+            goto done;
         }
         const bool valid = seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK;
         for (size_t i = 0; i < count; ++i) {
@@ -1124,13 +1151,16 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
         const int selected
             = choose_at(valid ? "Review words" : "Review - fix a word", review_items, entries, true, cursor);
         if (selected < 0) {
-            return -1;
+            outcome = -1;
+            goto done;
         }
         if ((size_t)selected == entries - 1) {
-            return 0;
+            outcome = 0;
+            goto done;
         }
         if (valid && (size_t)selected == count) {
-            return 1;
+            outcome = 1;
+            goto done;
         }
         cursor = (size_t)selected;
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
@@ -1140,12 +1170,16 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
             strcpy(words[selected], word);
         } else if (result < 0) {
             seedtool_zero(word, sizeof(word));
-            return -1;
+            outcome = -1;
+            goto done;
         }
         /* result == 0: backed out of re-entering this word, so it is left
          * exactly as it was and the list is simply shown again. */
         seedtool_zero(word, sizeof(word));
     }
+done:
+    seedtool_zero(review_labels, sizeof(review_labels));
+    return outcome;
 }
 
 /* enter_mnemonic_words, then review_and_confirm on the result: the two-step
@@ -1511,8 +1545,13 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
     }
     const size_t pages = (count + 3) / 4;
     size_t page = 0;
+    bool advanced;
+    /* Hoisted for the same reason as page_text's: every exit already wiped
+     * `numbers`, the dictionary positions, while leaving the words those
+     * positions spell rendered in full underneath. */
+    char lines[4][24] = { { 0 } };
     for (;;) {
-        char lines[4][24] = { { 0 } };
+        memset(lines, 0, sizeof(lines));
         const size_t first = page * 4;
         for (size_t i = 0; i < 4 && first + i < count; ++i) {
             const size_t position = first + i + 1;
@@ -1536,29 +1575,33 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
             footer);
         switch (wait_key()) {
         case KEY_SELECT:
-            seedtool_zero(numbers, sizeof(numbers));
-            return true;
+            advanced = true;
+            goto done;
         case KEY_NEXT:
             if (page + 1 >= pages) {
-                seedtool_zero(numbers, sizeof(numbers));
-                return true;
+                advanced = true;
+                goto done;
             }
             ++page;
             break;
         case KEY_PREV:
             if (!page) {
-                seedtool_zero(numbers, sizeof(numbers));
-                return false;
+                advanced = false;
+                goto done;
             }
             --page;
             break;
         case KEY_REDRAW:
             break;
         default:
-            seedtool_zero(numbers, sizeof(numbers));
-            return false;
+            advanced = false;
+            goto done;
         }
     }
+done:
+    seedtool_zero(numbers, sizeof(numbers));
+    seedtool_zero(lines, sizeof(lines));
+    return advanced;
 }
 
 /* Entering this screen reaches the whole seed, so the warning is far starker
@@ -2017,6 +2060,14 @@ static int collect_entropy(const int source, const size_t words)
             break;
         }
         --i;
+        /* The same restore the in-run back-step does above. Without it,
+         * declining this screen on a without-replacement card run stepped
+         * back to the last card with that card still struck off the deck, so
+         * it could not be re-picked - and every further decline struck off
+         * one more. */
+        if (source == SEEDTOOL_CARDS) {
+            available[values[i]] = true;
+        }
     }
     if (outcome == 1) {
         if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) == SEEDTOOL_OK) {
