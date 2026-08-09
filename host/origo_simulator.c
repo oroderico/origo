@@ -950,6 +950,59 @@ static bool dice_screen_hints_clear_the_bar(void)
     return true;
 }
 
+/* The backup-confirmation screen show_generated() puts between the word list
+ * and the quiz is a plain two-line acknowledge, so it has no quality bar to
+ * wrap into - but a line too wide for this face still wraps down onto the one
+ * below it, and line 2 wrapping lands on the footer. Both word counts are
+ * rendered (the first line names how many words the quiz asks for, 4 of 12 or
+ * 8 of 24) and each line is required to stay inside its own band. Strings
+ * copied from show_generated() in seedtool_app.c, the same way the dice hints
+ * above are. */
+/* Bottom-most lit row with `text` drawn as line 1 of an otherwise bare screen.
+ * draw_centered_box wraps at the display width rather than clipping, and the
+ * body's two lines sit at fixed y, so a wrapped line 1 is drawn straight over
+ * line 2 - it never runs off the screen, which is why measuring the edges
+ * (the way the dice titles above are measured) would not see it. */
+static int rendered_bottom(const char* text)
+{
+    seedtool_render_screen("Confirm backup", text, "", "");
+    const uint16_t* const pixels = seedtool_render_pixels();
+    int bottom = -1;
+    for (int y = 0; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                bottom = y;
+                break;
+            }
+        }
+    }
+    return bottom;
+}
+
+static bool backup_confirm_screen_lines_do_not_wrap(void)
+{
+    /* Calibrated against a string that plainly fits, so this needs no access
+     * to the font's private line height: anything reaching lower than one line
+     * of text does has taken a second line. The reference carries descenders
+     * because the strings below do - measured against an "X", whose glyph
+     * stops three rows higher, every one of them would read as wrapped. */
+    const int one_line = rendered_bottom("gjpqy");
+    if (one_line < 0) {
+        return false;
+    }
+    /* Both word counts the quiz can ask for (4 of 12, 8 of 24) and the line
+     * below them, copied from show_generated() in seedtool_app.c the same way
+     * the dice hints above are. */
+    static const char* const lines[]
+        = { "Retype 4 of the 12 words", "Retype 8 of the 24 words", "Have your backup ready" };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
+        if (rendered_bottom(lines[i]) > one_line) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Known-good vectors straight from Krux's own base32 test suite
  * (tests/test_bbqr.py, B32_TEST_BYTES/B32_ENCODED_STRINGS, unpadded form):
  * proof this encoder produces byte-for-byte the same output a BBQr-reading
@@ -1194,6 +1247,10 @@ static int self_test(void)
     }
     if (!dice_screen_titles_clear_the_edges()) {
         fputs("Origo dice screen title self-test failed\n", stderr);
+        return 1;
+    }
+    if (!backup_confirm_screen_lines_do_not_wrap()) {
+        fputs("Origo backup confirmation screen self-test failed\n", stderr);
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key

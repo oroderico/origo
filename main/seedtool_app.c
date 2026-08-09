@@ -1769,6 +1769,30 @@ static void show_generated(seedtool_generated_t* generated)
          * back one stage instead of skipping past confirmation into the
          * wallet's passphrase prompt. */
         while (show_numbered_list(generated->mnemonic, true)) {
+            /* The word list is left by paging forward off its last page - the
+             * same press that meant "next page" for the whole list - so
+             * without this screen the quiz's keyboard simply appeared, with
+             * no way to tell "show me more" from "I have written these down"
+             * and no warning that the words were about to leave the screen.
+             * The quiz's own "word N of M" title says which word it wants but
+             * never why it is asking, so the count is named here instead,
+             * before the words go away rather than after. */
+            /* Sized for the format's worst case rather than its real one: the
+             * counts are 4/12 or 8/24, but %u lets the compiler assume ten
+             * digits apiece, and -Wformat-truncation in the firmware build is
+             * an error. */
+            char intro[48];
+            (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
+                (unsigned)generated->words);
+            const seedtool_key_t intro_key = confirm("Confirm backup", intro, "Have your backup ready");
+            if (intro_key == KEY_TIMEOUT) {
+                /* Not `continue`: that would repaint the whole mnemonic on
+                 * the way out of a session that has already expired. */
+                break;
+            }
+            if (intro_key != KEY_SELECT) {
+                continue; /* Back: the words again, one stage, as everywhere else. */
+            }
             const int outcome = confirm_backup(generated->mnemonic, generated->words);
             if (outcome < 0) {
                 break;
