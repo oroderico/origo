@@ -643,6 +643,113 @@ static bool dice_entropy_false_positive_rate_is_bounded(void)
     return true;
 }
 
+/* seedtool_required_events' counts are chosen so that an honest run does not
+ * merely clear the poor-entropy gate but reports at or above the minimum on
+ * screen - the number the reader has just been asked to trust. That is a
+ * stricter property than the false-positive bound above, which counts only
+ * runs pushed past DICE_ENTROPY_TOLERANCE, and the gap between the two is
+ * wide enough to hide a regression: at D6's former counts of 50 and 99 rolls
+ * an honest run read short 21.9% and 36.6% of the time while being flagged
+ * just 3.0% and 5.3%, so the bound above passed comfortably and protected
+ * nothing. Whichever of the two properties a future change means to hold,
+ * both are now pinned.
+ *
+ * Coin is left out by name rather than by oversight. One flip is exactly one
+ * bit, so its count is at once the theoretical minimum and the entire
+ * transcript buffer, and about a quarter of honest coin runs report a bit
+ * short with no room left to pad them - the trade-off README's entropy
+ * section spells out. This exists to keep the other sources from drifting
+ * into that state, not to hold coin to a standard its encoding forbids. */
+static bool honest_runs_report_at_least_the_minimum(void)
+{
+    const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_CARDS_REPLACE };
+    const size_t sides[] = { 6, 20, 52 };
+    const size_t words[] = { 12, 24 };
+    const size_t trials = 2000;
+    const double max_short_read_rate = 0.01;
+
+    /* Its own stream, so adding this check cannot shift the draws the
+     * false-positive bound above already passes against. */
+    uint32_t state = 20260809;
+    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
+        const double bias = seedtool_dice_entropy_bias_bits(sources[s]);
+        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w) {
+            const size_t required = seedtool_required_events(sources[s], words[w]);
+            if (!required) {
+                continue; /* this source/word-count combination is not offered */
+            }
+            const int min_bits = (int)seedtool_min_entropy_bits(words[w]);
+            size_t short_reads = 0;
+            for (size_t t = 0; t < trials; ++t) {
+                uint8_t values[256];
+                for (size_t i = 0; i < required; ++i) {
+                    values[i] = (uint8_t)(xorshift32(&state) % sides[s]) + 1;
+                }
+                int bits = 0;
+                if (seedtool_dice_entropy_bits(sources[s], values, required, &bits) != SEEDTOOL_OK) {
+                    return false;
+                }
+                if (bits + (int)lround(bias) < min_bits) {
+                    ++short_reads;
+                }
+            }
+            if ((double)short_reads / (double)trials > max_short_read_rate) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* collect_entropy() gathers a run into values[256], entropy_quality() copies
+ * it into faces[256], and seedtool_generate() renders it into the
+ * SEEDTOOL_MAX_TRANSCRIPT_LEN-wide transcript field of seedtool_generated_t.
+ * None of the three is bounds-checked - the collection loop is simply
+ * `while (i < required)` - so they stay in range only because
+ * seedtool_required_events happens never to hand out more than they hold.
+ * The margin is not comfortable: coin at 24 words fills the transcript to the
+ * last byte. Nothing enforced that before this check, so a future count could
+ * cross the line silently and write past a stack array on a device with a
+ * live seed in memory.
+ *
+ * Both ceilings are exercised, because they bind different sources: the event
+ * count limits coin, while the rendered length limits D20, which spends three
+ * characters on a roll that costs the array one byte. */
+#define COLLECTION_ARRAY_LEN 256 /* values[] and faces[] in main/seedtool_app.c */
+
+static bool required_events_fit_the_collection_buffers(void)
+{
+    const seedtool_source_t sources[]
+        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
+    const size_t words[] = { 12, 24 };
+    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
+        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w) {
+            const size_t required = seedtool_required_events(sources[s], words[w]);
+            if (!required) {
+                continue;
+            }
+            if (required > COLLECTION_ARRAY_LEN) {
+                return false;
+            }
+            /* The widest transcript the source can print at that length: the
+             * highest face of a die, and distinct cards for the deck that
+             * rejects a repeat. */
+            uint8_t values[COLLECTION_ARRAY_LEN];
+            for (size_t i = 0; i < required; ++i) {
+                values[i] = sources[s] == SEEDTOOL_D6 ? 6
+                    : sources[s] == SEEDTOOL_D20      ? 20
+                    : sources[s] == SEEDTOOL_COIN     ? 1
+                                                      : (uint8_t)(i % 52);
+            }
+            char transcript[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
+            if (seedtool_transcript(sources[s], values, required, transcript, sizeof(transcript)) != SEEDTOOL_OK) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static size_t count_pixel_color(const uint16_t color)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -1238,6 +1345,14 @@ static int self_test(void)
     }
     if (!dice_entropy_false_positive_rate_is_bounded()) {
         fputs("Origo dice entropy false-positive-rate self-test failed\n", stderr);
+        return 1;
+    }
+    if (!honest_runs_report_at_least_the_minimum()) {
+        fputs("Origo honest-run short-read self-test failed\n", stderr);
+        return 1;
+    }
+    if (!required_events_fit_the_collection_buffers()) {
+        fputs("Origo collection buffer bound self-test failed\n", stderr);
         return 1;
     }
     if (!dice_progress_bar_is_bounded()) {
