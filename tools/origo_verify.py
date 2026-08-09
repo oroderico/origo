@@ -23,6 +23,28 @@ XPUB_VERSION = b"\x04\x88\xb2\x1e"
 ZPUB_VERSION = b"\x04\xb2\x47\x46"  # SLIP-132, native segwit (BIP84) only
 WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/data/wordlists/english.txt"
 
+# How many events each source needs, as (12 words, 24 words); None where that
+# combination is not offered. This has to agree exactly with
+# seedtool_required_events() in main/seedtool_core.c, because transcript()
+# below refuses any other count - a verifier that expects a different number
+# of rolls than the device asked for cannot check the device at all, which is
+# the one job it has. It drifted once already: D20 was padded from 30/60 to
+# 36/68 in the firmware and this table kept the old numbers, so no D20 seed
+# this firmware produced could be verified here. test_origo_verify.py parses
+# the C and fails if the two ever disagree again.
+REQUIRED_EVENTS = {
+    "d6": (50, 99),
+    "d20": (36, 68),
+    "coin": (128, 256),
+    "cards": (25, None),
+    # Without replacement, a single deck tops out around 225.6 bits
+    # (log2(52!)) - short of 256 even drawing every card - so 24 words
+    # instead returns the card to the deck and reshuffles before every
+    # draw, needing more draws (see shannon_bits/pattern_detected,
+    # which grade this the same way as any other die).
+    "cards-replace": (None, 48),
+}
+
 
 def words():
     result = WORDLIST.read_text(encoding="ascii").splitlines()
@@ -439,19 +461,7 @@ def addresses(mnemonic, passphrase, index, account_index=0):
 
 
 def generate(args):
-    counts = {
-        "d6": (50, 99),
-        "d20": (30, 60),
-        "coin": (128, 256),
-        "cards": (25, None),
-        # Without replacement, a single deck tops out around 225.6 bits
-        # (log2(52!)) - short of 256 even drawing every card - so 24 words
-        # instead returns the card to the deck and reshuffles before every
-        # draw, needing more draws (see shannon_bits/pattern_detected,
-        # which grade this the same way as any other die).
-        "cards-replace": (None, 48),
-    }
-    count = counts[args.source][0 if args.words == 12 else 1]
+    count = REQUIRED_EVENTS[args.source][0 if args.words == 12 else 1]
     if count is None:
         supported = 24 if args.words == 12 else 12
         raise ValueError(f"{args.source} mode supports {supported} words only")

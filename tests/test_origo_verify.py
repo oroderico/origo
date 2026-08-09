@@ -215,6 +215,40 @@ class SeedToolVerifierTests(unittest.TestCase):
                 results.add(mnemonic.split()[-1])
             self.assertEqual(len(results), 1 << missing)
 
+    def test_verifier_event_counts_match_the_firmware(self):
+        # The verifier exists to check the device without trusting it, and
+        # transcript() refuses any count but the expected one - so a table
+        # that disagrees with seedtool_required_events() does not merely
+        # report a wrong minimum, it makes every seed from that source
+        # unverifiable. That shipped once: D20 was padded from 30/60 to 36/68
+        # in the firmware and this table kept 30/60, so `generate d20` failed
+        # with "expected exactly 30 entries, got 36" on a perfectly good run.
+        source = (Path(__file__).parents[1] / "main/seedtool_core.c").read_text()
+        body = source.split("size_t seedtool_required_events", 1)[1].split("\n}", 1)[0]
+        names = {
+            "SEEDTOOL_D6": "d6",
+            "SEEDTOOL_D20": "d20",
+            "SEEDTOOL_COIN": "coin",
+            "SEEDTOOL_CARDS": "cards",
+            "SEEDTOOL_CARDS_REPLACE": "cards-replace",
+        }
+        # Each arm reads `return words == N ? <that N's count> : <the other>;`
+        # and N is 12 or 24 depending on which case reads more naturally in C.
+        pattern = re.compile(
+            r"case\s+(SEEDTOOL_\w+):.*?return\s+words\s*==\s*(12|24)\s*\?\s*(\d+)\s*:\s*(\d+);",
+            re.DOTALL,
+        )
+        found = {}
+        for case, pivot, when_pivot, otherwise in pattern.findall(body):
+            twelve, twentyfour = (
+                (when_pivot, otherwise) if pivot == "12" else (otherwise, when_pivot)
+            )
+            # 0 is how the C spells "this combination is not offered"; the
+            # Python table spells the same thing None.
+            found[names[case]] = tuple(int(n) or None for n in (twelve, twentyfour))
+        self.assertEqual(set(found), set(verify.REQUIRED_EVENTS), "a source was added or renamed")
+        self.assertEqual(found, verify.REQUIRED_EVENTS)
+
     def test_firmware_entropy_core_has_no_rng_call(self):
         source = (Path(__file__).parents[1] / "main/seedtool_core.c").read_text()
         for forbidden in ("get_random", "esp_random", "esp_fill_random", "randombytes"):

@@ -56,7 +56,7 @@ only later would mean checking a string the device then rewrites.
 | Source | 12 words | 24 words | Canonical transcript |
 |---|---:|---:|---|
 | D6 | 50 rolls | 99 rolls | digits concatenated, e.g. `123456` |
-| D20 | 30 rolls | 60 rolls | decimal rolls joined by `-`, e.g. `1-20-7` |
+| D20 | 36 rolls | 68 rolls | decimal rolls joined by `-`, e.g. `1-20-7` |
 | Coins | 128 flips | 256 flips | Heads=`1`, Tails=`0`, concatenated |
 | Cards | first 25 distinct cards | first 48 cards, with replacement | `cards-v1:` plus rank/suit codes |
 
