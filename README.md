@@ -15,6 +15,51 @@ only once to blind libsecp256k1's context against side-channel analysis. The
 seed-generation functions have no RNG input and produce the same result if the
 device RNG is stubbed.
 
+## What it replaces
+
+Almost everything a seed needs done to it is arithmetic. Turning dice into
+words, finishing a checksum, deriving an account key, reading off the first
+hundred receive addresses, working out which holes to punch in a metal plate —
+none of it needs a network, a signing key, or a general-purpose computer. It
+does need *somewhere to run*, and the usual answers each cost something:
+
+- **By hand.** A mnemonic's final word is a checksum, so finishing a
+  hand-rolled seed means a printed wordlist, a SHA256 you trust, and no
+  arithmetic slips along the way. An account xpub is not reachable this way
+  at all.
+- **An offline PC.** A disk that remembers, a network stack one command away
+  from up, and an operating system far too large to audit before you type a
+  seed into it. "Offline" there is a claim about configuration, not about
+  construction — and configuration is exactly what drifts.
+- **An old phone.** The same, plus a baseband processor you cannot inspect
+  and cannot prove is asleep.
+
+Origo is a fourth answer: a development board costing about as much as lunch,
+running firmware that does this arithmetic and has no facility for anything
+else. It generates a 12- or 24-word mnemonic from dice, coins or cards;
+finishes a checksum from 11 or 23 words already known; validates a mnemonic
+you already have; shows that mnemonic's master fingerprint, its BIP84 or
+BIP86 account key — as `xpub`, as a SLIP-132 `zpub` where one is defined, or
+as a QR code — its output descriptor, and its first hundred receive
+addresses; and exports a backup as words, as word numbers, as a Stackbit 1248
+punch pattern, or as a Compact SeedQR.
+
+The difference is not that Origo is careful where a PC is careless. It is
+that the things you would be trusting a PC *not* to do — write to a disk,
+bring up a radio, run code you never audited — are absent from the build
+rather than switched off within it. There is no filesystem, no persistence
+partition, and no networking component anywhere in the build graph, so no
+configuration change can turn one back on; putting one back would mean
+editing the component list, which is visible in a diff.
+
+What you trade is trusting this firmware instead, and the repository is
+arranged so that you do not have to take that on faith: the build is
+byte-for-byte reproducible, the linked surface is checked by
+`tools/audit_origo_elf.py` on every build, and any seed the device produces
+can be recomputed independently with `tools/origo_verify.py`. Those three are
+what to verify before trusting it with anything, and each has its own section
+below.
+
 ## Why
 
 On 30 July 2026, attackers began draining Coldcard wallets: an initial wave
@@ -469,6 +514,35 @@ a 295 KiB image limit. LEDC is the one peripheral driver let through that list,
 solely for the backlight's brightness PWM - it carries no wallet, radio or
 persistence surface of its own. The partition table contains only the factory
 application: there is no NVS, PHY-data or OTA slot.
+
+Wi-Fi and Bluetooth are absent rather than disabled. Neither appears in
+`main/CMakeLists.txt`'s component list, so neither is ever pulled into the
+build, and the options that would switch them off — `CONFIG_ESP_WIFI_ENABLED`,
+`CONFIG_BT_ENABLED` — are not present in the generated `sdkconfig` at all,
+because the components that declare them are not there to declare anything.
+That is a stronger statement than a flag set to `n`, and deliberately so: a
+flag is a configuration that can drift, which is the exact shape of the
+regression described under "Why" above. The audit checks the result from both
+ends, rejecting `esp_wifi_init`, `esp_wifi_start` and `nimble_port_init` among
+the linked symbols and `libesp_wifi.a` and `libbt.a` among the archive members
+the map file shows were actually linked.
+
+The build is reproducible: the same source and the same ESP-IDF produce a
+byte-identical binary, which is what makes a published SHA256 worth anything.
+Check it the way CI does, by building twice into separate directories and
+comparing:
+
+```sh
+idf.py -B "$PWD/build-a" -D SDKCONFIG="$PWD/build-a/sdkconfig" build
+idf.py -B "$PWD/build-b" -D SDKCONFIG="$PWD/build-b/sdkconfig" build
+cmp build-a/origo.bin build-b/origo.bin
+```
+
+A difference here means something outside the source — a path, a timestamp, a
+toolchain version — reached the image, and the published hash stops being a
+statement anyone else can confirm. `CONFIG_APP_REPRODUCIBLE_BUILD=y` and
+`CONFIG_APP_EXCLUDE_PROJECT_NAME_VAR=y` in `sdkconfig.defaults` are what keep
+build paths and project metadata out of it.
 
 ## Independent verification
 
