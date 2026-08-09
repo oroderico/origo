@@ -37,7 +37,17 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
     }
     switch (source) {
     case SEEDTOOL_D6:
-        return words == 12 ? 50 : 99;
+        /* 50 and 99 sat right on the line - 50 rolls can carry at most
+         * 50*log2(6) = 129.2 bits against a 128-bit minimum, and 99 at most
+         * 255.9 against 256, which the estimator cannot even reach. Simulated
+         * over 20000 honest runs, 21.9% of 50-roll runs and 36.6% of 99-roll
+         * ones reported fewer bits than the seed needs. Most cleared the
+         * quality gate anyway on DICE_ENTROPY_TOLERANCE, so they generated
+         * normally, but a reader who has just been asked to trust a number
+         * should not be shown one that reads short one time in three. At 60
+         * and 120 that is 0.0% of 20000, and the counts stay round: 120 is
+         * twice 60, as 256 bits is twice 128. */
+        return words == 12 ? 60 : 120;
     case SEEDTOOL_D20:
         /* Padded well past the 128/256-bit theoretical minimum (30/60 rolls
          * would only just clear it): the empirical Shannon estimate the
@@ -51,12 +61,13 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
         return words == 12 ? 25 : 0;
     case SEEDTOOL_CARDS_REPLACE:
         /* Monte-Carlo checked (host/origo_simulator.c's
-         * dice_entropy_false_positive_rate_is_bounded): 44 draws flags a
-         * genuinely random run 87% of the time, 46 still 19%; 48 is the
-         * smallest count under the same bound every other source here
-         * uses. Not offered for 12 words - SEEDTOOL_CARDS already covers
-         * that case, without needing replacement. */
-        return words == 24 ? 48 : 0;
+         * dice_entropy_false_positive_rate_is_bounded). 48 was the smallest
+         * count that cleared the false-positive bound, but on the same
+         * 20000-run simulation that moved D6 above it still reported short
+         * of 256 bits on 2.0% of honest draws; 50 brings that to 0.01% for
+         * two more cards. Not offered for 12 words - SEEDTOOL_CARDS already
+         * covers that case, without needing replacement. */
+        return words == 24 ? 50 : 0;
     default:
         return 0;
     }

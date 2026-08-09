@@ -55,10 +55,10 @@ only later would mean checking a string the device then rewrites.
 
 | Source | 12 words | 24 words | Canonical transcript |
 |---|---:|---:|---|
-| D6 | 50 rolls | 99 rolls | digits concatenated, e.g. `123456` |
+| D6 | 60 rolls | 120 rolls | digits concatenated, e.g. `123456` |
 | D20 | 36 rolls | 68 rolls | decimal rolls joined by `-`, e.g. `1-20-7` |
 | Coins | 128 flips | 256 flips | Heads=`1`, Tails=`0`, concatenated |
-| Cards | first 25 distinct cards | first 48 cards, with replacement | `cards-v1:` plus rank/suit codes |
+| Cards | first 25 distinct cards | first 50 cards, with replacement | `cards-v1:` plus rank/suit codes |
 
 Card ranks are `A23456789TJQK`; suits are `CDHS`. The canonical deck order is
 `AC..KC`, `AD..KD`, `AH..KH`, `AS..KS`. 12-word draws the first 25 distinct
@@ -132,9 +132,19 @@ and comfortably clear the 128-bit minimum by the 25th draw on their own; only
 their pattern check (each draw's rank, ignoring suit) can ever flag a card
 run. 24-word cards, drawn with replacement, go back to being an estimate —
 graded as a genuine 52-sided die, the same plug-in estimator and the same
-small (empirically under 1%, at the 48 draws that mode asks for) chance of
+small (empirically under 1%, at the 50 draws that mode asks for) chance of
 an honest run tripping "poor entropy" once. Adapted from Krux's dice-roll
 entropy screen (github.com/selfcustody/krux).
+
+Dice and card counts are set so that an honest run does not merely pass the
+gate but reads at or above the minimum on screen: D6 at its old 50 and 99
+rolls could carry at most 129.2 and 255.9 bits, so on a simulation of 20000
+honest runs 21.9% and 36.6% respectively reported fewer bits than the seed
+needs. Almost all still generated, absorbed by the four-bit tolerance, but a
+tool whose whole claim is not overstating entropy should not routinely show a
+number that reads short. Coin flips are the exception that stays: one flip is
+exactly one bit, so 128 and 256 flips are both the theoretical minimum and
+the whole of the transcript buffer, and there is no room to pad them.
 
 Checksum completion consumes 11 BIP39 words plus exactly 7 coin flips, or 23
 words plus exactly 3 flips. Those flips are the missing entropy bits and lead

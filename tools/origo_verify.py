@@ -33,7 +33,7 @@ WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/da
 # this firmware produced could be verified here. test_origo_verify.py parses
 # the C and fails if the two ever disagree again.
 REQUIRED_EVENTS = {
-    "d6": (50, 99),
+    "d6": (60, 120),
     "d20": (36, 68),
     "coin": (128, 256),
     "cards": (25, None),
@@ -42,7 +42,7 @@ REQUIRED_EVENTS = {
     # instead returns the card to the deck and reshuffles before every
     # draw, needing more draws (see shannon_bits/pattern_detected,
     # which grade this the same way as any other die).
-    "cards-replace": (None, 48),
+    "cards-replace": (None, 50),
 }
 
 
