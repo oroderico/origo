@@ -10,6 +10,15 @@
 #include <freertos/task.h>
 #include <stdbool.h>
 
+/* These are read against a 100 Hz FreeRTOS tick (CONFIG_FREERTOS_HZ), so every
+ * delay below rounds down to a whole 10 ms tick: POLL_MS actually polls every
+ * 10 ms, which leaves the release settling in 10 ms rather than the 15 it reads
+ * as. The hold values are multiples of 10 and so come out exact. The short
+ * settle is left alone deliberately, since bounce cannot double-fire here: the
+ * press latch below is only cleared once a release has been committed, so a
+ * contact dropping back mid-release just restarts the settle. Anyone raising
+ * the tick rate, or tuning these against a stopwatch, should know the two do
+ * not currently agree. */
 #define POLL_MS 15
 #define SETTLE_POLLS 2
 #define HOLD_DELAY_MS 500
@@ -23,6 +32,8 @@
 static bool left_seen, right_seen, repeated;
 static uint64_t repeat_at;
 static unsigned idle_polls;
+/* Set by seedtool_platform_flush_keys, cleared once both buttons are up. */
+static bool discarding;
 
 static bool pressed(const gpio_num_t pin) { return gpio_get_level(pin) == 0; }
 
@@ -55,7 +66,13 @@ seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
         const bool left = pressed(BUTTON_LEFT_GPIO);
         const bool right = pressed(BUTTON_RIGHT_GPIO);
 
-        if (left || right) {
+        if (discarding) {
+            /* Zeroing the latch alone would not be enough while a button is
+             * still down: the press would simply be counted from here and its
+             * release would act on the new screen anyway. Stay silent until the
+             * user has let go of everything. */
+            discarding = left || right;
+        } else if (left || right) {
             idle_polls = 0;
             if (!left_seen && !right_seen) {
                 repeated = false;
@@ -93,6 +110,13 @@ seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     }
+}
+
+void seedtool_platform_flush_keys(void)
+{
+    left_seen = right_seen = repeated = false;
+    idle_polls = 0;
+    discarding = true;
 }
 
 void seedtool_platform_random(uint8_t* output, const size_t output_len) { esp_fill_random(output, output_len); }

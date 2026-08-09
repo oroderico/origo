@@ -144,6 +144,9 @@ static seedtool_key_t wait_key(void)
         }
     }
     screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
+    /* Erasing is one of the two answers this screen accepts, and the user cannot
+     * have meant it with a press begun before the screen existed. */
+    seedtool_platform_flush_keys();
     /* The warning has replaced the caller's screen, so an extended session must
      * repaint it rather than let the next press act on what is no longer shown. */
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
@@ -171,6 +174,7 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
         return key;
     }
     screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
+    seedtool_platform_flush_keys();
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
@@ -2186,6 +2190,10 @@ void seedtool_run(void)
         }
         (void)seedtool_platform_wait_key((uint32_t)(deadline - now));
     }
+    /* Throwing the splash's presses away is not enough on its own: a button
+     * still held as the menu takes over would arrive there as a press the menu
+     * never saw begin. */
+    seedtool_platform_flush_keys();
     last_action = seedtool_platform_milliseconds();
 
     for (;;) {

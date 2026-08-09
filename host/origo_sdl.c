@@ -251,6 +251,15 @@ seedtool_key_t seedtool_platform_wait_key(const uint32_t timeout_ms)
     }
 }
 
+/* The simulator reads key events rather than pin levels, so it holds no press
+ * to abandon; what stands in for one is the queue, where a key struck before
+ * the new screen appeared is still waiting to be delivered to it. */
+void seedtool_platform_flush_keys(void)
+{
+    SDL_PumpEvents();
+    SDL_FlushEvent(SDL_KEYDOWN);
+}
+
 void seedtool_platform_random(uint8_t* output, const size_t output_len)
 {
     size_t offset = 0;

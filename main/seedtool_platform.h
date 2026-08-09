@@ -15,6 +15,12 @@ typedef enum { KEY_PREV, KEY_NEXT, KEY_SELECT, KEY_TIMEOUT, KEY_REDRAW } seedtoo
 void seedtool_platform_init(void);
 uint64_t seedtool_platform_milliseconds(void);
 seedtool_key_t seedtool_platform_wait_key(uint32_t timeout_ms);
+/* Abandons whatever the user is in the middle of doing, so that a screen just
+ * painted only ever sees a gesture begun after it appeared. A press in progress
+ * is dropped along with its release, since a release is what the device reports
+ * as a press: without this, a button already going down when a screen is
+ * replaced acts on the screen that took its place. */
+void seedtool_platform_flush_keys(void);
 void seedtool_platform_random(uint8_t* output, size_t output_len);
 _Noreturn void seedtool_platform_restart(void);
 
