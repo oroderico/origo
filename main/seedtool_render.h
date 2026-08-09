@@ -44,14 +44,15 @@ typedef struct {
     int entropy_pct; /* 0-100 */
     bool warn;
     bool complete;
-    /* The raw numbers behind entropy_pct, in bits rather than percent, for a
-     * screen that wants to print the count rather than only fill the bar.
-     * A min_bits of 0 - what the default struct literal gives, and what the
-     * ungraded screens elsewhere leave it at - means "this run carries no bit
-     * estimate", not "the minimum is zero": callers test it before printing
-     * bits, so a bar-only screen keeps its plain title. */
+    /* The count behind entropy_pct, in bits rather than percent, for a screen
+     * that prints the number rather than only filling the bar. `graded` says
+     * whether there is one: the default struct literal leaves it false, which
+     * is what the screens that draw a bar without a running estimate - and the
+     * checksum-completion flips, which are not graded at all - rely on. It is
+     * a flag rather than a sentinel value of `bits`, because zero bits is a
+     * real and meaningful reading at the start of every run. */
+    bool graded;
     int bits;
-    int min_bits;
 } seedtool_progress_t;
 
 /* Draws the same screen as seedtool_render_screen, then the bar on top of it

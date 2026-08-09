@@ -263,10 +263,11 @@ static unsigned step_value(
 }
 
 /* The "N/M" position counter every entry screen's title carries, with the
- * bits collected so far appended when `progress` has them (min_bits is 0 on
- * the default-initialised structs elsewhere in this file that only draw a
- * bar, and NULL on the checksum-completion flips, which are not graded at
- * all - see seedtool_progress_t's doc comment). Kept to one helper so the
+ * bits collected so far appended when `progress` says it has them (`graded`
+ * is false on the default-initialised structs elsewhere in this file that
+ * only draw a bar, and `progress` is NULL outright on the
+ * checksum-completion flips, which are not graded at all - see
+ * seedtool_progress_t's doc comment). Kept to one helper so the
  * dice/card and coin-flip screens can't drift into two different formats
  * for the same thing.
  *
@@ -285,7 +286,7 @@ static unsigned step_value(
 static void format_progress_heading(char* heading, const size_t heading_len, const char* title,
     const unsigned position, const unsigned total, const seedtool_progress_t* progress)
 {
-    if (progress && progress->min_bits > 0) {
+    if (progress && progress->graded) {
         (void)snprintf(heading, heading_len, "%s %u/%u %d bits", title, position, total, progress->bits);
     } else {
         (void)snprintf(heading, heading_len, "%s  %u/%u", title, position, total);
@@ -1878,8 +1879,8 @@ static seedtool_progress_t entropy_progress(const seedtool_source_t source, cons
         .entropy_pct = (int)((size_t)capped_bits * 100 / min_bits),
         .warn = pattern,
         .complete = false, /* only called for count < required, so never yet */
+        .graded = true,
         .bits = bits,
-        .min_bits = (int)min_bits,
     };
     return progress;
 }
