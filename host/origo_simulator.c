@@ -862,7 +862,7 @@ static bool title_fits(const seedtool_source_t source, const size_t sides, const
 
     char title[48];
     /* Format copied from format_progress_heading() in seedtool_app.c. */
-    (void)snprintf(title, sizeof(title), "%s %u/%u %db", label, (unsigned)required, (unsigned)required, bits);
+    (void)snprintf(title, sizeof(title), "%s %u/%u %d bits", label, (unsigned)required, (unsigned)required, bits);
     seedtool_render_dice_screen(title, "3", "123456", "L/R move   BOTH select", &(seedtool_progress_t) { 0 });
 
     /* Measured, not just tested for clipping: a title that merely reaches the
@@ -907,7 +907,10 @@ static bool dice_screen_titles_clear_the_edges(void)
     for (size_t w = 0; w < sizeof(word_counts) / sizeof(word_counts[0]); ++w) {
         const size_t words = word_counts[w];
         if (!title_fits(SEEDTOOL_D6, 6, words, "D6 dice") || !title_fits(SEEDTOOL_D20, 20, words, "D20 dice")
-            || !title_fits(SEEDTOOL_COIN, 2, words, "Coin flips")) {
+            /* "Coins", not the "Coin flips" the menu list above is checked
+             * with: collect_entropy() deliberately labels the entry screen
+             * with the shorter name so the spelled-out "bits" fits. */
+            || !title_fits(SEEDTOOL_COIN, 2, words, "Coins")) {
             return false;
         }
         /* CARD_SUIT_NAMES in seedtool_app.c, plus the suit carousel's own

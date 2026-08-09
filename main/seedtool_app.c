@@ -275,13 +275,18 @@ static unsigned step_value(
  * segment fills against it, and the end-of-run screen spells out "X of Y
  * bits" - and repeating it here cost the width that matters. A coin's
  * counters are the worst of both: one flip is one bit, so "256/256
- * 257/256b" reads as a typo of itself and left 5px of margin on a 240px
- * screen, where the count alone leaves 24px. */
+ * 257/256 bits" reads as a typo of itself and left the title 5px from the
+ * glass, where the count alone leaves 27px.
+ *
+ * "bits" is spelled out rather than abbreviated to a "b" the reader has to
+ * decode next to three other numbers; the four characters that costs are
+ * why collect_entropy() labels the coin screen "Coins" instead of the
+ * menu's "Coin flips". */
 static void format_progress_heading(char* heading, const size_t heading_len, const char* title,
     const unsigned position, const unsigned total, const seedtool_progress_t* progress)
 {
     if (progress && progress->min_bits > 0) {
-        (void)snprintf(heading, heading_len, "%s %u/%u %db", title, position, total, progress->bits);
+        (void)snprintf(heading, heading_len, "%s %u/%u %d bits", title, position, total, progress->bits);
     } else {
         (void)snprintf(heading, heading_len, "%s  %u/%u", title, position, total);
     }
@@ -1882,7 +1887,14 @@ static seedtool_progress_t entropy_progress(const seedtool_source_t source, cons
  * produced, 0 when the user backed out of the first entry, -1 on timeout. */
 static int collect_entropy(const int source, const size_t words)
 {
-    static const char* const names[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Cards" };
+    /* "Coins", not the menu's own "Coin flips": these label the entry screen,
+     * whose title also carries the position counter and the bit count, and
+     * coin is the source with the longest counter (256/256) as well as the
+     * longest name. Spelled out at full length it left the title 12px from
+     * the glass, inside the inset the quality bar below it keeps. The menu
+     * that got the reader here still says "Coin flips"; by this screen the
+     * source is not in doubt. */
+    static const char* const names[] = { "D6 dice", "D20 dice", "Coins", "Cards", "Cards" };
     static const char* const nouns[] = { "rolls", "rolls", "flips", "cards", "cards" };
     const size_t required = seedtool_required_events((seedtool_source_t)source, words);
     const unsigned max = source == SEEDTOOL_D6 ? 6 : 20;
