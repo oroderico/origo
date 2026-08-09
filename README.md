@@ -605,6 +605,22 @@ entropy source and recording process are sound. It cannot protect against a
 compromised display, malicious firmware, biased physical dice/cards/coins,
 shoulder surfing, mistakes copying entropy, or a Compact SeedQR photographed
 by anyone other than the person who asked to see it. Reproduce the result on a
-second independent implementation before funding an address. The ten-minute
-inactivity timer gives a 60-second extend-or-erase warning; cancel, error,
-timeout, and restart paths wipe session buffers before returning or rebooting.
+second independent implementation before funding an address.
+
+Nor does it defend against someone reading the board's memory directly. There
+is no secure element, no secure boot, no flash encryption, and JTAG is not
+fused off — this is a development board running an offline calculator, not a
+hardware wallet, and it is not built to survive an attacker who has the device
+in hand. What that leaves is a housekeeping obligation rather than a defence:
+every screen that holds seed material wipes its buffers when it is left, so
+what is in RAM is what the screen in front of you needs and not what three
+screens ago needed. Power the board down when you are done rather than leaving
+a session open.
+
+The ten-minute inactivity timer gives a 60-second extend-or-erase warning.
+Cancel, error and timeout paths wipe their session buffers before returning,
+and the timeout at the main menu reboots. One path does not wipe: an internal
+assertion failure reboots immediately (`__wrap_abort` in
+`main/seedtool_platform_esp.c`) without unwinding, so whatever was live stays
+in RAM until startup re-zeroes it. That is a bug's exit, not a normal one, but
+it is the one hole in the sentence above.
