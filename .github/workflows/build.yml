@@ -28,6 +28,34 @@ jobs:
       - name: Build and test shared host core
         run: ./tools/run-simulator.sh --self-test
 
+  # The self-test again, instrumented. Reading the code finds the bugs someone
+  # thought to look for; this finds the out-of-bounds access and the undefined
+  # behaviour nobody did. Kept a separate job so a sanitizer failure is
+  # distinguishable at a glance from the plain self-test failing.
+  sanitized-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source and pinned submodules
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
+        with:
+          submodules: recursive
+
+      - name: Install SDL development files
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      # Origo's own sources only: libwally is vendored and trusted, and
+      # secp256k1's inline assembly does not compile instrumented. clang
+      # rather than the default compiler because that is the combination this
+      # was validated against - GCC on some distributions ships the sanitizer
+      # link stubs without the runtime, and the failure looks like a linker
+      # error rather than a finding.
+      - name: Build and run the self-test under ASan and UBSan
+        run: |
+          cmake -S host -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang -DORIGO_SANITIZE=ON
+          cmake --build build-sanitize --parallel
+          ./build-sanitize/origo-simulator --self-test
+
   deterministic-firmware:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.4

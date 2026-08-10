@@ -50,5 +50,27 @@ target_include_directories(origo-simulator PRIVATE "${ORIGO_ROOT}/main")
 target_compile_options(origo-simulator PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
 target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
 
+# -DORIGO_SANITIZE=ON runs the self-test under AddressSanitizer and
+# UndefinedBehaviorSanitizer. Reading the code catches the bugs you thought to
+# look for; these catch the reads and the overflows you did not, which is a
+# different set - the firmware is full of fixed-size buffers whose bounds are
+# argued rather than checked.
+#
+# Applied to Origo's own sources only, never to wally_host. libwally is
+# vendored and trusted, and secp256k1's 64-bit inline assembly does not even
+# compile under the instrumentation ("inline assembly requires more registers
+# than available"). Excluding it costs nothing that is being audited here and
+# is what makes the option usable at all.
+#
+# Needs a toolchain whose sanitizer runtime is installed. On Fedora, GCC ships
+# the link stubs without libasan/libubsan, so configure with
+# -DCMAKE_C_COMPILER=clang.
+option(ORIGO_SANITIZE "Build the simulator with ASan and UBSan" OFF)
+if(ORIGO_SANITIZE)
+    target_compile_options(origo-simulator PRIVATE
+        -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all -g)
+    target_link_options(origo-simulator PRIVATE -fsanitize=address,undefined)
+endif()
+
 enable_testing()
 add_test(NAME origo-host-self-test COMMAND origo-simulator --self-test)
