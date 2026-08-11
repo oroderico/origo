@@ -44,6 +44,25 @@ FORBIDDEN_MAP_TEXT = (
     "DejaVuSans",
     "jade_symbols_",
 )
+
+
+def linked_map_text(map_text):
+    """`map_text` with the "Discarded input sections" block removed.
+
+    That block lists archives the linker considered and dropped, so a
+    forbidden name appearing only there is noise rather than a live link -
+    but everything after it, notably "Linker script and memory map" (the
+    authoritative list of what was actually linked), is not noise and has
+    to stay in. A version of this that kept only the text *before* the
+    discarded-sections header silently dropped that section along with it.
+    """
+    start = map_text.find("Discarded input sections")
+    end = map_text.find("Memory Configuration")
+    if start == -1 or end == -1:
+        return map_text
+    return map_text[:start] + map_text[end:]
+
+
 REQUIRED = {
     "app_main",
     "seedtool_generate",
@@ -90,9 +109,7 @@ def main():
         bad_map.append(f"missing map file: {map_file}")
     else:
         map_text = map_file.read_text(errors="replace")
-        # Only archive members pulled to satisfy live references are relevant;
-        # linker command groups and discarded sections mention unused archives.
-        linked_members = map_text.split("Discarded input sections", 1)[0]
+        linked_members = linked_map_text(map_text)
         bad_map.extend(item for item in FORBIDDEN_MAP_TEXT if item in linked_members)
 
     bin_file = args.bin_file or args.elf.with_suffix(".bin")

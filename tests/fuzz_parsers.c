@@ -45,7 +45,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     memcpy(str, data, n);
     str[n] = '\0';
 
-    switch (selector % 8) {
+    switch (selector % 10) {
     case 0: {
         size_t words = 0;
         (void)seedtool_validate_mnemonic(str, &words);
@@ -102,6 +102,22 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         for (size_t len = 0; len <= 8; ++len) {
             (void)seedtool_complete_checksum(str, coin, len, out, sizeof(out));
         }
+        break;
+    }
+    case 8: { /* wordlist: comprimento vindo do proprio input, nao do que str
+               * de fato contem - mesma forma do pc/pi do case 6 */
+        uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
+        bool letters[SEEDTOOL_LETTERS];
+        bool digits[SEEDTOOL_DIGITS];
+        const size_t prefix_len = n ? (size_t)(uint8_t)str[0] % (sizeof(str) - 1) : 0;
+        (void)seedtool_words_with_prefix(str, prefix_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
+        (void)seedtool_next_letters(str, prefix_len, letters);
+        (void)seedtool_next_digits(str, prefix_len, digits);
+        (void)seedtool_word_number(str, prefix_len);
+        break;
+    }
+    case 9: { /* passphrase: texto livre digitado pelo usuario */
+        (void)seedtool_validate_passphrase(str);
         break;
     }
     default: break;

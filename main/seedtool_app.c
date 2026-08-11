@@ -767,6 +767,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
 
         if (!matches) {
             seedtool_zero(stem, sizeof(stem));
+            seedtool_zero(candidates, sizeof(candidates));
             return -1;
         }
         if (matches <= SEEDTOOL_MAX_WORD_CHOICES) {
@@ -784,6 +785,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             seedtool_zero(listing, sizeof(listing));
             if (chosen < 0) {
                 seedtool_zero(stem, sizeof(stem));
+                seedtool_zero(candidates, sizeof(candidates));
                 return -1;
             }
             if ((size_t)chosen < matches) {
@@ -793,6 +795,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
                     strcpy(output, word);
                 }
                 seedtool_zero(stem, sizeof(stem));
+                seedtool_zero(candidates, sizeof(candidates));
                 return result;
             }
             erase = true;
@@ -823,6 +826,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
                     break;
                 default:
                     seedtool_zero(stem, sizeof(stem));
+                    seedtool_zero(candidates, sizeof(candidates));
                     return -1;
                 }
             }
@@ -838,6 +842,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
         if (erase) {
             if (!stem_len) {
                 seedtool_zero(stem, sizeof(stem));
+                seedtool_zero(candidates, sizeof(candidates));
                 return 0;
             }
             stem[--stem_len] = '\0';
@@ -2142,6 +2147,7 @@ static bool complete_checksum(void)
             }
             const int result
                 = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips, NULL);
+            seedtool_zero(flips, sizeof(flips));
             if (result < 0) {
                 outcome = -1;
             } else if (result == 0) {
