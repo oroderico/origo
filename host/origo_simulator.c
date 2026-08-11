@@ -294,7 +294,11 @@ static bool labels_fit_a_row(void)
 static bool list_viewport_is_sound(void)
 {
     const int track = 99;
-    /* 101 is the largest list the firmware builds: 100 addresses plus Back. */
+    /* The largest list the firmware builds is the address browser's, at 50
+     * shown addresses plus "Go to index" and Back. The sweep runs well past
+     * that on purpose: it costs nothing here, and it used to be a hundred-row
+     * list, so the headroom is what keeps this test from having to move every
+     * time that screen is resized. */
     for (size_t count = 1; count <= 101; ++count) {
         for (size_t selected = 0; selected < count; ++selected) {
             for (size_t previous = 0; previous <= count; ++previous) {

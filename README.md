@@ -364,10 +364,13 @@ type shows:
   Taproot is `xpub` only: SLIP-132 defines no taproot version prefix, so there
   is no `zpub`-equivalent to offer it as;
 - its mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i`
-  or `m/86'/0'/0'/0/i`, browsed as a scrollable list of a hundred rows rather
-  than stepped through one at a time. The whole list is derived when it is
-  opened, the same up-front derivation the QR carousel below already relies
-  on, so scrolling through it never re-runs BIP32.
+  or `m/86'/0'/0'/0/i`, browsed as a scrollable list rather than stepped
+  through one at a time. The list shows the first fifty; a "Go to index" entry
+  at the end of it takes any index in range on a keypad, since scrolling five
+  rows at a time to reach index 87 is not browsing. All hundred are derived
+  when the screen is opened, the same up-front derivation the QR carousel
+  below already relies on, and they stay derived until it is left — so neither
+  scrolling the list nor stepping back to it from an address re-runs BIP32.
 
 Long values are paged three lines at a time in the 16px face, split by what
 actually fits the display rather than by a character count, so a proportional
@@ -488,15 +491,15 @@ rejects a zpub request outright, that every prefix of every BIP39 word and all
 2048 word numbers are reachable through their keyboards, that every one of
 those 2048 words round-trips back to the same one-based number, that paged text
 reassembles byte for byte, that a scrolling list always keeps the selection on
-screen and never pads its end with blank rows for lists as large as the
-hundred-row address browser, that the rearranged keyboards still hold every
-letter and every printable character, that an account key with its origin
-still fits a single QR code, that every one of the 2048 Stackbit 1248 punch
-grids lights exactly the cells its digits' bits call for in both the simple and
-the physical layout, and that the Compact SeedQR payload for the published
-12- and 24-word zero-entropy vectors is exactly their raw entropy, drawn at
-QR version 1 and 2 respectively rather than the larger fixed version the
-account-key and address QR codes use.
+screen and never pads its end with blank rows, at every list length up to
+well past the longest one the firmware builds, that the rearranged keyboards
+still hold every letter and every printable character, that an account key
+with its origin still fits a single QR code, that every one of the 2048
+Stackbit 1248 punch grids lights exactly the cells its digits' bits call for
+in both the simple and the physical layout, and that the Compact SeedQR
+payload for the published 12- and 24-word zero-entropy vectors is exactly
+their raw entropy, drawn at QR version 1 and 2 respectively rather than the
+larger fixed version the account-key and address QR codes use.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.

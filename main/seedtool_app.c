@@ -26,9 +26,16 @@
 #define MAX_LINE_CHARS 48
 #define PASSPHRASE_TAIL 24
 
-/* The address list holds every index plus a trailing Back row. */
+/* Every index up to SEEDTOOL_MAX_ADDRESS_INDEX is derived and cached once per
+ * visit to the Addresses screen, but only the first ADDRESS_SHOWN_ROWS get a
+ * row in the list - scrolling to index 87 five rows at a time is its own
+ * problem, one "Go to index" solves directly instead. */
 #define ADDRESS_LIST_ROWS (SEEDTOOL_MAX_ADDRESS_INDEX + 1)
+#define ADDRESS_SHOWN_ROWS 50
 #define ADDRESS_LABEL_LEN (8 + SEEDTOOL_MAX_ADDRESS_LEN)
+/* derive_addresses labels one shown row per derived address, so showing more
+ * rows than were derived would read past the end of `addresses`. */
+_Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are shown than are derived");
 
 /* "Up/Down" rather than "L/R": the two buttons sit one above the other on
  * the board's left edge, not side by side, so the left button (KEY_PREV)
@@ -56,6 +63,17 @@
  * word-number keyboard's variable reachable-digit pruning, which exists only
  * because 2048 isn't a round power of ten. */
 #define ACCOUNT_DIGITS 3
+
+/* Same reasoning as ACCOUNT_DIGITS, sized for SEEDTOOL_MAX_ADDRESS_INDEX (99)
+ * instead: "Go to index" on the address list. The two constants are only
+ * compatible by arithmetic nobody restates when editing one of them - two
+ * digits reach exactly 99 - so changing either alone is a build error rather
+ * than a keypad that can type an index the derived set does not hold.
+ * browse_addresses rejects an out-of-range index at runtime as well: this
+ * pins the pair, that refuses to act on the gap if the pin is ever loosened. */
+#define ADDRESS_INDEX_DIGITS 2
+_Static_assert(ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99,
+    "the address-index keypad width and the derived address range must be changed together");
 
 /* Every key is found by its character rather than by where it sits, so the
  * layouts are QWERTY, or anything else, purely by changing the strings above. */
@@ -1015,6 +1033,72 @@ static int enter_account(uint32_t* value)
     }
 }
 
+/* Same shape as enter_account(), for jumping straight to an address index
+ * instead of scrolling the list to it: ADDRESS_INDEX_DIGITS is exactly wide
+ * enough for SEEDTOOL_MAX_ADDRESS_INDEX, so every digit stays reachable and
+ * there is nothing to prune. Returns 1 with `*value` set on Accept, 0 on
+ * backing out of the first digit, -1 on timeout. */
+static int enter_address_index(uint32_t* value)
+{
+    char digits[ADDRESS_INDEX_DIGITS + 1] = { 0 };
+    size_t digits_len = 0;
+    size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
+    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
+
+    for (;;) {
+        bool enabled[WORD_NUMBER_KEYS] = { false };
+        for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
+            const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
+            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
+                : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0
+                                                       : digits_len < ADDRESS_INDEX_DIGITS;
+        }
+        selected = !enabled[selected] && digits_len ? accept_index
+                                                     : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
+        bool picked = false;
+        while (!picked) {
+            seedtool_display_keyboard(
+                "Go to index", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            switch (wait_key()) {
+            case KEY_SELECT:
+                picked = true;
+                break;
+            case KEY_PREV:
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
+                break;
+            case KEY_NEXT:
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
+                break;
+            case KEY_REDRAW:
+                break;
+            default:
+                seedtool_zero(digits, sizeof(digits));
+                return -1;
+            }
+        }
+        const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
+        if (pressed == SEEDTOOL_KEY_ACCEPT) {
+            uint32_t number = 0;
+            for (size_t i = 0; i < digits_len; ++i) {
+                number = number * 10 + (uint32_t)(digits[i] - '0');
+            }
+            seedtool_zero(digits, sizeof(digits));
+            *value = number;
+            return 1;
+        }
+        if (pressed == SEEDTOOL_KEY_BACKSPACE) {
+            if (!digits_len) {
+                seedtool_zero(digits, sizeof(digits));
+                return 0;
+            }
+            digits[--digits_len] = '\0';
+        } else if (digits_len < ADDRESS_INDEX_DIGITS) {
+            digits[digits_len++] = pressed;
+            digits[digits_len] = '\0';
+        }
+    }
+}
+
 /* Returns 1 when a whole mnemonic was entered, 0 when the user backed out of the
  * first word or the method menu, -1 on timeout or overflow. Fills `words` (a
  * caller-owned array so restore_mnemonic below can keep reviewing them after
@@ -1118,7 +1202,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
 {
     size_t cursor = 0;
     int outcome;
-    /* Cleared at both ends, exactly as browse_addresses does with
+    /* Cleared at both ends, exactly as derive_addresses does with
      * address_labels: these rows are the mnemonic in plain text, one word
      * each, and they live in .bss rather than on a stack frame that the next
      * screen would overwrite anyway. Leaving them behind kept a restored seed
@@ -1138,7 +1222,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
              * bounded (SEEDTOOL_MAX_WORD_LEN), but GCC's format-truncation
              * analysis loses that bound through the words[][...] parameter
              * decay once inlined this deep - see the identical fix on
-             * browse_addresses's snprintf. */
+             * derive_addresses's snprintf. */
             (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%02u. %.*s", (unsigned)(i + 1),
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
@@ -1364,34 +1448,45 @@ static void show_address_qr(const char* title, const char* address)
     }
 }
 
-/* Labels for the address list are derived once when the list is opened, so
- * stepping through a hundred rows is instant rather than a fresh BIP32
- * derivation per row. Static: this does not belong on the stack, and the list
- * widget needs every row addressable up front, there is no windowed variant
- * of it. */
-static char address_labels[ADDRESS_LIST_ROWS][ADDRESS_LABEL_LEN];
-static const char* address_items[ADDRESS_LIST_ROWS + 1]; /* + Back */
+/* Addresses and their list labels are derived once per visit to the Addresses
+ * screen and cached here for the whole visit, not re-derived every time the
+ * reader backs out of one address's QR back to the list - only leaving the
+ * screen for good retires the cache (see its callers in show_type_menu).
+ * Static: this does not belong on the stack, and the list widget needs every
+ * shown row addressable up front, there is no windowed variant of it.
+ *
+ * The trade this makes deliberately: these rows now stay populated while a
+ * single address's text and QR are on screen, where re-deriving per visit used
+ * to leave them populated only while the list itself was up. Addresses are
+ * public - anyone holding the account xpub derives the same hundred - so this
+ * is a privacy surface rather than a seed one, and the alternative was the
+ * whole PBKDF2 and account derivation again on every step back from a QR.
+ * Total .bss actually falls: only the shown rows are labelled now. */
+static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+static char address_labels[ADDRESS_SHOWN_ROWS][ADDRESS_LABEL_LEN];
+static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Back */
 
-/* Builds the address list for one type and lets the reader browse it. Returns
- * the chosen index, or -1 on Back, timeout or a derivation error. On a
- * selection, the chosen address is copied into address_out before the working
- * array is zeroed, so the caller does not have to derive it a second time.
- * `cursor` is both where the list opens and where it is left: a reader who
- * opens address 10, views its QR and comes straight back lands on 10 again
- * rather than back at the top of the list. */
-static int browse_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    const uint32_t account, char* address_out, const size_t address_out_len, size_t* cursor)
+/* Fills the cache above for one type/account. Every index up to
+ * SEEDTOOL_MAX_ADDRESS_INDEX is derived - the mnemonic-to-seed PBKDF2 and the
+ * hardened account step are the expensive part, and Go to index needs any of
+ * them - but only the first ADDRESS_SHOWN_ROWS get a list row. Returns false
+ * (having already told the reader) on a derivation error. */
+static bool derive_addresses(
+    const char* mnemonic, const char* passphrase, const seedtool_address_type_t type, const uint32_t account)
 {
-    static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+    /* Cleared on entry as well as on the way out, exactly as review_labels is
+     * and for the same reason: these are .bss, so a failed derivation must not
+     * leave the previous account's rows sitting here to be wiped by a caller
+     * that this time never gets far enough to do it. */
+    seedtool_zero(address_labels, sizeof(address_labels));
     screen_text("Addresses", "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
-        seedtool_zero(address_labels, sizeof(address_labels));
         (void)acknowledge("Error", "Could not derive addresses", NULL);
-        return -1;
+        return false;
     }
-    for (uint32_t i = 0; i < ADDRESS_LIST_ROWS; ++i) {
+    for (uint32_t i = 0; i < ADDRESS_SHOWN_ROWS; ++i) {
         /* Precision on %s, not a bare conversion: addresses[i] is genuinely
          * bounded (SEEDTOOL_MAX_ADDRESS_LEN), but that bound doesn't survive
          * the array-to-pointer decay through this call for GCC's format-
@@ -1404,17 +1499,61 @@ static int browse_addresses(const char* mnemonic, const char* passphrase, const 
             (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1), addresses[i]);
         address_items[i] = address_labels[i];
     }
-    address_items[ADDRESS_LIST_ROWS] = "Back";
-    const int selected = choose_at("Addresses", address_items, ADDRESS_LIST_ROWS + 1, true, *cursor);
-    if (selected >= 0) {
-        *cursor = (size_t)selected;
+    address_items[ADDRESS_SHOWN_ROWS] = "Go to index";
+    address_items[ADDRESS_SHOWN_ROWS + 1] = "Back";
+    return true;
+}
+
+/* Lets the reader browse the cache derive_addresses filled. Returns the
+ * chosen index, or -1 on Back or timeout. On a selection, the chosen address
+ * is copied into address_out; nothing here re-derives. `cursor` is both where
+ * the list opens and where it is left: a reader who opens address 10, views
+ * its QR and comes straight back lands on 10 again rather than back at the
+ * top of the list. Go to index only moves `cursor` when it lands inside the
+ * shown rows - an index past ADDRESS_SHOWN_ROWS has no row of its own to
+ * leave the cursor on. */
+static int browse_addresses(char* address_out, const size_t address_out_len, size_t* cursor)
+{
+    for (;;) {
+        const int selected = choose_at("Addresses", address_items, ADDRESS_SHOWN_ROWS + 2, true, *cursor);
+        if (selected == (int)ADDRESS_SHOWN_ROWS) {
+            uint32_t index = 0;
+            const int result = enter_address_index(&index);
+            if (result < 0) {
+                return -1;
+            }
+            if (result == 0) {
+                continue;
+            }
+            /* The keypad cannot type a value this high while ADDRESS_INDEX_DIGITS
+             * and SEEDTOOL_MAX_ADDRESS_INDEX agree, and a _Static_assert holds
+             * them together - but `index` addresses a static array here rather
+             * than going through seedtool_mainnet_address, which is where that
+             * range is otherwise checked. Verified rather than inherited: back
+             * to the list instead of off the end of the cache. */
+            if (index > SEEDTOOL_MAX_ADDRESS_INDEX) {
+                continue;
+            }
+            if (index < ADDRESS_SHOWN_ROWS) {
+                *cursor = index;
+            }
+            /* Explicit precision for the same reason derive_addresses gives
+             * its own %s one: index, unlike the loop variable there, carries
+             * no compile-time bound GCC's format-truncation analysis can see
+             * through browse_addresses inlined into its callers. */
+            (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
+                addresses[index]);
+            return (int)index;
+        }
+        if (selected >= 0) {
+            *cursor = (size_t)selected;
+        }
+        if (selected >= 0 && selected < (int)ADDRESS_SHOWN_ROWS) {
+            (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
+                addresses[selected]);
+        }
+        return selected < 0 || selected == (int)ADDRESS_SHOWN_ROWS + 1 ? -1 : selected;
     }
-    if (selected >= 0 && selected < (int)ADDRESS_LIST_ROWS) {
-        (void)snprintf(address_out, address_out_len, "%s", addresses[selected]);
-    }
-    seedtool_zero(addresses, sizeof(addresses));
-    seedtool_zero(address_labels, sizeof(address_labels));
-    return selected < 0 || selected == (int)ADDRESS_LIST_ROWS ? -1 : selected;
 }
 
 /* One address type's worth of the wallet viewer: its account key, in whichever
@@ -1454,18 +1593,20 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
             seedtool_zero(xpub, sizeof(xpub));
         } else if (selected == 1) {
             show_descriptor(mnemonic, passphrase, fphex, type, account);
-        } else {
+        } else if (derive_addresses(mnemonic, passphrase, type, account)) {
             /* Loops back to the address list itself after each address's QR,
              * rather than out to this menu: picking another address is the
-             * common next step, not re-choosing "Addresses" again. Only
-             * backing out of the list (or a timeout) reaches the outer loop.
-             * `cursor` lives outside this loop so the list reopens wherever it
-             * was left, rather than back at address 0 every time. */
+             * common next step, not re-choosing "Addresses" again - and,
+             * since derive_addresses ran once above rather than on every pass
+             * through this loop, coming straight back from one address's QR
+             * no longer costs the whole derivation again. Only backing out of
+             * the list (or a timeout) reaches the outer loop. `cursor` lives
+             * outside this loop so the list reopens wherever it was left,
+             * rather than back at address 0 every time. */
             size_t cursor = 0;
             for (;;) {
                 char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-                const int index
-                    = browse_addresses(mnemonic, passphrase, type, account, address, sizeof(address), &cursor);
+                const int index = browse_addresses(address, sizeof(address), &cursor);
                 if (index < 0) {
                     seedtool_zero(address, sizeof(address));
                     break;
@@ -1478,6 +1619,8 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                 }
                 seedtool_zero(address, sizeof(address));
             }
+            seedtool_zero(addresses, sizeof(addresses));
+            seedtool_zero(address_labels, sizeof(address_labels));
         }
     }
 }

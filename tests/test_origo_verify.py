@@ -404,6 +404,23 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertIn("left_seen && right_seen", platform)
         self.assertIn("left_seen != right_seen", platform)
 
+    def test_go_to_index_cannot_read_past_the_address_cache(self):
+        # "Go to index" indexes the static address cache directly, so it never
+        # reaches seedtool_mainnet_address, which is where an address index is
+        # otherwise range-checked. Two things stand in for that, and a compiler
+        # can only see one of them: the _Static_assert holding the keypad width
+        # and the derived range together fails the build on its own, but the
+        # runtime reject can be deleted with the build still passing, so it is
+        # pinned here instead.
+        root = Path(__file__).parents[1]
+        app = (root / "main/seedtool_app.c").read_text()
+        self.assertIn("index > SEEDTOOL_MAX_ADDRESS_INDEX", app)
+        self.assertIn("ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS", app)
+        self.assertIn("ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99", app)
+        # The keypad's own cap is what the assertion above is asserting about;
+        # if it stops bounding the digits, the pair being pinned means nothing.
+        self.assertIn("digits_len < ADDRESS_INDEX_DIGITS", app)
+
     def test_passphrase_keyboards_cover_printable_ascii(self):
         source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
         layouts = source.split("passphrase_layouts[PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]
