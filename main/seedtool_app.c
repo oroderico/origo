@@ -2222,7 +2222,10 @@ static int confirm_backup(const char* mnemonic, const size_t count)
     }
 }
 
-static void show_generated(seedtool_generated_t* generated)
+/* Returns false only when the reader steps back off the very first screen -
+ * the caller still holds the entropy that produced this, and throwing it away
+ * to start the run over is not what one press should mean. */
+static bool show_generated(seedtool_generated_t* generated)
 {
     char hash[65];
     hexstr(generated->hash, sizeof(generated->hash), hash);
@@ -2237,7 +2240,11 @@ static void show_generated(seedtool_generated_t* generated)
     while (stage != STAGE_DONE) {
         switch (stage) {
         case STAGE_TRANSCRIPT:
-            stage = page_text("Canonical transcript", generated->transcript) ? STAGE_HASH : STAGE_DONE;
+            if (!page_text("Canonical transcript", generated->transcript)) {
+                seedtool_zero(hash, sizeof(hash));
+                return false;
+            }
+            stage = STAGE_HASH;
             break;
         case STAGE_HASH:
             stage = page_text("SHA256", hash) ? STAGE_WORDS : STAGE_TRANSCRIPT;
@@ -2287,6 +2294,7 @@ static void show_generated(seedtool_generated_t* generated)
         }
     }
     seedtool_zero(hash, sizeof(hash));
+    return true;
 }
 
 /* Bits collected so far and whether the run looks patterned, for any of the
@@ -2490,7 +2498,17 @@ static int collect_entropy(const int source, const size_t words)
             proceed = nav_dice_confirm(names[source], bits_line, "Looks good", "Generate seed", false, &complete);
         }
         if (proceed) {
-            break;
+            if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) != SEEDTOOL_OK) {
+                notice("Error", "Could not generate seed", NULL, "OK");
+                break;
+            }
+            if (show_generated(&generated)) {
+                break;
+            }
+            /* Stepped back off the first screen after generating. The rolls
+             * are all still here, so this is the verdict again - not the run
+             * thrown away and started from the first roll. */
+            continue;
         }
         --i;
         /* The same restore the in-run back-step does above. Without it,
@@ -2500,13 +2518,6 @@ static int collect_entropy(const int source, const size_t words)
          * one more. */
         if (source == SEEDTOOL_CARDS) {
             available[values[i]] = true;
-        }
-    }
-    if (outcome == 1) {
-        if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) == SEEDTOOL_OK) {
-            show_generated(&generated);
-        } else {
-            notice("Error", "Could not generate seed", NULL, "OK");
         }
     }
     seedtool_zero(values, sizeof(values));
@@ -2576,38 +2587,57 @@ static bool complete_checksum(void)
         if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
             outcome = -1;
         }
-        for (size_t i = 0; outcome == 1 && i < bits_count;) {
-            unsigned bit = 0;
-            char flips[8] = { 0 };
-            for (size_t f = 0; f < i; ++f) {
-                flips[f] = (char)('0' + bits[f]);
-            }
-            const int result
-                = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips, NULL);
-            seedtool_zero(flips, sizeof(flips));
-            if (result < 0) {
-                outcome = -1;
-            } else if (result == 0) {
-                /* Backing out of the first flip returns to the words - to the
-                 * list of them, with every one still there, rather than to an
-                 * empty entry screen. */
-                if (!i) {
-                    outcome = revisit_prefix(words, count, &by_number);
-                    if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
-                        outcome = -1;
+        /* The flips and the result they produce sit in one loop, so that
+         * backing off the completed mnemonic is the last flip again rather
+         * than the whole thing discarded: `i` outlives the flip loop for
+         * exactly that step back. */
+        size_t i = 0;
+        while (outcome == 1) {
+            while (outcome == 1 && i < bits_count) {
+                unsigned bit = 0;
+                char flips[8] = { 0 };
+                for (size_t f = 0; f < i; ++f) {
+                    flips[f] = (char)('0' + bits[f]);
+                }
+                const int result
+                    = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips, NULL);
+                seedtool_zero(flips, sizeof(flips));
+                if (result < 0) {
+                    outcome = -1;
+                } else if (result == 0) {
+                    /* Backing out of the first flip returns to the words - to the
+                     * list of them, with every one still there, rather than to an
+                     * empty entry screen. */
+                    if (!i) {
+                        outcome = revisit_prefix(words, count, &by_number);
+                        if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
+                            outcome = -1;
+                        }
+                    } else {
+                        --i;
                     }
                 } else {
-                    --i;
+                    bits[i] = (uint8_t)bit;
+                    ++i;
                 }
-            } else {
-                bits[i] = (uint8_t)bit;
-                ++i;
             }
-        }
-        if (outcome == 1 && seedtool_complete_checksum(prefix, bits, bits_count, completed, sizeof(completed))
-                == SEEDTOOL_OK
-            && page_text("Completed mnemonic", completed)) {
-            show_wallet_data(completed);
+            if (outcome != 1) {
+                break;
+            }
+            if (seedtool_complete_checksum(prefix, bits, bits_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
+                /* Said out loud rather than fallen through silently, which is
+                 * what this used to do: the reader typed eleven words and flipped
+                 * seven coins and was handed back the menu with no reason. */
+                notice("Error", "Could not complete", "the checksum", "OK");
+                break;
+            }
+            if (page_text("Completed mnemonic", completed)) {
+                show_wallet_data(completed);
+                break;
+            }
+            /* Back off the completed mnemonic: the last flip again, with the
+             * words and every flip before it still in hand. */
+            --i;
         }
         seedtool_zero(words, sizeof(words));
         seedtool_zero(prefix, sizeof(prefix));
