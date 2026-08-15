@@ -79,6 +79,16 @@ typedef enum {
     SEEDTOOL_BIP86 = 86,
 } seedtool_address_type_t;
 
+/* BIP44's chain level, the fourth path component: the branch an address is
+ * derived under, m/type'/0'/account'/chain/index. Numbered as BIP44 itself
+ * numbers it - and, exactly like seedtool_address_type_t above, the enumerator
+ * *is* the path component rather than something mapped to one, so it is written
+ * straight into the derivation path. */
+typedef enum {
+    SEEDTOOL_RECEIVE = 0,
+    SEEDTOOL_CHANGE = 1,
+} seedtool_chain_t;
+
 /* SLIP-132 defines a zpub version prefix for native segwit (BIP84) accounts
  * and none for taproot: SEEDTOOL_BIP86 with SEEDTOOL_ZPUB is SEEDTOOL_EINVAL
  * rather than a silent fall-back to xpub. */
@@ -195,16 +205,22 @@ seedtool_result_t seedtool_master_fingerprint(
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t account, seedtool_key_format_t format, char* output, size_t output_len);
 
+/* One mainnet address at m/type'/0'/account'/chain/index. `chain` selects the
+ * receive or change branch; anything outside seedtool_chain_t is EINVAL rather
+ * than a path component taken on trust. */
 seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
-    uint32_t account, uint32_t index, char* output, size_t output_len);
+    uint32_t account, seedtool_chain_t chain, uint32_t index, char* output, size_t output_len);
 
-/* Same addresses seedtool_mainnet_address would compute at each index
- * 0..count-1, but the mnemonic-to-seed PBKDF2 and the account-level derivation
- * run once instead of once per address: repeating them a hundred times, as
- * browsing the address list does, is slow enough on hardware with no EC
- * acceleration to look like a hang. `addresses` must hold at least `count` rows. */
+/* Same addresses seedtool_mainnet_address would compute on the same branch at
+ * each index 0..count-1, but the mnemonic-to-seed PBKDF2 and the account-level
+ * derivation run once instead of once per address: repeating them a hundred
+ * times, as browsing the address list does, is slow enough on hardware with no
+ * EC acceleration to look like a hang. The chain step sits below the account
+ * node, so switching branch re-runs only the cheap part of this.
+ * `addresses` must hold at least `count` rows. */
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
-    seedtool_address_type_t type, uint32_t account, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+    seedtool_address_type_t type, uint32_t account, seedtool_chain_t chain, uint32_t count,
+    char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
 /* BIP380 output descriptor checksum (bitcoin/bips, bip-0380.mediawiki):
  * appends "#" plus 8 checksum characters to `descriptor`, writing the whole

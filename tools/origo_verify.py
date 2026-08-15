@@ -142,9 +142,11 @@ def descriptor_checksum(desc):
 def descriptor(fingerprint, purpose, xpub, account=0):
     """The full wpkh()/tr() output descriptor Origo's own Descriptor export
     shows, checksum included - script fragment matches the address type,
-    always plain xpub (BIP380 has no notion of SLIP-132's zpub)."""
+    always plain xpub (BIP380 has no notion of SLIP-132's zpub). The chain
+    step is BIP389's multipath <0;1>, so one descriptor carries both the
+    receive and the change branch, exactly as the firmware writes it."""
     fragment = "wpkh" if purpose == 84 else "tr"
-    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/0/*)"
+    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/<0;1>/*)"
     return f"{body}#{descriptor_checksum(body)}"
 
 
@@ -450,7 +452,7 @@ def tagged_hash(tag, data):
     return hashlib.sha256(th + th + data).digest()
 
 
-def addresses(mnemonic, passphrase, index, account_index=0):
+def addresses(mnemonic, passphrase, index, account_index=0, chain=0):
     root = master(mnemonic, passphrase)
     result, accounts = {}, {}
     for purpose in (84, 86):
@@ -458,7 +460,7 @@ def addresses(mnemonic, passphrase, index, account_index=0):
         accounts[purpose] = xpub(account)
         if purpose == 84:
             accounts["84z"] = zpub(account)
-        node = derive(account, (0, index))
+        node = derive(account, (chain, index))
         if purpose == 84:
             result[purpose] = segwit(hash160(pubkey(node[0])), 0)
         else:
@@ -500,7 +502,8 @@ def generate(args):
 
 def inspect(args):
     mnemonic_entropy(args.mnemonic)
-    fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index, args.account)
+    chain = 1 if args.change else 0
+    fingerprint, addrs, accounts = addresses(args.mnemonic, args.passphrase, args.index, args.account, chain)
     print("checksum:   valid")
     print("word numbers:", " ".join(str(n) for n in word_numbers(args.mnemonic)))
     print("compact seedqr (hex):", compact_seedqr_payload(args.mnemonic).hex())
@@ -511,7 +514,7 @@ def inspect(args):
     for purpose in (84, 86):
         print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose], args.account)}")
     for purpose in (84, 86):
-        print(f"m/{purpose}'/0'/{args.account}'/0/{args.index}: {addrs[purpose]}")
+        print(f"m/{purpose}'/0'/{args.account}'/{chain}/{args.index}: {addrs[purpose]}")
     for purpose in (84, 86):
         print(f"descriptor {purpose}: {descriptor(fingerprint, purpose, accounts[purpose], args.account)}")
 
@@ -546,6 +549,7 @@ def main():
     check.add_argument("--passphrase", default="")
     check.add_argument("--index", type=int, choices=range(100), default=0)
     check.add_argument("--account", type=int, choices=range(1000), default=0)
+    check.add_argument("--change", action="store_true", help="derive the change branch (chain 1) instead of receive")
     check.set_defaults(func=inspect)
     comp = sub.add_parser("complete")
     comp.add_argument("prefix")

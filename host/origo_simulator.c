@@ -18,6 +18,10 @@
 static const char mnemonic[]
     = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 static const char expected_address[] = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
+/* BIP84's own published change vector, m/84'/0'/0'/1/0 for the same mnemonic -
+ * the spec publishes both branches, so the change side is pinned to a vector
+ * this project did not invent either. */
+static const char expected_change_address[] = "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el";
 static const char expected_xpub84[]
     = "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V";
 static const char expected_xpub86[]
@@ -441,9 +445,12 @@ static bool full_entropy_events_generate(void)
  * cross-checked independently against a from-scratch Python transcription of
  * the same bip-0380.mediawiki pseudocode before this C version was written -
  * two independent implementations of the spec agreeing is the actual
- * confidence here, not either one alone. Also checks EINVAL on a character
- * outside the checksum's charset and ENOSPACE on a buffer too small for the
- * result. */
+ * confidence here, not either one alone. The descriptor carries BIP389's
+ * multipath "<0;1>" chain step, which is exactly what show_descriptor writes:
+ * "<", ";" and ">" are all in BIP380's INPUT_CHARSET, so this also pins that
+ * the checksum covers a multipath descriptor rather than rejecting one. Also
+ * checks EINVAL on a character outside the checksum's charset and ENOSPACE on
+ * a buffer too small for the result. */
 static bool descriptor_checksum_matches_bip380_vector(void)
 {
     char out[256];
@@ -452,12 +459,12 @@ static bool descriptor_checksum_matches_bip380_vector(void)
         return false;
     }
     char body[192];
-    (void)snprintf(body, sizeof(body), "wpkh([73c5da0a/84'/0'/0']%s/0/*)", expected_xpub84);
+    (void)snprintf(body, sizeof(body), "wpkh([73c5da0a/84'/0'/0']%s/<0;1>/*)", expected_xpub84);
     if (seedtool_descriptor_checksum(body, out, sizeof(out)) != SEEDTOOL_OK) {
         return false;
     }
     char expected[256];
-    (void)snprintf(expected, sizeof(expected), "%s#wc3n3van", body);
+    (void)snprintf(expected, sizeof(expected), "%s#hpg6d6w2", body);
     if (strcmp(out, expected) != 0) {
         return false;
     }
@@ -1336,8 +1343,12 @@ static int self_test(void)
     char address[SEEDTOOL_MAX_ADDRESS_LEN];
     char xpub[SEEDTOOL_MAX_XPUB_LEN];
     if (wally_init(0) != WALLY_OK || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
-        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, 0, address, sizeof(address)) != SEEDTOOL_OK
+        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_RECEIVE, 0, address, sizeof(address))
+            != SEEDTOOL_OK
         || strcmp(address, expected_address) != 0
+        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_CHANGE, 0, address, sizeof(address))
+            != SEEDTOOL_OK
+        || strcmp(address, expected_change_address) != 0
         || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
         || strcmp(xpub, expected_xpub84) != 0
         || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
@@ -1366,6 +1377,35 @@ static int self_test(void)
                    xpub_account_one, sizeof(xpub_account_one))
                 != SEEDTOOL_EINVAL) {
             fputs("Origo account index self-test failed\n", stderr);
+            return 1;
+        }
+    }
+    /* The same for the chain level: the branch really is threaded down into
+     * the derivation rather than ignored - receive and change at one index
+     * must differ - and a value outside seedtool_chain_t is rejected outright
+     * rather than written into the path on trust. */
+    {
+        char receive[SEEDTOOL_MAX_ADDRESS_LEN];
+        char change[SEEDTOOL_MAX_ADDRESS_LEN];
+        char batch[2][SEEDTOOL_MAX_ADDRESS_LEN];
+        if (seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_RECEIVE, 3, receive, sizeof(receive))
+                != SEEDTOOL_OK
+            || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_CHANGE, 3, change, sizeof(change))
+                != SEEDTOOL_OK
+            || strcmp(receive, change) == 0
+            || seedtool_mainnet_address(
+                   mnemonic, "", SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 0, receive, sizeof(receive))
+                != SEEDTOOL_EINVAL
+            || seedtool_mainnet_addresses(mnemonic, "", SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 2, batch)
+                != SEEDTOOL_EINVAL) {
+            fputs("Origo chain self-test failed\n", stderr);
+            return 1;
+        }
+        /* The batch path derives the same branch the single-address one does,
+         * rather than the two agreeing only on receive. */
+        if (seedtool_mainnet_addresses(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_CHANGE, 2, batch) != SEEDTOOL_OK
+            || strcmp(batch[0], expected_change_address) != 0) {
+            fputs("Origo chain batch self-test failed\n", stderr);
             return 1;
         }
     }

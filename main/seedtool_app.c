@@ -593,12 +593,12 @@ done:
 #define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/999']") + SEEDTOOL_MAX_XPUB_LEN)
 
 /* A BIP380 output descriptor for this account, checksum included: prefix,
- * bracketed origin, xpub, the receive-chain "0" and wildcard "*" suffix, a
- * "#" and 8 checksum characters. "wpkh" rather than "tr" since it is one
- * character longer, the only other prefix this ever produces, so it is the
- * binding case; the account component and the checksum's fixed 8 characters
- * follow ACCOUNT_KEY_LEN's own convention above. */
-#define DESCRIPTOR_LEN (sizeof("wpkh([00000000/84'/0'/999']/0/*)#12345678") + SEEDTOOL_MAX_XPUB_LEN)
+ * bracketed origin, xpub, BIP389's "<0;1>" multipath chain step and wildcard
+ * "*" suffix, a "#" and 8 checksum characters. "wpkh" rather than "tr" since
+ * it is one character longer, the only other prefix this ever produces, so it
+ * is the binding case; the account component and the checksum's fixed 8
+ * characters follow ACCOUNT_KEY_LEN's own convention above. */
+#define DESCRIPTOR_LEN (sizeof("wpkh([00000000/84'/0'/999']/<0;1>/*)#12345678") + SEEDTOOL_MAX_XPUB_LEN)
 
 /* The upper bound on a single BBQr part's byte length: a part is never
  * longer than the whole value it is cut from, and a descriptor - longer than
@@ -1402,7 +1402,15 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
  * exact same xpub - a descriptor just states the script type inline instead
  * of leaving it implied by which menu the xpub came from. Always plain xpub,
  * never zpub: SLIP-132 version bytes are a wallet-display convention BIP380
- * itself has no notion of. */
+ * itself has no notion of.
+ *
+ * The chain step is BIP389's multipath "<0;1>" rather than a bare "0", so the
+ * one descriptor describes both the receive and the change branch. A wallet
+ * imported from a receive-only descriptor has nowhere to send its change and
+ * would need a second import to get one - the descriptor exists to be the
+ * whole account in one string, and half an account is the one thing it must
+ * not be. BIP380's own INPUT_CHARSET already contains "<", ";" and ">", so
+ * seedtool_descriptor_checksum covers this unchanged. */
 static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
@@ -1414,7 +1422,7 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
     char value[DESCRIPTOR_LEN] = { 0 };
     if (seedtool_account_xpub(mnemonic, passphrase, type, account, SEEDTOOL_XPUB, xpub, sizeof(xpub))
         == SEEDTOOL_OK) {
-        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/0/*)", type == SEEDTOOL_BIP84 ? "wpkh" : "tr",
+        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/<0;1>/*)", type == SEEDTOOL_BIP84 ? "wpkh" : "tr",
             fphex, (unsigned)type, (unsigned)account, xpub);
         seedtool_zero(xpub, sizeof(xpub));
         if (seedtool_descriptor_checksum(body, value, sizeof(value)) == SEEDTOOL_OK) {
@@ -1466,13 +1474,16 @@ static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
 static char address_labels[ADDRESS_SHOWN_ROWS][ADDRESS_LABEL_LEN];
 static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Back */
 
-/* Fills the cache above for one type/account. Every index up to
+/* Fills the cache above for one type/account/branch. Every index up to
  * SEEDTOOL_MAX_ADDRESS_INDEX is derived - the mnemonic-to-seed PBKDF2 and the
  * hardened account step are the expensive part, and Go to index needs any of
- * them - but only the first ADDRESS_SHOWN_ROWS get a list row. Returns false
+ * them - but only the first ADDRESS_SHOWN_ROWS get a list row. One branch's
+ * worth at a time: switching between receive and change re-enters here rather
+ * than caching both, which keeps this .bss the size it already was and costs
+ * only the derivation a type or account change costs today. Returns false
  * (having already told the reader) on a derivation error. */
-static bool derive_addresses(
-    const char* mnemonic, const char* passphrase, const seedtool_address_type_t type, const uint32_t account)
+static bool derive_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
+    const uint32_t account, const seedtool_chain_t chain)
 {
     /* Cleared on entry as well as on the way out, exactly as review_labels is
      * and for the same reason: these are .bss, so a failed derivation must not
@@ -1480,7 +1491,7 @@ static bool derive_addresses(
      * that this time never gets far enough to do it. */
     seedtool_zero(address_labels, sizeof(address_labels));
     screen_text("Addresses", "Deriving addresses...", NULL, NULL);
-    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, ADDRESS_LIST_ROWS, addresses)
+    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         (void)acknowledge("Error", "Could not derive addresses", NULL);
@@ -1593,7 +1604,21 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
             seedtool_zero(xpub, sizeof(xpub));
         } else if (selected == 1) {
             show_descriptor(mnemonic, passphrase, fphex, type, account);
-        } else if (derive_addresses(mnemonic, passphrase, type, account)) {
+        }
+        if (selected != 2) {
+            continue;
+        }
+        /* Which branch, asked the same way and in the same shape the account
+         * key's xpub/zpub choice above is asked: the list itself is identical
+         * either way, so the question belongs before it rather than as a mode
+         * to toggle inside it. */
+        const char* const branches[] = { "Receive", "Change", "Back" };
+        const int branch = choose("Addresses", branches, 3, true);
+        if (branch < 0 || branch == 2) {
+            continue;
+        }
+        const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
+        if (derive_addresses(mnemonic, passphrase, type, account, chain)) {
             /* Loops back to the address list itself after each address's QR,
              * rather than out to this menu: picking another address is the
              * common next step, not re-choosing "Addresses" again - and,
@@ -1612,8 +1637,8 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                     break;
                 }
                 char path[32];
-                (void)snprintf(
-                    path, sizeof(path), "m/%u'/0'/%u'/0/%u", (unsigned)type, (unsigned)account, (unsigned)index);
+                (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)type, (unsigned)account,
+                    (unsigned)chain, (unsigned)index);
                 if (page_text(path, address)) {
                     show_address_qr(path, address);
                 }

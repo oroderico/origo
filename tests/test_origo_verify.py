@@ -85,12 +85,29 @@ class SeedToolVerifierTests(unittest.TestCase):
         # The exact checksum this same descriptor got independently from the
         # firmware's own C implementation (seedtool_descriptor_checksum) -
         # two from-scratch implementations of bip-0380.mediawiki's pseudocode
-        # agreeing is the actual confidence here, not either one alone.
+        # agreeing is the actual confidence here, not either one alone. The
+        # chain step is BIP389's multipath <0;1>, whose three extra characters
+        # are all inside BIP380's INPUT_CHARSET, so the checksum covers it
+        # rather than rejecting it.
         fingerprint, _, accounts = verify.addresses(self.MNEMONIC, "", 0)
         self.assertEqual(
             verify.descriptor(fingerprint, 84, accounts[84]),
-            f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/0/*)#wc3n3van",
+            f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/<0;1>/*)#hpg6d6w2",
         )
+
+    def test_change_branch_matches_the_published_bip84_vector(self):
+        # BIP84 publishes both branches for this mnemonic, so the change side
+        # is pinned to the spec's own vector rather than to whatever this
+        # implementation happens to produce. The same assertion the firmware
+        # self-test makes, from the independent implementation.
+        _, receive, _ = verify.addresses(self.MNEMONIC, "", 0, chain=0)
+        _, change, _ = verify.addresses(self.MNEMONIC, "", 0, chain=1)
+        self.assertEqual(receive[84], "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu")
+        self.assertEqual(change[84], "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el")
+        # Threaded, not ignored: every type must differ across the branches at
+        # the same index, taproot included.
+        for purpose in (84, 86):
+            self.assertNotEqual(receive[purpose], change[purpose])
 
     def test_d6_transcript_pipeline_against_a_krux_vector(self):
         # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
