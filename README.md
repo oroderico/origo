@@ -345,7 +345,12 @@ screen in the entry path may depend on the device RNG.
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
 four-page keyboard covering the whole printable range, entered twice, and exists
-for that derivation session only.
+for that derivation session only. It is set from the wallet viewer's Customize
+screen rather than asked for on the way in: a session begins with none, and the
+screen states which of the two is in force rather than leaving it to be assumed.
+Changing or clearing it re-derives the master fingerprint, since that
+fingerprint is a function of it — so the fingerprint is also the check that the
+passphrase in force is the intended one.
 
 ## Restore and inspect
 

@@ -1349,58 +1349,17 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
     }
 }
 
-/* Type a passphrase twice and keep it only if both attempts agree, writing it
- * to `output` untouched unless they do. Shared by the session gate below and
- * by the Customize screen's editor: the gate and the editor differ in what
- * Back means and in what an empty passphrase means, but the typing itself -
- * and the mismatch that must discard both attempts - is one piece of logic,
- * not two copies to keep in step. `failure_detail` is the second line of the
- * mismatch notice, which is the one thing that genuinely differs: the gate has
- * derived nothing yet, while the editor may be leaving an earlier passphrase
- * in place. */
-static bool enter_passphrase_confirmed(
-    char output[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], const char* const failure_detail)
-{
-    char attempt[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    const bool ok = enter_passphrase_once(attempt, sizeof(attempt))
-        && acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required")
-        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(attempt, confirmation) == 0;
-    if (ok) {
-        /* The old value goes before the new one lands, not after: this buffer
-         * holds a live session secret and must never briefly hold a mix. */
-        seedtool_zero(output, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
-        memcpy(output, attempt, sizeof(attempt));
-    } else {
-        (void)acknowledge("Passphrase mismatch", failure_detail, "Try again");
-    }
-    seedtool_zero(attempt, sizeof(attempt));
-    seedtool_zero(confirmation, sizeof(confirmation));
-    return ok;
-}
-
-static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
-{
-    const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
-    const int selected = choose("Optional passphrase", options, 3, true);
-    if (selected != 1) {
-        passphrase[0] = '\0';
-        /* Only "No passphrase" derives; back and timeout both leave without. */
-        return selected == 0;
-    }
-    if (!enter_passphrase_confirmed(passphrase, "Nothing was derived")) {
-        seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
-        return false;
-    }
-    return true;
-}
-
-/* The same passphrase, changed part-way through a session rather than asked
- * for once on the way in. Returns true only when `passphrase` actually
- * changed, so the caller knows to re-derive the fingerprint it has cached;
- * Back, a timeout and a mismatch all leave the acting passphrase exactly as
- * it was rather than dropping the session to no passphrase in silence, which
- * would change every derived key without saying so. */
+/* The optional passphrase, set and changed from Customize rather than asked
+ * for on the way in. A session starts without one and says so on Customize's
+ * own row, so the reader who does not use a passphrase never crosses a screen
+ * about it, and the reader who does sets it in the same place they set the
+ * account and the type - all three being inputs to the same derivation.
+ *
+ * Returns true only when `passphrase` actually changed, so the caller knows to
+ * re-derive the fingerprint it has cached. Back, a timeout and a mismatch all
+ * leave the acting passphrase exactly as it was: dropping a session silently
+ * to no passphrase would change every derived key without saying so, which is
+ * the one outcome this screen must never produce by accident. */
 static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
     const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
@@ -1409,13 +1368,29 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
         return false;
     }
     if (selected == 0) {
+        /* Already none: nothing changed, so nothing re-derives. */
         if (!passphrase[0]) {
             return false;
         }
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
         return true;
     }
-    return enter_passphrase_confirmed(passphrase, "Passphrase unchanged");
+    char attempt[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    const bool ok = enter_passphrase_once(attempt, sizeof(attempt))
+        && acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required")
+        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(attempt, confirmation) == 0;
+    if (ok) {
+        /* The old value goes before the new one lands, not after: this buffer
+         * holds a live session secret and must never briefly hold a mix. */
+        seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
+        memcpy(passphrase, attempt, sizeof(attempt));
+    } else {
+        (void)acknowledge("Passphrase mismatch", "Passphrase unchanged", "Try again");
+    }
+    seedtool_zero(attempt, sizeof(attempt));
+    seedtool_zero(confirmation, sizeof(confirmation));
+    return ok;
 }
 
 /* The account key's own QR, warned about up front since a photo of it reveals
@@ -1952,9 +1927,13 @@ static void show_wallet_data(const char* mnemonic)
     char fphex[9] = { 0 };
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
 
-    if (!get_session_passphrase(passphrase)) {
-        goto done;
-    }
+    /* Starts with no passphrase and derives immediately, rather than asking
+     * for one before anything can be seen. The passphrase is a parameter of
+     * the derivation like the account and the type, and it is set in the same
+     * place they are; a gate here made it the one parameter that had to be
+     * decided before the wallet existed and could not be revisited after. What
+     * is in force is always on Customize's own row and beside the master
+     * fingerprint, so "none" is stated rather than merely defaulted to. */
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
         (void)acknowledge("Error", "Derivation failed", NULL);
         goto done;
