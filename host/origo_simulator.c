@@ -38,13 +38,21 @@ static const char mnemonic24[]
 static const char bad_checksum_mnemonic[]
     = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
 
-/* `count` copies of "abandon", the prefix of the published all-zero vectors. */
-static bool repeat_abandon(const size_t count, char* out, const size_t out_len)
+/* `count` words, all "abandon" when `spread` is zero and a spread of the
+ * wordlist otherwise.
+ *
+ * The all-"abandon" prefix is the one the published vectors use, but every one
+ * of its word indices is zero - so every bit it contributes to the entropy is
+ * zero too, and a prefix packed at the wrong bit offset would still hash to the
+ * right thing. It cannot catch a packing bug on its own, which is why the
+ * checks below run over a spread prefix as well. */
+static bool build_prefix(const size_t count, const unsigned spread, char* out, const size_t out_len)
 {
     out[0] = '\0';
     size_t used = 0;
     for (size_t i = 0; i < count; ++i) {
-        const char* const word = "abandon";
+        const char* const word
+            = spread ? seedtool_word((size_t)((i * spread + 7u) % SEEDTOOL_WORDLIST_LEN)) : "abandon";
         const size_t len = strlen(word);
         if (used + len + (i ? 1 : 0) + 1 > out_len) {
             return false;
@@ -75,13 +83,14 @@ static bool final_word_filter_is_exact(void)
     static const struct {
         size_t words;
         size_t expected;
-    } cases[] = { { 12, 128 }, { 24, 8 } };
+        unsigned spread;
+    } cases[] = { { 12, 128, 0 }, { 24, 8, 0 }, { 12, 128, 173 }, { 24, 8, 409 } };
 
     for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
         const size_t prefix_words = cases[c].words - 1;
         char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
         seedtool_wordset_t set;
-        if (!repeat_abandon(prefix_words, prefix, sizeof(prefix))
+        if (!build_prefix(prefix_words, cases[c].spread, prefix, sizeof(prefix))
             || seedtool_final_word_candidates(prefix, &set) != SEEDTOOL_OK
             || seedtool_wordset_count(&set) != cases[c].expected) {
             return false;
