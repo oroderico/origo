@@ -407,6 +407,76 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(platform.count("esp_fill_random"), 1)
         self.assertIn("wally_secp_randomize", app)
 
+    # Names that mean a buffer holds seed material. Deliberately a list of
+    # patterns rather than a list of buffers: a new buffer called `passphrase`
+    # is covered the day it is written, where a fixed inventory would have to
+    # be remembered. A new *kind* of secret under a name not listed here is the
+    # one case that escapes, so adding a pattern is part of adding one.
+    SECRET_BUFFER_NAMES = (
+        "mnemonic", "passphrase", "seed", "entropy", "word", "words", "stem",
+        "flips", "coin_bits", "completed", "attempt", "confirmation", "xpub",
+    )
+
+    @staticmethod
+    def _c_functions(source):
+        """(name, body) for each function definition, by brace counting."""
+        for match in re.finditer(r"^(?:static\s+)?[\w ]+?\**(\w+)\([^;]*?\)\s*\{", source, re.M | re.S):
+            depth, i = 0, match.end() - 1
+            while i < len(source):
+                if source[i] == "{":
+                    depth += 1
+                elif source[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            yield match.group(1), source[match.end():i]
+
+    def test_every_secret_buffer_is_wiped_in_the_function_that_holds_it(self):
+        # README's Safety boundaries promise that every screen holding seed
+        # material wipes its buffers when it is left. seedtool_zero is called
+        # over a hundred times to that end and, until this test, not one of
+        # those calls was verified by anything - the promise rested entirely on
+        # each author remembering. Two real gaps of exactly this shape were
+        # found by hand in c330a74, which is the argument for checking it.
+        #
+        # What this pins is narrow and deliberately so: a local array whose
+        # name says it holds a secret must be passed to seedtool_zero somewhere
+        # in the same function. It cannot prove every *path* wipes - that needs
+        # the compiler, not a regex - but it does catch the buffer that is
+        # never wiped at all, which is what both real gaps were.
+        root = Path(__file__).parents[1]
+        pattern = re.compile(
+            r"^\s+(?:char|uint8_t|uint16_t)\s+(\w+)\s*\[", re.M)
+        unwiped = []
+        for name in ("main/seedtool_app.c", "main/seedtool_core.c"):
+            source = (root / name).read_text()
+            for func, body in self._c_functions(source):
+                for buf in pattern.findall(body):
+                    if buf not in self.SECRET_BUFFER_NAMES:
+                        continue
+                    if not re.search(rf"seedtool_zero\(\s*&?{re.escape(buf)}\b", body):
+                        unwiped.append(f"{name}:{func}() leaves `{buf}` unwiped")
+        self.assertEqual(unwiped, [], "; ".join(unwiped))
+
+    def test_the_wipe_check_would_notice_an_unwiped_buffer(self):
+        # A checker that silently matches nothing passes just as quietly as one
+        # that works, and this one is a regex over C - exactly the kind that
+        # rots into a no-op. So: it must find the buffers that are there, and
+        # it must fail on one that is not wiped.
+        found = [
+            buf
+            for func, body in self._c_functions(
+                (Path(__file__).parents[1] / "main/seedtool_app.c").read_text())
+            for buf in re.findall(r"^\s+(?:char|uint8_t)\s+(\w+)\s*\[", body, re.M)
+            if buf in self.SECRET_BUFFER_NAMES
+        ]
+        self.assertGreaterEqual(len(found), 8, f"the scan found only {found}")
+        planted = "static void f(void)\n{\n    char passphrase[64] = { 0 };\n    use(passphrase);\n}\n"
+        functions = list(self._c_functions(planted))
+        self.assertEqual(len(functions), 1)
+        self.assertNotIn("seedtool_zero", functions[0][1])
+
     def test_word_entry_never_consults_the_rng(self):
         # Every screen in the word-entry path must be a pure function of what
         # the user typed. Randomising the initial key or the suggestion order
@@ -462,7 +532,12 @@ class SeedToolVerifierTests(unittest.TestCase):
         for fragment, why in (
             ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
             ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
-            ("\"m/%u'/0'/%u'/%u/%u\"", "the address title no longer carries the branch"),
+            # The address list's title is the path prefix its rows share, and
+            # each address's own path is that prefix plus an index - so the
+            # branch is carried once, by the prefix, and both the title and
+            # every row depend on it.
+            ("\"m/%u'/0'/%u'/%u\"", "the address path prefix no longer carries the branch"),
+            ("\"%s/%u\"", "an address path is no longer built from the shared prefix"),
         ):
             self.assertTrue(fragment in app, why)
         for fragment, why in (
