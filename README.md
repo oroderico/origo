@@ -32,7 +32,7 @@ device RNG is stubbed.
 
 Almost everything a seed needs done to it is arithmetic. Turning dice into
 words, finishing a checksum, deriving an account key, reading off the first
-hundred receive addresses, working out which holes to punch in a metal plate —
+hundred addresses of a branch, working out which holes to punch in a metal plate —
 none of it needs a network, a signing key, or a general-purpose computer. It
 does need *somewhere to run*, and the usual answers each cost something:
 
@@ -53,9 +53,9 @@ else. It generates a 12- or 24-word mnemonic from dice, coins or cards;
 finishes a checksum from 11 or 23 words already known; validates a mnemonic
 you already have; shows that mnemonic's master fingerprint, its BIP84 or
 BIP86 account key — as `xpub`, as a SLIP-132 `zpub` where one is defined, or
-as a QR code — its output descriptor, and its first hundred receive
-addresses; and exports a backup as words, as word numbers, as a Stackbit 1248
-punch pattern, or as a Compact SeedQR.
+as a QR code — its output descriptor, and the first hundred addresses of its
+receive or change branch; and exports a backup as words, as word numbers, as a
+Stackbit 1248 punch pattern, or as a Compact SeedQR.
 
 The difference is not that Origo is careful where a PC is careless. It is
 that the things you would be trusting a PC *not* to do — write to a disk,
@@ -363,14 +363,36 @@ type shows:
   serialises only the plain BIP32 versions and has no notion of SLIP-132.
   Taproot is `xpub` only: SLIP-132 defines no taproot version prefix, so there
   is no `zpub`-equivalent to offer it as;
-- its mainnet receive addresses for indices 0 through 99 at `m/84'/0'/0'/0/i`
-  or `m/86'/0'/0'/0/i`, browsed as a scrollable list rather than stepped
-  through one at a time. The list shows the first fifty; a "Go to index" entry
-  at the end of it takes any index in range on a keypad, since scrolling five
-  rows at a time to reach index 87 is not browsing. All hundred are derived
-  when the screen is opened, the same up-front derivation the QR carousel
-  below already relies on, and they stay derived until it is left — so neither
-  scrolling the list nor stepping back to it from an address re-runs BIP32.
+- its mainnet addresses for indices 0 through 99, on whichever branch is asked
+  for: `Addresses` opens a Receive/Change choice first, and the list that
+  follows is `m/84'/0'/0'/0/i` or `m/86'/0'/0'/0/i` for receive,
+  `.../1/i` for change, with each address titled by its own full path so the
+  branch is never inferred from which menu it was reached through. The list
+  shows the first fifty; a "Go to index" entry at the end of it takes any
+  index in range on a keypad, since scrolling five rows at a time to reach
+  index 87 is not browsing. All hundred are derived when the screen is opened,
+  the same up-front derivation the QR carousel below already relies on, and
+  they stay derived until it is left — so neither scrolling the list nor
+  stepping back to it from an address re-runs BIP32. One branch is cached at a
+  time: switching between them re-derives, which costs what changing the
+  account already costs and keeps the cache the size it was. The chain step
+  sits below the account key, so only the cheap half of the derivation
+  actually repeats;
+- its BIP380 output descriptor — script type, key origin, account key and an
+  8-character checksum in the one string a watch-only wallet imports directly,
+  as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`
+  equivalent. The chain step is BIP389's multipath `<0;1>`, so the single
+  descriptor describes the receive and the change branch together: a wallet
+  imported from a receive-only descriptor has nowhere to put its change. That
+  is a deliberate trade rather than a free upgrade — BIP389 is newer than
+  BIP380, and a wallet that predates it (Bitcoin Core before v26.0, among
+  others) rejects the `<0;1>` outright rather than reading half of it. Such a
+  wallet wants the receive-only form, `.../0/*`, which is the same string with
+  the multipath step replaced and its checksum recomputed; `tools/origo_verify.py`
+  is the offline way to produce one. Always plain `xpub`, never `zpub` —
+  SLIP-132's version bytes are a display convention BIP380 has no notion of. It
+  carries the same account key the QR does, so it reveals every address of the
+  account exactly as that does, and the device says so before showing one.
 
 Long values are paged three lines at a time in the 16px face, split by what
 actually fits the display rather than by a character count, so a proportional
@@ -590,12 +612,19 @@ BIP39, BIP32, BIP84, BIP86 and Bech32/Bech32m. Examples:
 python3 tools/origo_verify.py generate d20 --words 12 1 2 3 ...
 python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
+python3 tools/origo_verify.py inspect "abandon ... about" --index 0 --change
 ```
 
 `inspect` prints the checksum verdict, one-based word numbers, the Compact
 SeedQR payload, master fingerprint, both account xpubs, the exact payload of
-both account key QR codes and both addresses, so every value the device can
-display has an independent second implementation to be compared against.
+both account key QR codes, both addresses and both output descriptors, so
+every value the device can display has an independent second implementation to
+be compared against. `--change` derives the change branch instead of receive,
+so an address read off the device's Change list can be checked against the
+same second implementation the receive one is. It also prints each descriptor's
+pre-BIP389 receive-only form, which the device itself does not show — that
+line is byte for byte what the device exported before the multipath change,
+and it is what to hand a wallet that rejects `<0;1>`.
 
 Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and

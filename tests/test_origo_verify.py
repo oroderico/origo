@@ -85,12 +85,37 @@ class SeedToolVerifierTests(unittest.TestCase):
         # The exact checksum this same descriptor got independently from the
         # firmware's own C implementation (seedtool_descriptor_checksum) -
         # two from-scratch implementations of bip-0380.mediawiki's pseudocode
-        # agreeing is the actual confidence here, not either one alone.
+        # agreeing is the actual confidence here, not either one alone. The
+        # chain step is BIP389's multipath <0;1>, whose three extra characters
+        # are all inside BIP380's INPUT_CHARSET, so the checksum covers it
+        # rather than rejecting it.
         fingerprint, _, accounts = verify.addresses(self.MNEMONIC, "", 0)
         self.assertEqual(
             verify.descriptor(fingerprint, 84, accounts[84]),
+            f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/<0;1>/*)#hpg6d6w2",
+        )
+        # The pre-BIP389 fallback is not a new string to be trusted on its own:
+        # it is byte for byte the descriptor this firmware exported before the
+        # multipath change, checksum included, which is what makes it a safe
+        # thing to hand a wallet that rejects <0;1>.
+        self.assertEqual(
+            verify.descriptor(fingerprint, 84, accounts[84], multipath=False),
             f"wpkh([{fingerprint}/84'/0'/0']{accounts[84]}/0/*)#wc3n3van",
         )
+
+    def test_change_branch_matches_the_published_bip84_vector(self):
+        # BIP84 publishes both branches for this mnemonic, so the change side
+        # is pinned to the spec's own vector rather than to whatever this
+        # implementation happens to produce. The same assertion the firmware
+        # self-test makes, from the independent implementation.
+        _, receive, _ = verify.addresses(self.MNEMONIC, "", 0, chain=0)
+        _, change, _ = verify.addresses(self.MNEMONIC, "", 0, chain=1)
+        self.assertEqual(receive[84], "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu")
+        self.assertEqual(change[84], "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el")
+        # Threaded, not ignored: every type must differ across the branches at
+        # the same index, taproot included.
+        for purpose in (84, 86):
+            self.assertNotEqual(receive[purpose], change[purpose])
 
     def test_d6_transcript_pipeline_against_a_krux_vector(self):
         # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
@@ -420,6 +445,31 @@ class SeedToolVerifierTests(unittest.TestCase):
         # The keypad's own cap is what the assertion above is asserting about;
         # if it stops bounding the digits, the pair being pinned means nothing.
         self.assertIn("digits_len < ADDRESS_INDEX_DIGITS", app)
+
+    def test_firmware_emits_the_branch_it_is_tested_for(self):
+        # Everything else about the chain level is tested through the core
+        # functions, which the screens are free to call correctly and then
+        # display something else entirely. Both the descriptor body and the
+        # per-address title are built by their own snprintf in the app, so a
+        # revert to a receive-only string there passes the C self-test, all of
+        # these tests and the build - the multipath export would simply be
+        # gone. Same reasoning, and same remedy, as the Go to index pin above.
+        # assertTrue/assertFalse rather than assertIn/assertNotIn: the haystack
+        # is the whole 2000-line file, and unittest prints the haystack on
+        # failure - a hundred kilobytes of C around the one line that matters.
+        root = Path(__file__).parents[1]
+        app = (root / "main/seedtool_app.c").read_text()
+        for fragment, why in (
+            ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
+            ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
+            ("\"m/%u'/0'/%u'/%u/%u\"", "the address title no longer carries the branch"),
+        ):
+            self.assertTrue(fragment in app, why)
+        for fragment, why in (
+            ("]%s/0/*)", "the descriptor body reverted to receive-only"),
+            ("\"m/%u'/0'/%u'/0/%u\"", "the address title reverted to a hardcoded receive branch"),
+        ):
+            self.assertFalse(fragment in app, why)
 
     def test_passphrase_keyboards_cover_printable_ascii(self):
         source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
