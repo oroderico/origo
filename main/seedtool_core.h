@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "seedtool_wordlist.h"
+
 #define SEEDTOOL_HASH_LEN 32
 /* Worst case across every (source, word count) seedtool_required_events
  * covers: 256 single-character coin flips for a 24-word mnemonic
@@ -177,6 +179,20 @@ seedtool_result_t seedtool_generate(
  * flips. The coin bits are interpreted in entry order, most significant first. */
 seedtool_result_t seedtool_complete_checksum(
     const char* prefix_mnemonic, const uint8_t* coin_bits, size_t coin_bits_len, char* output, size_t output_len);
+
+/* Every word that could legally end `prefix_mnemonic` - 11 words for a 12-word
+ * mnemonic, 23 for a 24-word one - written into `allowed`.
+ *
+ * A mnemonic's last word is part entropy and part checksum: for 12 words it is
+ * the final 7 entropy bits followed by 4 checksum bits, so exactly 2^7 = 128 of
+ * the 2048 words can end it. For 24 words it is 3 entropy bits and 8 checksum
+ * bits, leaving only 8. Which ones depends on every word before it, so this is
+ * a pure function of the prefix and nothing else.
+ *
+ * Enumerated by hashing, not by trying words: each candidate value of the free
+ * entropy bits fixes the checksum that must follow it, and the two together are
+ * the word. That is 128 (or 8) SHA256 calls and no wordlist search. */
+seedtool_result_t seedtool_final_word_candidates(const char* prefix_mnemonic, seedtool_wordset_t* allowed);
 
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);

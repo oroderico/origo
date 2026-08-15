@@ -320,6 +320,21 @@ digits that still lead to a word number are reachable, and the number is shown a
 the word it means, to be confirmed, before the next word is asked for. In both
 cases deleting past the start of a word steps back to the previous one.
 
+Restoring a mnemonic narrows the **last** word further still. That word carries
+the checksum, so most of the wordlist cannot end a given eleven or twenty-three:
+its eleven bits are the leftover entropy bits followed by the checksum bits,
+which leaves 128 of the 2048 words possible for a 12-word mnemonic and only 8
+for a 24-word one. The keyboard offers those and nothing else — so a word misread
+off a metal plate is not typeable in the first place, rather than being reported
+as `Invalid checksum` after the whole mnemonic has been entered. Few enough
+remain for a 24-word restore that entry lists them outright instead of asking
+for a letter. The narrowing is exact in both directions: everything it excludes
+genuinely fails validation, and no correct seed becomes harder to enter. It
+applies to both entry methods and to the last word on the review screen, where
+it is rebuilt from the words currently entered — but not to "Complete checksum",
+whose 11 or 23 words have no checksum in them yet, and not to the backup quiz,
+which asks what the reader wrote down.
+
 A word number is one-based: the position in a printed BIP39 English wordlist,
 where `abandon` is 1 and `zoo` is 2048. It is one more than the zero-based index
 the encoding itself uses, so a list numbered from zero must be read with that in
