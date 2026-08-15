@@ -1486,7 +1486,7 @@ static void show_address_qr(const char* title, const char* address)
 /* Addresses and their list labels are derived once per visit to the Addresses
  * screen and cached here for the whole visit, not re-derived every time the
  * reader backs out of one address's QR back to the list - only leaving the
- * screen for good retires the cache (see its callers in show_type_menu).
+ * screen for good retires the cache (see the end of show_addresses).
  * Static: this does not belong on the stack, and the list widget needs every
  * shown row addressable up front, there is no windowed variant of it.
  *
@@ -1647,87 +1647,78 @@ static bool choose_address_type(seedtool_address_type_t* type)
     return true;
 }
 
-/* One address type's worth of the wallet viewer: its account key, in whichever
- * format was asked for, and its addresses. SLIP-132 defines no taproot version
- * prefix, so BIP86 never offers a format choice, only BIP84 does. */
-static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
+/* The watch-only account key for the type and account currently set, in
+ * whichever format was asked for. SLIP-132 defines no taproot version prefix,
+ * so BIP86 never offers a format choice, only BIP84 does. */
+static void show_account_key(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
-    const char* const title = address_type_name(type);
-    for (;;) {
-        const char* items[] = { "Account key", "Descriptor", "Addresses", "Back" };
-        const int selected = choose(title, items, 4, true);
-        if (selected < 0 || selected == 3) {
+    seedtool_key_format_t format = SEEDTOOL_XPUB;
+    if (type == SEEDTOOL_BIP84) {
+        const char* const formats[] = { "xpub", "zpub", "Back" };
+        const int chosen = choose("Account key format", formats, 3, true);
+        if (chosen < 0 || chosen == 2) {
             return;
         }
-        if (selected == 0) {
-            seedtool_key_format_t format = SEEDTOOL_XPUB;
-            if (type == SEEDTOOL_BIP84) {
-                const char* const formats[] = { "xpub", "zpub", "Back" };
-                const int chosen = choose("Account key format", formats, 3, true);
-                if (chosen < 0 || chosen == 2) {
-                    continue;
-                }
-                format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
-            }
-            char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
-            char origin[32];
-            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
-            if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub))
-                == SEEDTOOL_OK) {
-                if (page_text(origin, xpub)) {
-                    export_qr(mnemonic, passphrase, fphex, type, account, format);
-                }
-            } else {
-                (void)acknowledge("Error", "Could not derive account key", NULL);
-            }
-            seedtool_zero(xpub, sizeof(xpub));
-        } else if (selected == 1) {
-            show_descriptor(mnemonic, passphrase, fphex, type, account);
-        }
-        if (selected != 2) {
-            continue;
-        }
-        /* Which branch, asked the same way and in the same shape the account
-         * key's xpub/zpub choice above is asked: the list itself is identical
-         * either way, so the question belongs before it rather than as a mode
-         * to toggle inside it. */
-        const char* const branches[] = { "Receive", "Change", "Back" };
-        const int branch = choose("Addresses", branches, 3, true);
-        if (branch < 0 || branch == 2) {
-            continue;
-        }
-        const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
-        if (derive_addresses(mnemonic, passphrase, type, account, chain)) {
-            /* Loops back to the address list itself after each address's QR,
-             * rather than out to this menu: picking another address is the
-             * common next step, not re-choosing "Addresses" again - and,
-             * since derive_addresses ran once above rather than on every pass
-             * through this loop, coming straight back from one address's QR
-             * no longer costs the whole derivation again. Only backing out of
-             * the list (or a timeout) reaches the outer loop. `cursor` lives
-             * outside this loop so the list reopens wherever it was left,
-             * rather than back at address 0 every time. */
-            size_t cursor = 0;
-            for (;;) {
-                char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-                const int index = browse_addresses(address, sizeof(address), &cursor);
-                if (index < 0) {
-                    seedtool_zero(address, sizeof(address));
-                    break;
-                }
-                char path[32];
-                (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)type, (unsigned)account,
-                    (unsigned)chain, (unsigned)index);
-                if (page_text(path, address)) {
-                    show_address_qr(path, address);
-                }
-                seedtool_zero(address, sizeof(address));
-            }
-            seedtool_zero(addresses, sizeof(addresses));
-            seedtool_zero(address_labels, sizeof(address_labels));
-        }
+        format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
     }
+    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    char origin[32];
+    (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
+    if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+        if (page_text(origin, xpub)) {
+            export_qr(mnemonic, passphrase, fphex, type, account, format);
+        }
+    } else {
+        (void)acknowledge("Error", "Could not derive account key", NULL);
+    }
+    seedtool_zero(xpub, sizeof(xpub));
+}
+
+/* The address list for the type and account currently set, on whichever
+ * branch is asked for first. */
+static void show_addresses(
+    const char* mnemonic, const char* passphrase, const seedtool_address_type_t type, const uint32_t account)
+{
+    /* Which branch, asked the same way and in the same shape the account
+     * key's xpub/zpub choice is asked: the list itself is identical either
+     * way, so the question belongs before it rather than as a mode to toggle
+     * inside it. */
+    const char* const branches[] = { "Receive", "Change", "Back" };
+    const int branch = choose("Addresses", branches, 3, true);
+    if (branch < 0 || branch == 2) {
+        return;
+    }
+    const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
+    if (!derive_addresses(mnemonic, passphrase, type, account, chain)) {
+        return;
+    }
+    /* Loops back to the address list itself after each address's QR, rather
+     * than out to the menu that opened it: picking another address is the
+     * common next step, not re-choosing "Addresses" again - and, since
+     * derive_addresses ran once above rather than on every pass through this
+     * loop, coming straight back from one address's QR no longer costs the
+     * whole derivation again. Only backing out of the list (or a timeout)
+     * leaves. `cursor` lives outside this loop so the list reopens wherever it
+     * was left, rather than back at address 0 every time. */
+    size_t cursor = 0;
+    for (;;) {
+        char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+        const int index = browse_addresses(address, sizeof(address), &cursor);
+        if (index < 0) {
+            seedtool_zero(address, sizeof(address));
+            break;
+        }
+        char path[32];
+        (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)type, (unsigned)account, (unsigned)chain,
+            (unsigned)index);
+        if (page_text(path, address)) {
+            show_address_qr(path, address);
+        }
+        seedtool_zero(address, sizeof(address));
+    }
+    seedtool_zero(addresses, sizeof(addresses));
+    seedtool_zero(address_labels, sizeof(address_labels));
 }
 
 /* One word per screen, stepped the same way show_qr steps between values:
@@ -2006,21 +1997,32 @@ static void show_wallet_data(const char* mnemonic)
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
     for (;;) {
-        const char* const view_item = address_type_name(type);
-        const char* menu[] = { "Master fingerprint", "Customize", view_item, "Backup", "Done / erase" };
+        const char* menu[] = { "Master fingerprint", "Customize", "Account key", "Descriptor", "Addresses", "Backup",
+            "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
-        if (selected < 0 || selected == 4) {
+        if (selected < 0 || selected == 6) {
             break;
         }
-        if (selected == 0) {
+        switch (selected) {
+        case 0:
             (void)acknowledge(
                 "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
-        } else if (selected == 1) {
+            break;
+        case 1:
             show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
-        } else if (selected == 2) {
-            show_type_menu(mnemonic, passphrase, fphex, type, account);
-        } else {
+            break;
+        case 2:
+            show_account_key(mnemonic, passphrase, fphex, type, account);
+            break;
+        case 3:
+            show_descriptor(mnemonic, passphrase, fphex, type, account);
+            break;
+        case 4:
+            show_addresses(mnemonic, passphrase, type, account);
+            break;
+        default:
             show_backup_menu(mnemonic);
+            break;
         }
     }
 done:

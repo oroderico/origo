@@ -363,10 +363,12 @@ the optional passphrase. All three last for the whole viewing session rather
 than one visit to a screen, so checking account 2 under both types means
 setting it once. The passphrase can be changed or removed at any point without
 leaving the session; the master fingerprint is re-derived when it is, since
-that fingerprint is a function of it. One type is in force at a time, named on
-the menu row that opens its data, so an account key and its addresses are
-always read for the type currently set rather than interleaved with the other
-one's. That row shows:
+that fingerprint is a function of it. One type is in force at a time, so an
+account key and its addresses are always read for the type currently set
+rather than interleaved with the other one's — the derivation path shown with
+every value names it, so what is on screen says which type produced it rather
+than leaving it to be remembered. The wallet menu itself then offers, for
+whatever is set:
 
 - its watch-only account key at `m/84'/0'/0'` or `m/86'/0'/0'`, titled with its
   key origin such as `[73c5da0a/84'/0'/0']`. Native SegWit can be shown as
