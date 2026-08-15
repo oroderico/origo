@@ -1374,8 +1374,8 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
     }
 }
 
-/* The optional passphrase, set and changed from Customize rather than asked
- * for on the way in. A session starts without one and says so on Customize's
+/* The optional passphrase, set and changed from Derivation rather than asked
+ * for on the way in. A session starts without one and says so on Derivation's
  * own row, so the reader who does not use a passphrase never crosses a screen
  * about it, and the reader who does sets it in the same place they set the
  * account and the type - all three being inputs to the same derivation.
@@ -1617,7 +1617,7 @@ static int browse_addresses(
 }
 
 /* Every script type the viewer derives, in the order they are offered. Adding
- * one is a row here and nothing else: the Customize row, the Wallet row, the
+ * one is a row here and nothing else: the Derivation row, the Wallet row, the
  * type menu's own title and the chooser all read their name from this table
  * rather than each carrying its own conditional to be found and updated. */
 static const struct {
@@ -1990,18 +1990,21 @@ static void show_backup_menu(const char* mnemonic)
  * each owning its own copy of Account key/Descriptor/Addresses, and passphrase
  * a gate asked once before the Wallet menu existed and unchangeable after -
  * so setting all three meant crossing screens that had nothing else in common.
- * Gathered here they read as what they are: the parameters of the derivation,
- * editable in any order, none of them a place you pass *through*.
+ * Gathered here they read as what they are, and as what names the screen: the
+ * inputs to the derivation, editable in any order, none of them a place you
+ * pass *through*. The account and the type choose the path; the passphrase
+ * goes into the PBKDF2 above it, so it decides the seed the path is walked
+ * from. Different levels, one question - where the keys come from.
  *
  * `fp`/`fphex` come in by pointer because the passphrase is one of the two
- * inputs to the master fingerprint: change it and the cached fingerprint the
- * Wallet menu shows is stale, so it is re-derived here rather than left to
- * disagree with what the device is now deriving from.
+ * inputs to the master fingerprint: change it and the fingerprint titling the
+ * Wallet menu is stale, so it is re-derived here rather than left to disagree
+ * with what the device is now deriving from.
  *
  * Follows show_settings_menu's shape exactly - live-formatted labels rebuilt
  * each pass, a row either toggling in place or opening a dedicated editor and
  * returning. */
-static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
+static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], uint8_t fp[4], char fphex[9])
 {
     size_t cursor = 0;
@@ -2013,7 +2016,7 @@ static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtoo
         /* Says whether one is set, never anything about what it is. */
         const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
         const char* items[] = { account_item, type_item, passphrase_item, "Back" };
-        const int selected = choose_kept("Customize", items, 4, true, &cursor);
+        const int selected = choose_kept("Derivation", items, 4, true, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
@@ -2046,7 +2049,7 @@ static void show_wallet_data(const char* mnemonic)
      * place they are; a gate here made it the one parameter that had to be
      * decided before the wallet existed and could not be revisited after.
      * Which of the two is in force is stated rather than merely defaulted to:
-     * in full on Customize's own row, and by the fingerprint titling the menu
+     * in full on Derivation's own row, and by the fingerprint titling the menu
      * below, which is a function of it and moves whenever it changes. */
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
         (void)acknowledge("Error", "Derivation failed", NULL);
@@ -2055,13 +2058,13 @@ static void show_wallet_data(const char* mnemonic)
     hexstr(fp, sizeof(fp), fphex);
 
     /* m/type'/0'/account' and the passphrase above it: all three live for the
-     * whole wallet-viewing session, not one visit to a type's screens, so
+     * whole wallet-viewing session rather than one visit to a screen, so
      * checking account 2 under both types means setting it once - not
      * resetting on the way from one to the other. They are edited together in
-     * Customize; the row below names the type in force so the menu says what
-     * it will show before it is opened. Neither Master fingerprint (always the
-     * root's, account- and type-independent) nor Backup (about the mnemonic
-     * itself, not a derivation) reads account or type. */
+     * Derivation, which is what they have in common: each is an input to what
+     * the other screens derive. Backup reads none of them, being about the
+     * mnemonic itself rather than anything derived from it, and neither does
+     * the fingerprint in the title, which is always the root's. */
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
     /* The fingerprint names this menu rather than sitting on a row of it: it
@@ -2071,14 +2074,14 @@ static void show_wallet_data(const char* mnemonic)
      * it is a function of the passphrase in force and moves the moment that
      * does, so a reader who knows their wallet's fingerprint can see at a
      * glance whether the device is deriving that wallet. Whether a passphrase
-     * is set at all is said in full on Customize's own row. */
+     * is set at all is said in full on Derivation's own row. */
     char wallet_title[sizeof("Wallet @") + 8];
     _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
         "the wallet title must hold its label and all eight fingerprint hex digits");
     (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
     size_t cursor = 0;
     for (;;) {
-        const char* menu[] = { "Backup", "Extended public key", "Customize", "Addresses", "Done / erase" };
+        const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Done / erase" };
         const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
         if (selected < 0 || selected == 4) {
             break;
@@ -2091,7 +2094,7 @@ static void show_wallet_data(const char* mnemonic)
             show_extended_keys(mnemonic, passphrase, fphex, type, account);
             break;
         case 2:
-            show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
+            show_derivation_menu(mnemonic, &account, &type, passphrase, fp, fphex);
             /* The passphrase may have changed under it, and with it the
              * fingerprint this title states. */
             (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);

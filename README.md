@@ -345,7 +345,7 @@ screen in the entry path may depend on the device RNG.
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
 four-page keyboard covering the whole printable range, entered twice, and exists
-for that derivation session only. It is set from the wallet viewer's Customize
+for that derivation session only. It is set from the wallet viewer's Derivation
 screen rather than asked for on the way in: a session begins with none, and the
 screen states which of the two is in force rather than leaving it to be assumed.
 Changing or clearing it re-derives the master fingerprint, since that
@@ -362,7 +362,7 @@ being asked for is what makes it a check: it is a function of the passphrase in
 force and moves the moment that does, so a reader who knows their wallet's
 fingerprint sees at a glance whether the device is deriving that wallet.
 
-A **Customize** screen holds the three things that decide what everything else
+A **Derivation** screen holds the three things that decide what everything else
 derives: the account index (`m/type'/0'/account'`, 0 through 999), the wallet
 type — Native SegWit (BIP84) or Taproot (BIP86) — and the optional passphrase.
 All three last for the whole viewing session rather than one visit to a screen,
