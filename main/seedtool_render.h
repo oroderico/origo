@@ -98,6 +98,30 @@ seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
 void seedtool_render_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
     const char* footer);
 
+/* The two fixed controls a nav screen always carries, addressed as selections
+ * alongside an ordinary item index. Sentinels rather than positions past the
+ * end of the list, so a caller never has to know how many rows the chrome
+ * added to reach them - "the back arrow" and "the confirm bar" name
+ * themselves. Adapted from Blockstream Jade, which puts a back button in every
+ * title bar (main/ui/dialogs.c) rather than spending a list row on it. */
+#define SEEDTOOL_NAV_BACK SIZE_MAX
+#define SEEDTOOL_NAV_CONFIRM (SIZE_MAX - 1)
+
+/* A list under the nav chrome: a back arrow at the top left, in the title bar
+ * where it costs no row, and a confirm bar along the bottom. Both sit in the
+ * same place on every screen that uses this, so neither button carries a
+ * meaning that changes with the screen - up and down only ever move the
+ * cursor, and the chord only ever takes what is highlighted.
+ *
+ * `selected` is an item index or one of the sentinels above. `confirm` labels
+ * the bottom bar; `confirm_enabled` false draws it dimmed, for a screen where
+ * confirming is not yet possible and the reader should still see where the
+ * control will be. Shows the same SEEDTOOL_LIST_ROWS rows as
+ * seedtool_render_list, one pixel shorter each to buy the bar its height, so
+ * seedtool_list_top and seedtool_list_thumb apply here unchanged. */
+void seedtool_render_nav_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
+    const char* confirm, bool confirm_enabled);
+
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole
  * layout, ignoring the separators; disabled keys are drawn dimmed and are meant

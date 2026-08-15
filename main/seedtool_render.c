@@ -58,6 +58,25 @@
 #define LIST_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * LIST_ROW_HEIGHT)
 #define LIST_SCROLL_MIN 10
 
+/* Nav chrome. The back arrow lives inside the title bar, so the rows below it
+ * keep the full height they have on a plain list bar one pixel each, which is
+ * what pays for the confirm bar at the bottom. The title is centred between
+ * two margins of NAV_BACK_WIDTH rather than across the whole screen, so the
+ * arrow does not push it visually off-centre. */
+#define NAV_BACK_X 2
+#define NAV_BACK_Y 1
+#define NAV_BACK_WIDTH 20
+#define NAV_BACK_HEIGHT 18
+#define NAV_ARROW_WIDTH 7
+#define NAV_ARROW_HEIGHT 11
+#define NAV_ROW_HEIGHT 32
+/* The rows' own height, less the 2px the last one leaves under itself: a
+ * plain list can let its track overhang that gap, having nothing below it,
+ * but here the confirm bar is what comes next and the two must not touch. */
+#define NAV_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * NAV_ROW_HEIGHT - 2)
+#define NAV_BAR_Y 118
+#define NAV_BAR_HEIGHT 17
+
 /* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
  * xpub in one image. Raising it again is a compile error rather than a code
  * quietly clipped by the bottom of the display. */
@@ -506,6 +525,69 @@ void seedtool_render_list(const char* title, const char* const* items, const siz
         fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
     }
     draw_centered(tft_DefaultFont, footer, LIST_FOOTER_Y);
+}
+
+/* A solid left-pointing triangle with its apex at (x, y + height / 2): the
+ * back arrow, drawn rather than set, since the 16px face carries no glyph for
+ * one and Jade's own symbols font is not linked here. */
+static void draw_back_arrow(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    for (int column = 0; column < width; ++column) {
+        const int half = (column + 1) * height / (2 * width);
+        fill_rect(x + column, y + height / 2 - half, 1, 2 * half + 1, color);
+    }
+}
+
+void seedtool_render_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* confirm, const bool confirm_enabled)
+{
+    seedtool_render_clear();
+    const bool on_back = selected == SEEDTOOL_NAV_BACK;
+    if (on_back) {
+        fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+    }
+    draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+        on_back ? COLOR_BLACK : COLOR_WHITE);
+    /* Centred between two margins the width of the arrow's box, not across the
+     * glass: a title centred over the whole width would read as leaning right
+     * against the arrow, and a long one would paint into it. */
+    (void)draw_centered_box(tft_Ubuntu16, title, NAV_BACK_X + NAV_BACK_WIDTH,
+        SEEDTOOL_DISPLAY_WIDTH - 2 * (NAV_BACK_X + NAV_BACK_WIDTH), LIST_TITLE_Y);
+
+    for (size_t row = 0; row < SEEDTOOL_LIST_ROWS && top + row < count; ++row) {
+        const char* const item = items[top + row];
+        const bool highlighted = top + row == selected;
+        const int y = LIST_TOP + (int)row * NAV_ROW_HEIGHT;
+        /* No rule above the last row here: what a plain list sets apart that
+         * way is its way out, and on this screen the way out is the arrow. */
+        if (highlighted) {
+            fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
+        }
+        draw_line_at(tft_Ubuntu16, item, seedtool_render_fit_row(item), LIST_TEXT_X,
+            y + (NAV_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, highlighted ? COLOR_BLACK : COLOR_WHITE);
+    }
+    if (count > SEEDTOOL_LIST_ROWS) {
+        const seedtool_thumb_t thumb = seedtool_list_thumb(count, top, NAV_SCROLL_HEIGHT);
+        fill_rect(LIST_SCROLL_X, LIST_TOP, LIST_SCROLL_WIDTH, NAV_SCROLL_HEIGHT, COLOR_DIM);
+        fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
+    }
+
+    if (confirm) {
+        const bool on_confirm = selected == SEEDTOOL_NAV_CONFIRM;
+        /* Filled when it is both selectable and selected, outlined when it is
+         * selectable but not selected, dimmed when it cannot be taken at all -
+         * so the bar is in the same place either way and only its state says
+         * whether confirming is available yet. */
+        const uint16_t ink = !confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
+        if (on_confirm && confirm_enabled) {
+            fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_HEIGHT, COLOR_HIGHLIGHT);
+        } else {
+            fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, confirm_enabled ? COLOR_WHITE : COLOR_DIM);
+        }
+        draw_centered_in(
+            tft_Ubuntu16, confirm, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
+    }
 }
 
 /* One past the last key of the row starting at `row`. */

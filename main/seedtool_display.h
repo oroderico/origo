@@ -34,6 +34,8 @@ void seedtool_display_dice_screen(const char* title, const char* line1, const ch
 void seedtool_display_splash(void);
 void seedtool_display_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
     const char* footer);
+void seedtool_display_nav_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
+    const char* confirm, bool confirm_enabled);
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 bool seedtool_display_qr(const char* title, const char* text);

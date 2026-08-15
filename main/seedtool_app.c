@@ -268,6 +268,85 @@ static int choose(const char* title, const char* const* items, const size_t coun
     return choose_at(title, items, count, hint, 0);
 }
 
+/* Outcomes of choose_nav, alongside a non-negative item index. Distinct from
+ * choose_at's -1-or-index, because a nav screen has to tell three ways out
+ * apart rather than two: the reader left through the arrow, the reader took
+ * the confirm bar, or nobody was there. */
+#define NAV_TIMEOUT (-1)
+#define NAV_BACK (-2)
+#define NAV_CONFIRM (-3)
+
+/* The nav chrome's ring, laid out the way the screen is: the back arrow at the
+ * top, then the items, then the confirm bar at the bottom. Moving down off the
+ * last one wraps to the first, as every list here already does. */
+static size_t nav_ring_size(const size_t count, const bool confirm_enabled)
+{
+    return count + 1 + (confirm_enabled ? 1 : 0);
+}
+
+static size_t nav_position(const size_t selected, const size_t count)
+{
+    if (selected == SEEDTOOL_NAV_BACK) {
+        return 0;
+    }
+    return selected == SEEDTOOL_NAV_CONFIRM ? count + 1 : selected + 1;
+}
+
+static size_t nav_selection(const size_t position, const size_t count)
+{
+    if (!position) {
+        return SEEDTOOL_NAV_BACK;
+    }
+    return position > count ? SEEDTOOL_NAV_CONFIRM : position - 1;
+}
+
+/* A choice made under the back-arrow-and-confirm-bar chrome. `cursor` carries
+ * the selection in and out so a caller that reopens the same screen after an
+ * edit lands where it left off; seed it with SEEDTOOL_NAV_CONFIRM for the
+ * default of starting on the confirm bar, or SEEDTOOL_NAV_BACK, or an item
+ * index, for a screen that wants otherwise.
+ *
+ * No footer hint: the controls are on screen, and the bar is standing where
+ * the hint used to be drawn. Any screen converted to this chrome is reached
+ * well past the menus that teach the chord. */
+static int choose_nav(const char* title, const char* const* items, const size_t count, const char* confirm,
+    const bool confirm_enabled, size_t* const cursor)
+{
+    size_t top = 0;
+    /* A cursor left on a control this draw does not offer - the confirm bar
+     * of a screen that has since become unconfirmable, or an item index from
+     * a longer list - falls back to the arrow, which is always there. */
+    if ((*cursor == SEEDTOOL_NAV_CONFIRM && !confirm_enabled)
+        || (*cursor != SEEDTOOL_NAV_CONFIRM && *cursor != SEEDTOOL_NAV_BACK && *cursor >= count)) {
+        *cursor = SEEDTOOL_NAV_BACK;
+    }
+    for (;;) {
+        if (*cursor != SEEDTOOL_NAV_BACK && *cursor != SEEDTOOL_NAV_CONFIRM) {
+            top = seedtool_list_top(count, *cursor, top);
+        }
+        seedtool_display_nav_list(title, items, count, *cursor, top, confirm, confirm_enabled);
+        const size_t ring = nav_ring_size(count, confirm_enabled);
+        size_t position = nav_position(*cursor, count);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            if (*cursor == SEEDTOOL_NAV_BACK) {
+                return NAV_BACK;
+            }
+            return *cursor == SEEDTOOL_NAV_CONFIRM ? NAV_CONFIRM : (int)*cursor;
+        case KEY_PREV:
+            *cursor = nav_selection((position + ring - 1) % ring, count);
+            break;
+        case KEY_NEXT:
+            *cursor = nav_selection((position + 1) % ring, count);
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            return NAV_TIMEOUT;
+        }
+    }
+}
+
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
 {
@@ -1178,7 +1257,7 @@ static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemo
 }
 
 static char review_labels[24][32];
-static const char* review_items[24 + 2]; /* + "Continue"/status, + "Back" */
+static const char* review_items[24];
 
 /* Lets the reader jump straight to any already-entered word and fix it,
  * rather than losing the other 11 or 23 correct ones over a single mistake -
@@ -1188,9 +1267,12 @@ static const char* review_items[24 + 2]; /* + "Continue"/status, + "Back" */
  * already uses to pick one item out of several to inspect or act on -
  * coherence with the rest of the app mattered more here than the carousel's
  * one-item-at-a-time feel, since this is fundamentally "pick which of these
- * to fix," not "read through them in order." "Continue" (or the checksum's
- * current verdict) and "Back" ride the same list as two more rows, past the
- * last word. Shown after every full entry, not only a failed one, so a word
+ * to fix," not "read through them in order." Continuing and going back are
+ * not rows here but the nav chrome's own two controls - the confirm bar and
+ * the back arrow - so the list holds words and nothing else, and neither way
+ * out moves as the word count does. This is the first screen on that chrome;
+ * choose_nav is meant to take the rest as they are tested.
+ * Shown after every full entry, not only a failed one, so a word
  * can be double-checked before continuing at all. `words` is edited in
  * place; `mnemonic` is rejoined from it after every change so
  * seedtool_validate_mnemonic always grades the current state. Returns 1 once
@@ -1200,7 +1282,9 @@ static const char* review_items[24 + 2]; /* + "Continue"/status, + "Back" */
 static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number,
     char* mnemonic, const size_t mnemonic_len)
 {
-    size_t cursor = 0;
+    /* The confirm bar by default, as every nav screen opens: the reader who
+     * has just typed twelve words is far more often done than not. */
+    size_t cursor = SEEDTOOL_NAV_CONFIRM;
     int outcome;
     /* Cleared at both ends, exactly as derive_addresses does with
      * address_labels: these rows are the mnemonic in plain text, one word
@@ -1227,31 +1311,25 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
         }
-        /* Continue only appears once it would actually do something: an
-         * invalid checksum can't be acted on, so an inert "Checksum invalid"
-         * row that just redisplays the same list on select was a dead click
-         * - the title already says "Review - fix a word", no extra row
-         * needed to repeat that. */
-        size_t entries = count;
-        if (valid) {
-            review_items[entries++] = "Continue";
-        }
-        review_items[entries++] = "Back";
-        const int selected
-            = choose_at(valid ? "Review words" : "Review - fix a word", review_items, entries, true, cursor);
-        if (selected < 0) {
+        /* Continue can only be taken once it would actually do something: an
+         * invalid checksum can't be acted on. It stays drawn either way,
+         * dimmed rather than gone, so the control the reader is heading for
+         * does not appear and disappear under them as words are fixed - the
+         * title carries the verdict, as it already did. */
+        const int selected = choose_nav(
+            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, &cursor);
+        if (selected == NAV_TIMEOUT) {
             outcome = -1;
             goto done;
         }
-        if ((size_t)selected == entries - 1) {
+        if (selected == NAV_BACK) {
             outcome = 0;
             goto done;
         }
-        if (valid && (size_t)selected == count) {
+        if (selected == NAV_CONFIRM) {
             outcome = 1;
             goto done;
         }
-        cursor = (size_t)selected;
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
         const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
                                       : enter_word(selected + 1, count, word, sizeof(word));

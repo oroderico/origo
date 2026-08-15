@@ -126,6 +126,13 @@ void seedtool_display_list(const char* title, const char* const* items, const si
     present();
 }
 
+void seedtool_display_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* confirm, const bool confirm_enabled)
+{
+    seedtool_render_nav_list(title, items, count, selected, top, confirm, confirm_enabled);
+    present();
+}
+
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     const size_t selected, const size_t position, const size_t total)
 {
