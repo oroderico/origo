@@ -226,11 +226,6 @@ static int choose_at(const char* title, const char* const* items, const size_t c
     }
 }
 
-static int choose(const char* title, const char* const* items, const size_t count, const bool hint)
-{
-    return choose_at(title, items, count, hint, 0);
-}
-
 /* Outcomes of choose_nav, alongside a non-negative item index. Distinct from
  * choose_at's -1-or-index, because a nav screen has to tell three ways out
  * apart rather than two: the reader left through the arrow, the reader took
@@ -2064,8 +2059,7 @@ static bool choose_address_type(seedtool_address_type_t* type)
             current = i;
         }
     }
-    items[ADDRESS_TYPE_COUNT] = "Back";
-    const int selected = choose_at("Type", items, ADDRESS_TYPE_COUNT + 1, true, current);
+    const int selected = choose_menu_at("Type", items, ADDRESS_TYPE_COUNT, &current);
     if (selected < 0 || (size_t)selected >= ADDRESS_TYPE_COUNT) {
         return false;
     }
@@ -2113,8 +2107,7 @@ static void show_extended_keys(const char* mnemonic, const char* passphrase, con
             items[count++] = "zpub";
         }
         items[count++] = "Descriptor";
-        items[count++] = "Back";
-        const int selected = choose_kept("Extended public key", items, count, true, &cursor);
+        const int selected = choose_menu_at("Extended public key", items, count, &cursor);
         if (selected < 0 || (size_t)selected == count - 1) {
             return;
         }
@@ -2137,8 +2130,8 @@ static void show_addresses(
      * key's xpub/zpub choice is asked: the list itself is identical either
      * way, so the question belongs before it rather than as a mode to toggle
      * inside it. */
-    const char* const branches[] = { "Receive", "Change", "Back" };
-    const int branch = choose("Addresses", branches, 3, true);
+    const char* const branches[] = { "Receive", "Change" };
+    const int branch = choose_menu("Addresses", branches, 2);
     if (branch < 0 || branch == 2) {
         return;
     }
@@ -2436,8 +2429,8 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
          * the fingerprint with them; the type picks a path from that seed; the
          * account picks a branch of that path. Widest consequence first, and
          * the fingerprint in the title above only ever moves for the first. */
-        const char* items[] = { passphrase_item, type_item, account_item, "Back" };
-        const int selected = choose_kept("Derivation", items, 4, true, &cursor);
+        const char* items[] = { passphrase_item, type_item, account_item };
+        const int selected = choose_menu_at("Derivation", items, 3, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
@@ -3263,8 +3256,8 @@ static bool flip_words(const size_t words)
  * -1 for back. */
 static int choose_coin_method(void)
 {
-    const char* methods[] = { "Flip each word", "Flip and hash", "Back" };
-    const int selected = choose("Coin method", methods, 3, true);
+    const char* methods[] = { "Flip each word", "Flip and hash" };
+    const int selected = choose_menu("Coin method", methods, 2);
     return selected < 0 || selected == 2 ? -1 : selected;
 }
 
