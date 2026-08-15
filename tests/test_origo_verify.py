@@ -532,7 +532,12 @@ class SeedToolVerifierTests(unittest.TestCase):
         for fragment, why in (
             ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
             ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
-            ("\"m/%u'/0'/%u'/%u/%u\"", "the address title no longer carries the branch"),
+            # The address list's title is the path prefix its rows share, and
+            # each address's own path is that prefix plus an index - so the
+            # branch is carried once, by the prefix, and both the title and
+            # every row depend on it.
+            ("\"m/%u'/0'/%u'/%u\"", "the address path prefix no longer carries the branch"),
+            ("\"%s/%u\"", "an address path is no longer built from the shared prefix"),
         ):
             self.assertTrue(fragment in app, why)
         for fragment, why in (
