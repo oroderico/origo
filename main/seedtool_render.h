@@ -107,6 +107,26 @@ void seedtool_render_list(const char* title, const char* const* items, size_t co
  * the keys fills to `position - 1` of `total`, the words already behind this
  * one - passphrase and account-index entry have no such count, so `total` of
  * 0 skips the bar entirely rather than drawing an empty one. */
+/* A row of digit boxes with the one being set carrying up and down arrows,
+ * for a value scrolled in place rather than hunted for on a keypad.
+ * `digits[0..count)` is what each box shows: boxes before `active` are drawn as
+ * set, the one at `active` as being scrolled - a SEEDTOOL_KEY_BACKSPACE there
+ * draws the backspace glyph - and those after it as still to come. `progress`
+ * draws the dice bar underneath when it is not NULL.
+ *
+ * `count` must not exceed SEEDTOOL_DIGIT_BOXES_MAX: the row is centred, so more
+ * boxes than fit do not wrap or shrink, they run off both edges where fill_rect
+ * clips them without complaint. The renderer asserts that this many fit the
+ * display; the caller is what has to stay within it. */
+#define SEEDTOOL_DIGIT_BOXES_MAX 4
+void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,
+    const seedtool_progress_t* progress);
+
+/* One wider box for a value scrolled whole (a die face, a D20 roll) rather
+ * than digit by digit. `back` draws the backspace glyph in place of `text`. */
+void seedtool_render_value_box(
+    const char* title, const char* text, bool back, const char* footer, const seedtool_progress_t* progress);
+
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 
