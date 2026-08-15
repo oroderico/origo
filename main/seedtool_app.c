@@ -1522,20 +1522,31 @@ static int revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t 
  * acknowledge, the same widget restore_seed's own "Checksum valid" already
  * uses for the opposite verdict, says it without adding a row that does
  * nothing when picked. */
-static int restore_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
+static int restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number,
+    char* mnemonic, const size_t mnemonic_len, bool resume)
 {
-    char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
-    bool by_number = false;
-    int outcome = enter_mnemonic_words(count, words, &by_number);
-    if (outcome == 1) {
-        if (join_words(words, count, mnemonic, mnemonic_len)
-            && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
-            notice("Invalid checksum", "Check your words", "Fix one to continue", "Fix a word");
+    /* Entry and review chained the way revisit_prefix chains them, so the
+     * review's arrow reopens the entry screen rather than dropping past it to
+     * the length menu. `resume` starts on the review instead: for a caller
+     * that has taken the reader forward and needs to hand the words back
+     * without asking for them again. */
+    for (;;) {
+        if (!resume) {
+            const int entered = enter_mnemonic_words(count, words, by_number);
+            if (entered != 1) {
+                return entered;
+            }
+            if (join_words(words, count, mnemonic, mnemonic_len)
+                && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
+                notice("Invalid checksum", "Check your words", "Fix one to continue", "Fix a word");
+            }
         }
-        outcome = review_and_confirm(words, count, by_number, mnemonic, mnemonic_len);
+        resume = false;
+        const int reviewed = review_and_confirm(words, count, *by_number, mnemonic, mnemonic_len);
+        if (reviewed != 0) {
+            return reviewed;
+        }
     }
-    seedtool_zero(words, sizeof(words));
-    return outcome;
 }
 
 static bool enter_passphrase_once(char* output, const size_t output_len)
@@ -1585,25 +1596,35 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
     }
 }
 
-static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
+/* 1 once a passphrase decision has been made, 0 when the reader steps back
+ * off the prompt, -1 on timeout. Three ways out rather than a bool: this is
+ * the first screen of the wallet, so backing off it has to mean "the screen
+ * before the wallet" and not the same thing as a failure - which is what a
+ * bool made it, and why one press here used to end the whole session's work.
+ *
+ * A mismatch returns to the prompt rather than out of it, which is what the
+ * notice's own "Try again" says will happen. */
+static int get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
-    const char* options[] = { "No passphrase", "Enter passphrase" };
-    const int selected = choose_menu("Optional passphrase", options, 2);
-    if (selected != 1) {
-        passphrase[0] = '\0';
-        /* Only "No passphrase" derives; back and timeout both leave without. */
-        return selected == 0;
-    }
-    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
-    const bool ok = enter_passphrase_once(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1)
-        && nav_acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
-        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(passphrase, confirmation) == 0;
-    seedtool_zero(confirmation, sizeof(confirmation));
-    if (!ok) {
+    for (;;) {
+        const char* options[] = { "No passphrase", "Enter passphrase" };
+        const int selected = choose_menu("Optional passphrase", options, 2);
+        if (selected != 1) {
+            passphrase[0] = '\0';
+            return selected == 0 ? 1 : selected == 2 ? 0 : -1;
+        }
+        char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
+        const bool ok = enter_passphrase_once(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1)
+            && nav_acknowledge(
+                "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
+            && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(passphrase, confirmation) == 0;
+        seedtool_zero(confirmation, sizeof(confirmation));
+        if (ok) {
+            return 1;
+        }
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
         notice("Passphrase mismatch", "Nothing was derived", "Try again", "Try again");
     }
-    return ok;
 }
 
 /* The account key's own QR, warned about up front since a photo of it reveals
@@ -2089,13 +2110,19 @@ static void show_backup_menu(const char* mnemonic)
     }
 }
 
-static void show_wallet_data(const char* mnemonic)
+/* Returns false only when the reader steps back off the passphrase prompt,
+ * the first screen here - so a caller can show whatever came before the
+ * wallet again instead of treating that press as the end of the visit. */
+static bool show_wallet_data(const char* mnemonic)
 {
     uint8_t fp[4] = { 0 };
     char fphex[9] = { 0 };
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    bool stepped_back = false;
 
-    if (!get_session_passphrase(passphrase)) {
+    const int chosen = get_session_passphrase(passphrase);
+    if (chosen != 1) {
+        stepped_back = chosen == 0;
         goto done;
     }
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
@@ -2137,6 +2164,7 @@ done:
     seedtool_zero(fp, sizeof(fp));
     seedtool_zero(fphex, sizeof(fphex));
     seedtool_zero(passphrase, sizeof(passphrase));
+    return !stepped_back;
 }
 
 /* A backup is only as good as its transcription: quizzes one word from every
@@ -2278,8 +2306,10 @@ static bool show_generated(seedtool_generated_t* generated)
         case STAGE_QUIZ: {
             const int outcome = confirm_backup(generated->mnemonic, generated->words);
             if (outcome == 1) {
-                show_wallet_data(generated->mnemonic);
-                stage = STAGE_DONE;
+                /* Stepping back off the wallet's first screen lands on the
+                 * backup intro: the quiz itself is behind it and already
+                 * passed, so there is no screen between the two to go to. */
+                stage = show_wallet_data(generated->mnemonic) ? STAGE_DONE : STAGE_INTRO;
             } else {
                 /* Backing out of the quiz's first word lands on the intro,
                  * one stage, as everywhere else - it used to jump two, back
@@ -2632,8 +2662,13 @@ static bool complete_checksum(void)
                 break;
             }
             if (page_text("Completed mnemonic", completed)) {
-                show_wallet_data(completed);
-                break;
+                if (show_wallet_data(completed)) {
+                    break;
+                }
+                /* Stepped back off the wallet's first screen: the completed
+                 * mnemonic again. `i` is untouched, so the flips behind it
+                 * are still there if the reader keeps going back. */
+                continue;
             }
             /* Back off the completed mnemonic: the last flip again, with the
              * words and every flip before it still in hand. */
@@ -2683,15 +2718,33 @@ static void restore_seed(void)
         if (selected < 0 || selected == 2) {
             return;
         }
+        const size_t count = selected ? 24 : 12;
         char mnemonic[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
-        /* restore_mnemonic's review step only ever returns 1 with a checksum
-         * that already passed - a reader who fixes a word doesn't lose the
-         * other 11 or 23, and one who can't gets to keep trying instead of
-         * being dropped straight back to "12 words / 24 words / Back". */
-        const int outcome = restore_mnemonic(selected ? 24 : 12, mnemonic, sizeof(mnemonic));
-        if (outcome == 1 && nav_acknowledge("Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet", false)) {
-            show_wallet_data(mnemonic);
+        /* Held here, like complete_checksum's, so that every step back from
+         * here on hands the words over rather than asking for them again. */
+        char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+        bool by_number = false;
+        bool resume = false;
+        int outcome;
+        for (;;) {
+            outcome = restore_mnemonic(count, words, &by_number, mnemonic, sizeof(mnemonic), resume);
+            resume = false;
+            if (outcome != 1) {
+                break;
+            }
+            if (!nav_acknowledge(
+                    "Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet", false)) {
+                /* Back off the verdict is the review again, with a restore
+                 * that already succeeded still in hand. */
+                resume = true;
+                continue;
+            }
+            if (show_wallet_data(mnemonic)) {
+                break;
+            }
+            /* Back off the wallet's first screen: the verdict again. */
         }
+        seedtool_zero(words, sizeof(words));
         seedtool_zero(mnemonic, sizeof(mnemonic));
         if (outcome != 0) {
             return;
