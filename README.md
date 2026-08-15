@@ -344,21 +344,13 @@ and padded to four digits.
 
 ### The keyboards
 
-The letter keyboards are QWERTY by default, or alphabetical if Settings says so
-— `Keyboard: QWERTY` / `Keyboard: ABC`, for readers who do not touch-type and
-would rather not hunt. The number keyboard has no such choice, digits having
-only one order. The setting lives in Settings, which is reachable only from the
-main menu, so it cannot change while a seed is loaded: no session can have half
-a passphrase typed on one arrangement and half on the other. Keys are found by
-character rather than by position in any case, so the same presses spell the
-same string either way.
-
-The cursor opens on the middle key of the middle row — because on a ring of
-thirty keys walked with two buttons the corner is the furthest possible place to
-start from. It then keeps its place, so repeating a character is one press rather
-than a walk back, and returns to the centre when a keyboard is opened or a symbol
-page is turned. When the letter it was resting on stops leading to a word, it
-moves to the nearest key that still does.
+The keyboards are QWERTY. The cursor opens on the middle key of the middle row —
+`g` on the letter keyboards, `5` on the number one — because on a ring of thirty
+keys walked with two buttons the corner is the furthest possible place to start
+from. It then keeps its place, so repeating a character is one press rather than
+a walk back, and returns to the centre when a keyboard is opened or a symbol page
+is turned. When the letter it was resting on stops leading to a word, it moves to
+the nearest key that still does.
 
 The suggestion order, the initially selected key and where a list has scrolled to
 are pure functions of what has been typed and chosen. None is randomised: no
