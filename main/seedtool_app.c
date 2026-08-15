@@ -2285,7 +2285,12 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
                 (void)snprintf(lines[i], sizeof(lines[i]), "%02u. %04u", (unsigned)position, (unsigned)number);
             }
         }
-        char footer[16];
+        /* Sized for the format's worst case rather than its real one: pages
+         * tops out at six here, but `page` now comes from page_shown() rather
+         * than from the loop, so the compiler can no longer see a bound and
+         * assumes ten digits apiece - and -Wformat-truncation is an error in
+         * the firmware build even though the host build lets it pass. */
+        char footer[24];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
         const seedtool_nav_t nav = page_nav(cursor, pages, footer);
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
