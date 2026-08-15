@@ -1233,22 +1233,26 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
          * - the title already says "Review - fix a word", no extra row
          * needed to repeat that. */
         size_t entries = count;
+        review_items[entries++] = "Back";
         if (valid) {
+            /* Last, below Back: it is what the reader is here to reach, and
+             * the list wraps, so one press up from the first word lands on it
+             * rather than on the way out. Back keeps its place directly after
+             * the words, where every other list in the firmware puts it. */
             review_items[entries++] = "Continue";
         }
-        review_items[entries++] = "Back";
         const int selected
             = choose_at(valid ? "Review words" : "Review - fix a word", review_items, entries, true, cursor);
         if (selected < 0) {
             outcome = -1;
             goto done;
         }
-        if ((size_t)selected == entries - 1) {
-            outcome = 0;
+        if (valid && (size_t)selected == entries - 1) {
+            outcome = 1;
             goto done;
         }
-        if (valid && (size_t)selected == count) {
-            outcome = 1;
+        if ((size_t)selected == count) {
+            outcome = 0;
             goto done;
         }
         cursor = (size_t)selected;
