@@ -117,6 +117,47 @@ class SeedToolVerifierTests(unittest.TestCase):
         for purpose in (84, 86):
             self.assertNotEqual(receive[purpose], change[purpose])
 
+    def test_coin_words_reach_the_published_vectors_and_agree_with_complete(self):
+        # The device's Flip-each-word method packs eleven flips per word
+        # straight into the entropy, with no hash - so the verifier has to be
+        # able to reproduce it from the flips alone, or a seed made that way is
+        # one the README's "recompute it independently" promise does not cover.
+        #
+        # All-zero flips are the anchor: 121 zero bits plus seven more are 128
+        # zero entropy bits, which BIP39 publishes as abandon x11 + about. That
+        # fixes the whole chain, checksum included, to something outside this
+        # project.
+        wl = verify.words()
+
+        def mnemonic_from_flips(flips, words):
+            count = 11 if words == 12 else 23
+            idx = [int(flips[i * 11 : (i + 1) * 11], 2) for i in range(count)]
+            tail = flips[count * 11 :]
+            packed = int("".join(f"{i:011b}" for i in idx), 2)
+            entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16 if words == 12 else 32, "big")
+            return verify.mnemonic_from_entropy(entropy), [wl[i] for i in idx], tail
+
+        self.assertEqual(mnemonic_from_flips("0" * 128, 12)[0], self.MNEMONIC)
+        self.assertEqual(mnemonic_from_flips("0" * 256, 24)[0], self.MNEMONIC_24)
+
+        # Eleven bits are one index and nothing past it: the top of the
+        # wordlist must be reachable and must not overflow into a twelfth bit.
+        self.assertEqual(len(wl), 1 << 11)
+        self.assertEqual(mnemonic_from_flips("1" * 121 + "0" * 7, 12)[1][0], "zoo")
+
+        # And the same flips must reach the same mnemonic through `complete`,
+        # which is the route a reader takes when converting by hand: the two
+        # are the same arithmetic entered from different ends, so a divergence
+        # would mean one of them is lying about what the device did.
+        flips = "01100110011" * 11 + "0110011"
+        expected, words11, tail = mnemonic_from_flips(flips, 12)
+        self.assertEqual(words11[0], "grid")
+        packed = 0
+        for word in words11:
+            packed = (packed << 11) | wl.index(word)
+        entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16, "big")
+        self.assertEqual(verify.mnemonic_from_entropy(entropy), expected)
+
     def test_d6_transcript_pipeline_against_a_krux_vector(self):
         # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
         # against a run Krux produces the same mnemonic from, which is what
@@ -407,6 +448,85 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(platform.count("esp_fill_random"), 1)
         self.assertIn("wally_secp_randomize", app)
 
+    # Names that mean a buffer holds seed material. Deliberately a list of
+    # patterns rather than a list of buffers: a new buffer called `passphrase`
+    # is covered the day it is written, where a fixed inventory would have to
+    # be remembered. A new *kind* of secret under a name not listed here is the
+    # one case that escapes, so adding a pattern is part of adding one.
+    # Two rounds of additions have come from reviewing other people's screens
+    # rather than from this list being thought through: `indices` and `bits`
+    # hold a mnemonic just as plainly as `words` does, and both were wiped by
+    # the author rather than by anything here noticing they had to be. That is
+    # the failure mode to expect - the list lags the code - so it is worth
+    # widening on sight rather than when something goes wrong.
+    SECRET_BUFFER_NAMES = (
+        "mnemonic", "passphrase", "seed", "entropy", "word", "words", "stem",
+        "flips", "coin_bits", "completed", "attempt", "confirmation", "xpub",
+        # A mnemonic by another name: word indices, the bits they are packed
+        # from, and the strings a screen shows them in.
+        "indices", "bits", "tail", "history", "bitline", "prefix", "digits",
+    )
+
+    @staticmethod
+    def _c_functions(source):
+        """(name, body) for each function definition, by brace counting."""
+        for match in re.finditer(r"^(?:static\s+)?[\w ]+?\**(\w+)\([^;]*?\)\s*\{", source, re.M | re.S):
+            depth, i = 0, match.end() - 1
+            while i < len(source):
+                if source[i] == "{":
+                    depth += 1
+                elif source[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            yield match.group(1), source[match.end():i]
+
+    def test_every_secret_buffer_is_wiped_in_the_function_that_holds_it(self):
+        # README's Safety boundaries promise that every screen holding seed
+        # material wipes its buffers when it is left. seedtool_zero is called
+        # over a hundred times to that end and, until this test, not one of
+        # those calls was verified by anything - the promise rested entirely on
+        # each author remembering. Two real gaps of exactly this shape were
+        # found by hand in c330a74, which is the argument for checking it.
+        #
+        # What this pins is narrow and deliberately so: a local array whose
+        # name says it holds a secret must be passed to seedtool_zero somewhere
+        # in the same function. It cannot prove every *path* wipes - that needs
+        # the compiler, not a regex - but it does catch the buffer that is
+        # never wiped at all, which is what both real gaps were.
+        root = Path(__file__).parents[1]
+        pattern = re.compile(
+            r"^\s+(?:char|uint8_t|uint16_t)\s+(\w+)\s*\[", re.M)
+        unwiped = []
+        for name in ("main/seedtool_app.c", "main/seedtool_core.c"):
+            source = (root / name).read_text()
+            for func, body in self._c_functions(source):
+                for buf in pattern.findall(body):
+                    if buf not in self.SECRET_BUFFER_NAMES:
+                        continue
+                    if not re.search(rf"seedtool_zero\(\s*&?{re.escape(buf)}\b", body):
+                        unwiped.append(f"{name}:{func}() leaves `{buf}` unwiped")
+        self.assertEqual(unwiped, [], "; ".join(unwiped))
+
+    def test_the_wipe_check_would_notice_an_unwiped_buffer(self):
+        # A checker that silently matches nothing passes just as quietly as one
+        # that works, and this one is a regex over C - exactly the kind that
+        # rots into a no-op. So: it must find the buffers that are there, and
+        # it must fail on one that is not wiped.
+        found = [
+            buf
+            for func, body in self._c_functions(
+                (Path(__file__).parents[1] / "main/seedtool_app.c").read_text())
+            for buf in re.findall(r"^\s+(?:char|uint8_t)\s+(\w+)\s*\[", body, re.M)
+            if buf in self.SECRET_BUFFER_NAMES
+        ]
+        self.assertGreaterEqual(len(found), 8, f"the scan found only {found}")
+        planted = "static void f(void)\n{\n    char passphrase[64] = { 0 };\n    use(passphrase);\n}\n"
+        functions = list(self._c_functions(planted))
+        self.assertEqual(len(functions), 1)
+        self.assertNotIn("seedtool_zero", functions[0][1])
+
     def test_word_entry_never_consults_the_rng(self):
         # Every screen in the word-entry path must be a pure function of what
         # the user typed. Randomising the initial key or the suggestion order
@@ -462,7 +582,12 @@ class SeedToolVerifierTests(unittest.TestCase):
         for fragment, why in (
             ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
             ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
-            ("\"m/%u'/0'/%u'/%u/%u\"", "the address title no longer carries the branch"),
+            # The address list's title is the path prefix its rows share, and
+            # each address's own path is that prefix plus an index - so the
+            # branch is carried once, by the prefix, and both the title and
+            # every row depend on it.
+            ("\"m/%u'/0'/%u'/%u\"", "the address path prefix no longer carries the branch"),
+            ("\"%s/%u\"", "an address path is no longer built from the shared prefix"),
         ):
             self.assertTrue(fragment in app, why)
         for fragment, why in (
@@ -470,6 +595,28 @@ class SeedToolVerifierTests(unittest.TestCase):
             ("\"m/%u'/0'/%u'/0/%u\"", "the address title reverted to a hardcoded receive branch"),
         ):
             self.assertFalse(fragment in app, why)
+
+    def test_number_entry_narrows_by_the_same_set_the_letters_do(self):
+        # The checksum filter is proved exact by the C self-test, but that
+        # proves the *function*, not that the screen calls it. enter_word_number
+        # is the screen, and a rewrite of it that reached for the unnarrowed
+        # seedtool_word_number would leave the number pad accepting last words
+        # the letter keyboard refuses - the exact asymmetry the filter exists to
+        # prevent, and invisible to every other test here, since the function it
+        # stopped calling still works perfectly.
+        #
+        # That is not hypothetical: it is what a rewrite of this screen did.
+        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
+        start = source.index("static int enter_word_number(")
+        body = source[start : source.index("\n}\n", start)]
+        self.assertIn("const seedtool_wordset_t* allowed", body, "enter_word_number no longer takes the allowed set")
+        for narrowed, plain in (("seedtool_next_digits_in", "seedtool_next_digits"),
+                                ("seedtool_word_number_in", "seedtool_word_number")):
+            self.assertIn(narrowed, body, f"enter_word_number no longer calls {narrowed}")
+            # The plain name is a prefix of the narrowed one, so count the calls
+            # rather than searching for the string: `foo(` never matches `foo_in(`.
+            self.assertEqual(
+                body.count(f"{plain}("), 0, f"enter_word_number calls {plain} directly, bypassing the filter")
 
     def test_passphrase_keyboards_cover_printable_ascii(self):
         source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()

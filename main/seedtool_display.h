@@ -44,6 +44,10 @@ void seedtool_display_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
     const seedtool_progress_t* progress);
+void seedtool_display_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,
+    const seedtool_progress_t* progress);
+void seedtool_display_value_box(
+    const char* title, const char* text, bool back, const char* footer, const seedtool_progress_t* progress);
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 bool seedtool_display_qr(const char* title, const char* text);

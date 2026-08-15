@@ -47,6 +47,10 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
  * backspace key's own fix for the same gap) would mean the footer stops
  * being plain text, which every screen that draws one currently assumes. */
 #define NAV_FOOTER "Up/Down move   BOTH select"
+/* The scrolled digit field keeps a footer: up and down are the digit there,
+ * not a cursor, so the nav chrome's two controls have nothing to attach to
+ * and the hint is still the only thing that says what the buttons do. */
+#define DIGIT_FOOTER "Up/Down set   BOTH take"
 
 /* Word entry keyboard: the letters plus backspace. */
 #define WORD_LAYOUT SEEDTOOL_WORD_LAYOUT
@@ -73,6 +77,12 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
 #define ADDRESS_INDEX_DIGITS 2
 _Static_assert(ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99,
     "the address-index keypad width and the derived address range must be changed together");
+
+/* The word-number field draws one box per digit, and the renderer bounds how
+ * many of those fit across the display. Widening a word number without the
+ * boxes to show it would run the row off both edges, which clips silently. */
+_Static_assert(SEEDTOOL_MAX_WORD_DIGITS <= SEEDTOOL_DIGIT_BOXES_MAX,
+    "a word number has more digits than the digit field can draw boxes for");
 
 /* Every key is found by its character rather than by where it sits, so the
  * layouts are QWERTY, or anything else, purely by changing the strings above. */
@@ -440,6 +450,27 @@ static int choose_menu(const char* title, const char* const* items, const size_t
     return choose_menu_at(title, items, count, &cursor);
 }
 
+/* A menu that reopens where it was left rather than at its first row. Every
+ * looping menu here wants this: the row just chosen is the one whose result
+ * the reader is coming back from, and it is far more often the neighbour of
+ * their next choice than the top of the list is. `cursor` lives in the
+ * caller's frame for as long as that screen does, so a fresh visit still
+ * starts at the top - the same span the address list keeps its own position
+ * over, and for the same reason.
+ *
+ * Back and a timeout leave `cursor` alone: they end the screen, so there is
+ * nothing to come back to, and writing the Back row's index there would mean
+ * a screen re-entered later opened on the way out of itself. */
+static int choose_kept(
+    const char* title, const char* const* items, const size_t count, const bool hint, size_t* cursor)
+{
+    const int selected = choose_at(title, items, count, hint, *cursor);
+    if (selected >= 0) {
+        *cursor = (size_t)selected;
+    }
+    return selected;
+}
+
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
 {
@@ -519,7 +550,15 @@ static int enter_value(const char* title, const unsigned position, const unsigne
          * mis-keyed roll is caught against the paper now rather than at the end
          * of ninety-nine of them. Only its tail fits, which is the part that
          * just changed. */
-        if (progress) {
+        /* A plain number scrolls in its own box, the same shape the word-number
+         * field uses - up and down are the value, and there is nothing else on
+         * screen to hunt through. A formatted value (a card, "A Clubs") is too
+         * wide for a box and stays on the text screen, where the running
+         * transcript sits under it. */
+        if (!format) {
+            seedtool_display_value_box(
+                heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
+        } else if (progress) {
             seedtool_display_dice_screen(
                 heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
         } else {
@@ -946,8 +985,14 @@ static size_t layout_key_index(const char* layout, const char target)
  * back out of this word, and -1 on timeout or overflow. Only letters that can
  * still lead to a word are reachable, and once ten or fewer words match the
  * remaining candidates are offered directly. The initial key and the candidate
- * order are deterministic; nothing here consults the RNG. */
-static int enter_word(const size_t position, const size_t total, char* output, const size_t output_len)
+ * order are deterministic; nothing here consults the RNG.
+ *
+ * `allowed` narrows which words count as words at all, NULL for the whole
+ * list. Every enabled letter leads to at least one allowed word, so a stem
+ * built here can never strand the reader with no candidates - the invariant
+ * the empty-match bail below relies on. */
+static int enter_word(
+    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
 {
     char stem[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
     size_t stem_len = 0;
@@ -959,7 +1004,8 @@ static int enter_word(const size_t position, const size_t total, char* output, c
 
     for (;;) {
         uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
-        const size_t matches = seedtool_words_with_prefix(stem, stem_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
+        const size_t matches
+            = seedtool_words_with_prefix_in(allowed, stem, stem_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
         bool erase = false;
 
         if (!matches) {
@@ -1003,7 +1049,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             /* Too many candidates to list: narrow the stem one letter at a time. */
             bool letters[SEEDTOOL_LETTERS] = { false };
             bool enabled[WORD_KEYS] = { false };
-            (void)seedtool_next_letters(stem, stem_len, letters);
+            (void)seedtool_next_letters_in(allowed, stem, stem_len, letters);
             for (size_t i = 0; i < WORD_KEYS; ++i) {
                 const char key = seedtool_layout_key(WORD_LAYOUT, i);
                 enabled[i] = key == SEEDTOOL_KEY_BACKSPACE || letters[key - 'a'];
@@ -1055,94 +1101,159 @@ static int enter_word(const size_t position, const size_t total, char* output, c
  * chosen, 0 when the user deleted back out of this word, -1 on timeout or
  * overflow. Only digits that still lead to a word number are reachable, and the
  * number is shown as its word before it is accepted: a digit misread off paper
- * is otherwise a different seed with no sign that anything went wrong. */
-static int enter_word_number(const size_t position, const size_t total, char* output, const size_t output_len)
+ * is otherwise a different seed with no sign that anything went wrong.
+ *
+ * `allowed` narrows that further on a mnemonic's last word, where the checksum
+ * leaves only a handful of words possible. It is the same set the letter
+ * keyboard narrows by, and it has to be applied here too: a restore that
+ * refuses a word by letter and accepts it by number is worse than one that does
+ * neither, because the reader who used the number pad has been told nothing.
+ *
+ * Up to four boxes, scrolled one at a time, and a number ends where the reader
+ * says it does: `240` is typed as three digits, not as `0240`. The ring for the
+ * current box carries the digits that still lead somewhere, then OK once what
+ * is typed is already a word number, then backspace - the same ring Jade's
+ * index entry uses, where a short number also has to be able to stop early.
+ *
+ * A fixed four-box field was tried first and was wrong: it made 240 a dead end,
+ * since no fourth digit takes 240x into 1..2048, so the reader who typed it
+ * found a box with nothing in it but backspace. Ending the number early is not
+ * a convenience here, it is what makes three-digit numbers reachable at all.
+ *
+ * Replaces a twelve-key keypad the reader had to walk a cursor across. Two
+ * buttons that mean "the digit goes up" and "the digit goes down" need no
+ * hunting, and the row of boxes shows how much is left to type without a
+ * separate readout. */
+static int enter_word_number(
+    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
 {
     char digits[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
-    size_t digits_len = 0;
-    size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
-    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
+    /* What each box shows, including the one being scrolled. */
+    char shown[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
+    size_t at = 0;
     char title[24];
     (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)position, (unsigned)total);
 
+    /* The ring for the current box: the digits still reachable, then backspace.
+     * Rebuilt whenever the box changes, since which digits are reachable
+     * depends on the ones already set. */
+    char ring[SEEDTOOL_DIGITS + 2];
+    size_t ring_len = 0, on = 0;
+    bool rebuild = true;
+
     for (;;) {
-        bool reachable[SEEDTOOL_DIGITS] = { false };
-        bool enabled[WORD_NUMBER_KEYS] = { false };
-        (void)seedtool_next_digits(digits, digits_len, reachable);
-        const unsigned number = seedtool_word_number(digits, digits_len);
-        for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
-            const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
-            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
-                : key == SEEDTOOL_KEY_ACCEPT           ? number != 0
-                                                       : reachable[key - '0'];
-        }
-        /* Once the typed digits are themselves a complete valid number and
-         * cannot be extended any further, every digit key goes dark at once
-         * and the cursor has to land somewhere. nearest_enabled's ring
-         * distance to Accept vs. Backspace from here depends on exactly
-         * which key the reader was last on - circumstantial, and it lands on
-         * Backspace as often as not. Accept is the deliberate target
-         * whenever it's actually reachable; only fall back to the generic
-         * search when it isn't (still mid-prefix, no complete number yet). */
-        selected = !enabled[selected] && number ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
-        bool picked = false;
-        while (!picked) {
-            seedtool_display_keyboard(
-                title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, position, total);
-            switch (wait_key()) {
-            case KEY_SELECT:
-                picked = true;
-                break;
-            case KEY_PREV:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
-                break;
-            case KEY_NEXT:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
-                break;
-            case KEY_REDRAW:
-                break;
-            default:
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
+        if (rebuild) {
+            bool reachable[SEEDTOOL_DIGITS] = { false };
+            /* Narrowed by `allowed`, exactly as the letter keyboard is. The
+             * ring is built per box, so a digit that cannot begin an allowed
+             * word never appears to be scrolled to in the first place. */
+            (void)seedtool_next_digits_in(allowed, digits, at, reachable);
+            ring_len = 0;
+            for (size_t d = 0; d < SEEDTOOL_DIGITS; ++d) {
+                if (reachable[d]) {
+                    ring[ring_len++] = (char)('0' + d);
+                }
             }
+            /* OK only once the digits already name a word - so it is absent on
+             * an empty field and on a prefix like `20`, which is a real number
+             * but is offered here as a step towards 200x rather than as 20
+             * itself... which it also is. Both readings are live, which is
+             * exactly why the reader has to say which one they meant. */
+            if (seedtool_word_number_in(allowed, digits, at)) {
+                ring[ring_len++] = SEEDTOOL_KEY_ACCEPT;
+            }
+            ring[ring_len++] = SEEDTOOL_KEY_BACKSPACE;
+            on = 0;
+            rebuild = false;
         }
 
-        const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
-        if (pressed == SEEDTOOL_KEY_ACCEPT) {
-            const char* const word = seedtool_word(number - 1);
-            char counted[32];
-            (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
-            /* The number that was typed is the thing being checked here, so
-             * the bar names it rather than saying "Continue": what the reader
-             * is agreeing to is that this word is the one they meant. */
-            const int taken = nav_screen(title, word, counted, "Use this word", true, false, NULL);
-            seedtool_zero(counted, sizeof(counted));
-            if (taken == NAV_CONFIRM) {
-                const int result = !word || strlen(word) + 1 > output_len ? -1 : 1;
-                if (result == 1) {
-                    strcpy(output, word);
-                }
-                seedtool_zero(digits, sizeof(digits));
-                return result;
-            }
-            if (taken == NAV_TIMEOUT) {
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
-            }
-            /* Went back: the number is cleared rather than left half-entered, so
-             * what is on screen is always the whole of what was typed. */
+        memset(shown, 0, sizeof(shown));
+        memcpy(shown, digits, at);
+        shown[at] = ring[on];
+        for (size_t i = at + 1; i < SEEDTOOL_MAX_WORD_DIGITS; ++i) {
+            shown[i] = ' ';
+        }
+        seedtool_display_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
+
+        seedtool_key_t key = wait_key();
+        if (key == KEY_REDRAW) {
+            continue;
+        }
+        if (key == KEY_TIMEOUT) {
             seedtool_zero(digits, sizeof(digits));
-            digits_len = 0;
-        } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
-            if (!digits_len) {
+            seedtool_zero(shown, sizeof(shown));
+            return -1;
+        }
+        if (key == KEY_PREV) {
+            on = on ? on - 1 : ring_len - 1;
+            continue;
+        }
+        if (key == KEY_NEXT) {
+            on = on + 1 < ring_len ? on + 1 : 0;
+            continue;
+        }
+
+        /* KEY_SELECT: commit whatever the box is showing. */
+        if (ring[on] == SEEDTOOL_KEY_BACKSPACE) {
+            if (!at) {
                 seedtool_zero(digits, sizeof(digits));
+                seedtool_zero(shown, sizeof(shown));
                 return 0;
             }
-            digits[--digits_len] = '\0';
-        } else if (digits_len < SEEDTOOL_MAX_WORD_DIGITS) {
-            digits[digits_len++] = pressed;
-            digits[digits_len] = '\0';
+            digits[--at] = '\0';
+            rebuild = true;
+            continue;
         }
+        bool typed_last = false;
+        if (ring[on] != SEEDTOOL_KEY_ACCEPT) {
+            digits[at++] = ring[on];
+            digits[at] = '\0';
+            rebuild = true;
+            /* A fourth digit has nowhere left to go, so it confirms itself
+             * rather than asking for an OK the field has no box to show. */
+            if (at < SEEDTOOL_MAX_WORD_DIGITS) {
+                continue;
+            }
+            typed_last = true;
+        }
+
+        /* Narrowed here too, not only where the ring is built. The ring should
+         * already have made a disallowed number untypeable - but this is the
+         * gate a number passes through to become a word, and a gate that
+         * inherits its guarantee from the screen upstream is one bug away from
+         * accepting what that screen was supposed to have refused. A number
+         * outside the set reads as no word at all, which sends the reader back
+         * to the field rather than into a confirmation they should never see. */
+        const unsigned number = seedtool_word_number_in(allowed, digits, at);
+        const char* const word = number ? seedtool_word(number - 1) : NULL;
+        char counted[32];
+        (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
+        /* The number just typed is what is being checked, so the bar names
+         * it rather than saying "Continue". */
+        const int answer = word ? nav_screen(title, word, counted, "Use this word", true, false, NULL) : NAV_BACK;
+        seedtool_zero(counted, sizeof(counted));
+        if (answer == NAV_CONFIRM) {
+            const int result = strlen(word) + 1 > output_len ? -1 : 1;
+            if (result == 1) {
+                strcpy(output, word);
+            }
+            seedtool_zero(digits, sizeof(digits));
+            seedtool_zero(shown, sizeof(shown));
+            return result;
+        }
+        if (answer == NAV_TIMEOUT) {
+            seedtool_zero(digits, sizeof(digits));
+            seedtool_zero(shown, sizeof(shown));
+            return -1;
+        }
+        /* Went back from the confirmation. A number that confirmed itself on a
+         * fourth digit reopens that digit, so a wrong last one costs a press
+         * rather than the whole number; one the reader ended with OK returns to
+         * the field exactly as it was, with the OK still on the ring. */
+        if (typed_last) {
+            digits[--at] = '\0';
+        }
+        rebuild = true;
     }
 }
 
@@ -1284,6 +1395,31 @@ static int enter_address_index(uint32_t* value)
     }
 }
 
+/* words[0..count) joined with single spaces, the same layout seedtool_generate's
+ * transcript-to-mnemonic conversion and every published BIP39 vector use.
+ * Shared by enter_mnemonic_words (to ask what the last word could be),
+ * enter_mnemonic (once, after entry) and review_and_confirm (again after every
+ * edit), so every one of them is working from the exact string
+ * seedtool_validate_mnemonic will see. */
+static bool join_words(
+    char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
+{
+    size_t used = 0;
+    mnemonic[0] = '\0';
+    for (size_t i = 0; i < count; ++i) {
+        const size_t n = strlen(words[i]);
+        if (used + n + (i ? 1 : 0) + 1 > mnemonic_len) {
+            return false;
+        }
+        if (i) {
+            mnemonic[used++] = ' ';
+        }
+        memcpy(mnemonic + used, words[i], n + 1);
+        used += n;
+    }
+    return true;
+}
+
 /* Returns 1 when a whole mnemonic was entered, 0 when the user backed out of the
  * first word or the method menu, -1 on timeout or overflow. Fills `words` (a
  * caller-owned array so restore_mnemonic below can keep reviewing them after
@@ -1305,9 +1441,35 @@ static int enter_mnemonic_words(
     }
     int outcome = 1;
     size_t index = 0;
+    seedtool_wordset_t allowed;
     while (index < count) {
-        const int result = method ? enter_word_number(index + 1, count, words[index], sizeof(words[index]))
-                                  : enter_word(index + 1, count, words[index], sizeof(words[index]));
+        /* The last word of a whole mnemonic carries the checksum, so most of
+         * the wordlist cannot end it: 128 of 2048 can for 12 words, 8 for 24.
+         * Narrowing to those here is the same verdict the review screen
+         * already gives afterwards, moved to where it prevents the mistake
+         * instead of reporting it - a reader restoring from paper finds the
+         * wrong last word unreachable rather than typeable and then refused.
+         *
+         * Only for a mnemonic that is meant to be whole. complete_checksum
+         * enters 11 or 23 words precisely because their last word has no
+         * checksum in it yet, and narrowing there would be narrowing to a
+         * checksum the mnemonic is not supposed to satisfy. */
+        const bool last_of_whole = index + 1 == count && (count == 12 || count == 24);
+        const seedtool_wordset_t* filter = NULL;
+        if (last_of_whole) {
+            char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+            if (!join_words(words, count - 1, prefix, sizeof(prefix))
+                || seedtool_final_word_candidates(prefix, &allowed) != SEEDTOOL_OK) {
+                seedtool_zero(prefix, sizeof(prefix));
+                outcome = -1;
+                break;
+            }
+            seedtool_zero(prefix, sizeof(prefix));
+            filter = &allowed;
+        }
+        const int result = method
+            ? enter_word_number(index + 1, count, filter, words[index], sizeof(words[index]))
+            : enter_word(index + 1, count, filter, words[index], sizeof(words[index]));
         if (result < 0) {
             outcome = -1;
             break;
@@ -1324,32 +1486,13 @@ static int enter_mnemonic_words(
         }
         ++index;
     }
+    /* The set is 128 of 2048 words picked out by the eleven before them, so it
+     * says something about those eleven; wiped like everything else derived
+     * from them. */
+    seedtool_zero(&allowed, sizeof(allowed));
     return outcome;
 }
 
-/* words[0..count) joined with single spaces, the same layout seedtool_generate's
- * transcript-to-mnemonic conversion and every published BIP39 vector use.
- * Called once after entry and again by review_and_confirm after every edit,
- * so a mid-review fix is checked against the exact string
- * seedtool_validate_mnemonic will see. */
-static bool join_words(
-    char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
-{
-    size_t used = 0;
-    mnemonic[0] = '\0';
-    for (size_t i = 0; i < count; ++i) {
-        const size_t n = strlen(words[i]);
-        if (used + n + (i ? 1 : 0) + 1 > mnemonic_len) {
-            return false;
-        }
-        if (i) {
-            mnemonic[used++] = ' ';
-        }
-        memcpy(mnemonic + used, words[i], n + 1);
-        used += n;
-    }
-    return true;
-}
 
 static char review_labels[24][32];
 static const char* review_items[24];
@@ -1385,9 +1528,11 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
      * address_labels: these rows are the mnemonic in plain text, one word
      * each, and they live in .bss rather than on a stack frame that the next
      * screen would overwrite anyway. Leaving them behind kept a restored seed
-     * readable in RAM for the rest of the session - past "Done / erase" and
-     * past the session-timeout screen, which erases nothing here. Clearing on
-     * entry as well as exit keeps a 12-word restore from leaving rows 12..23
+     * readable in RAM for the rest of the session. Both ways out of the wallet
+     * now reboot, and C startup zeroes .bss, so that particular leak would no
+     * longer outlive the session - but this wipe is what makes the rows gone
+     * while the session is still running, which the reboot cannot do. Clearing
+     * on entry as well as exit keeps a 12-word restore from leaving rows 12..23
      * of a previous 24-word one on show. */
     seedtool_zero(review_labels, sizeof(review_labels));
     for (;;) {
@@ -1426,8 +1571,30 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
             goto done;
         }
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
-                                      : enter_word(selected + 1, count, word, sizeof(word));
+        /* Re-entering the last word narrows to what can actually end these
+         * words, exactly as first entry does. Only the last one: every earlier
+         * word is free, and it is usually an earlier word that is wrong - the
+         * checksum fails on whichever word was mistyped, not necessarily on
+         * the one carrying it.
+         *
+         * Built from the current words each time, so fixing word 3 and then
+         * word 12 offers the candidates for the corrected prefix rather than
+         * the one entry started with. If it cannot be built the word is simply
+         * entered unnarrowed: this screen exists to fix a mnemonic that is
+         * already wrong, so it must never be the thing that blocks the fix. */
+        seedtool_wordset_t allowed;
+        const seedtool_wordset_t* filter = NULL;
+        if ((size_t)selected + 1 == count) {
+            char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+            if (join_words(words, count - 1, prefix, sizeof(prefix))
+                && seedtool_final_word_candidates(prefix, &allowed) == SEEDTOOL_OK) {
+                filter = &allowed;
+            }
+            seedtool_zero(prefix, sizeof(prefix));
+        }
+        const int result = by_number ? enter_word_number(selected + 1, count, filter, word, sizeof(word))
+                                      : enter_word(selected + 1, count, filter, word, sizeof(word));
+        seedtool_zero(&allowed, sizeof(allowed));
         if (result == 1) {
             strcpy(words[selected], word);
         } else if (result < 0) {
@@ -1479,8 +1646,11 @@ static int review_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t c
             goto done;
         }
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
-                                     : enter_word(selected + 1, count, word, sizeof(word));
+        /* NULL: every word here is a prefix word, so none of them is the one
+         * the checksum narrows - that is the word the flips are about to
+         * name, and it is not in this list. */
+        const int result = by_number ? enter_word_number(selected + 1, count, NULL, word, sizeof(word))
+                                     : enter_word(selected + 1, count, NULL, word, sizeof(word));
         if (result == 1) {
             strcpy(words[selected], word);
         } else if (result < 0) {
@@ -1607,35 +1777,49 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
     }
 }
 
-/* 1 once a passphrase decision has been made, 0 when the reader steps back
- * off the prompt, -1 on timeout. Three ways out rather than a bool: this is
- * the first screen of the wallet, so backing off it has to mean "the screen
- * before the wallet" and not the same thing as a failure - which is what a
- * bool made it, and why one press here used to end the whole session's work.
+/* The optional passphrase, set and changed from Derivation rather than asked
+ * for on the way in. A session starts without one and says so on Derivation's
+ * own row, so the reader who does not use a passphrase never crosses a screen
+ * about it, and the reader who does sets it in the same place they set the
+ * account and the type - all three being inputs to the same derivation.
  *
- * A mismatch returns to the prompt rather than out of it, which is what the
- * notice's own "Try again" says will happen. */
-static int get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
+ * Returns true only when `passphrase` actually changed, so the caller knows to
+ * re-derive the fingerprint it has cached. Back, a timeout and a mismatch all
+ * leave the acting passphrase exactly as it was: dropping a session silently
+ * to no passphrase would change every derived key without saying so, which is
+ * the one outcome this screen must never produce by accident. */
+static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
-    for (;;) {
-        const char* options[] = { "No passphrase", "Enter passphrase" };
-        const int selected = choose_menu("Optional passphrase", options, 2);
-        if (selected != 1) {
-            passphrase[0] = '\0';
-            return selected == 0 ? 1 : selected == 2 ? 0 : -1;
-        }
-        char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
-        const bool ok = enter_passphrase_once(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1)
-            && nav_acknowledge(
-                "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
-            && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(passphrase, confirmation) == 0;
-        seedtool_zero(confirmation, sizeof(confirmation));
-        if (ok) {
-            return 1;
+    const char* options[] = { "No passphrase", "Enter passphrase" };
+    const int selected = choose_menu("Passphrase", options, 2);
+    if (selected < 0 || selected == 2) {
+        return false;
+    }
+    if (selected == 0) {
+        /* Already none: nothing changed, so nothing re-derives. */
+        if (!passphrase[0]) {
+            return false;
         }
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
-        notice("Passphrase mismatch", "Nothing was derived", "Try again", "Try again");
+        return true;
     }
+    char attempt[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    const bool ok = enter_passphrase_once(attempt, sizeof(attempt))
+        && nav_acknowledge(
+               "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
+        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(attempt, confirmation) == 0;
+    if (ok) {
+        /* The old value goes before the new one lands, not after: this buffer
+         * holds a live session secret and must never briefly hold a mix. */
+        seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
+        memcpy(passphrase, attempt, sizeof(attempt));
+    } else {
+        notice("Passphrase mismatch", "Passphrase unchanged", "Try again", "Try again");
+    }
+    seedtool_zero(attempt, sizeof(attempt));
+    seedtool_zero(confirmation, sizeof(confirmation));
+    return ok;
 }
 
 /* The account key's own QR, warned about up front since a photo of it reveals
@@ -1728,7 +1912,7 @@ static void show_address_qr(const char* title, const char* address)
 /* Addresses and their list labels are derived once per visit to the Addresses
  * screen and cached here for the whole visit, not re-derived every time the
  * reader backs out of one address's QR back to the list - only leaving the
- * screen for good retires the cache (see its callers in show_type_menu).
+ * screen for good retires the cache (see the end of show_addresses).
  * Static: this does not belong on the stack, and the list widget needs every
  * shown row addressable up front, there is no windowed variant of it.
  *
@@ -1752,14 +1936,14 @@ static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Bac
  * only the derivation a type or account change costs today. Returns false
  * (having already told the reader) on a derivation error. */
 static bool derive_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    const uint32_t account, const seedtool_chain_t chain)
+    const uint32_t account, const seedtool_chain_t chain, const char* const prefix)
 {
     /* Cleared on entry as well as on the way out, exactly as review_labels is
      * and for the same reason: these are .bss, so a failed derivation must not
      * leave the previous account's rows sitting here to be wiped by a caller
      * that this time never gets far enough to do it. */
     seedtool_zero(address_labels, sizeof(address_labels));
-    screen_text("Addresses", "Deriving addresses...", NULL, NULL);
+    screen_text(prefix, "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
@@ -1791,10 +1975,11 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
  * top of the list. Go to index only moves `cursor` when it lands inside the
  * shown rows - an index past ADDRESS_SHOWN_ROWS has no row of its own to
  * leave the cursor on. */
-static int browse_addresses(char* address_out, const size_t address_out_len, size_t* cursor)
+static int browse_addresses(
+    const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
 {
     for (;;) {
-        const int selected = choose_menu_at("Addresses", address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
+        const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
             const int result = enter_address_index(&index);
@@ -1835,87 +2020,179 @@ static int browse_addresses(char* address_out, const size_t address_out_len, siz
     }
 }
 
-/* One address type's worth of the wallet viewer: its account key, in whichever
- * format was asked for, and its addresses. SLIP-132 defines no taproot version
- * prefix, so BIP86 never offers a format choice, only BIP84 does. */
-static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
+/* Every script type the viewer derives, in the order they are offered. Adding
+ * one is a row here and nothing else: the Derivation row, the Wallet row, the
+ * type menu's own title and the chooser all read their name from this table
+ * rather than each carrying its own conditional to be found and updated. */
+static const struct {
+    seedtool_address_type_t type;
+    const char* name;
+} ADDRESS_TYPES[] = {
+    { SEEDTOOL_BIP84, "Native SegWit" },
+    { SEEDTOOL_BIP86, "Taproot" },
+};
+#define ADDRESS_TYPE_COUNT (sizeof(ADDRESS_TYPES) / sizeof(ADDRESS_TYPES[0]))
+
+static const char* address_type_name(const seedtool_address_type_t type)
+{
+    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
+        if (ADDRESS_TYPES[i].type == type) {
+            return ADDRESS_TYPES[i].name;
+        }
+    }
+    return "";
+}
+
+/* Which script type to derive: a list naming every type on offer, opened on
+ * the one in force. Not a value cycled in place by pressing the row - two
+ * types cycle tolerably and more do not, and a cycle never shows what it is
+ * cycling through, so a reader would have to press past their choice to find
+ * out what else existed. Returns false, leaving `*type` alone, on Back or a
+ * timeout. */
+static bool choose_address_type(seedtool_address_type_t* type)
+{
+    char labels[ADDRESS_TYPE_COUNT][32];
+    const char* items[ADDRESS_TYPE_COUNT + 1];
+    size_t current = 0;
+    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
+        /* The enumerator is the BIP number itself, so the label states it
+         * rather than the table repeating it as text. */
+        (void)snprintf(
+            labels[i], sizeof(labels[i]), "%s (BIP%u)", ADDRESS_TYPES[i].name, (unsigned)ADDRESS_TYPES[i].type);
+        items[i] = labels[i];
+        if (ADDRESS_TYPES[i].type == *type) {
+            current = i;
+        }
+    }
+    items[ADDRESS_TYPE_COUNT] = "Back";
+    const int selected = choose_at("Type", items, ADDRESS_TYPE_COUNT + 1, true, current);
+    if (selected < 0 || (size_t)selected >= ADDRESS_TYPE_COUNT) {
+        return false;
+    }
+    *type = ADDRESS_TYPES[selected].type;
+    return true;
+}
+
+/* The watch-only account key for the type and account currently set, in the
+ * format asked for. */
+static void show_account_key(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
+{
+    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    char origin[32];
+    (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
+    if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+        if (page_text(origin, xpub)) {
+            export_qr(mnemonic, passphrase, fphex, type, account, format);
+        }
+    } else {
+        notice("Error", "Could not derive account key", NULL, "OK");
+    }
+    seedtool_zero(xpub, sizeof(xpub));
+}
+
+/* Everything that hands out the account's extended public key, gathered behind
+ * one row. xpub, zpub and the descriptor are the same 78 bytes three ways -
+ * the plain BIP32 serialisation, the same key with SLIP-132's version bytes,
+ * and the same key again with its script type and derivation stated inline for
+ * a wallet to import - so they belong together rather than as separate rows
+ * that look unrelated while carrying identical risk. Each one reveals every
+ * address of the account, and each says so before it is shown.
+ *
+ * SLIP-132 defines no taproot version prefix, so zpub is offered for BIP84
+ * only; under BIP86 the row is absent rather than present and refusing. */
+static void show_extended_keys(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
-    const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+    size_t cursor = 0;
     for (;;) {
-        const char* items[] = { "Account key", "Descriptor", "Addresses" };
-        const int selected = choose_menu(title, items, 3);
-        if (selected < 0 || selected == 3) {
+        const char* items[4];
+        size_t count = 0;
+        items[count++] = "xpub";
+        if (type == SEEDTOOL_BIP84) {
+            items[count++] = "zpub";
+        }
+        items[count++] = "Descriptor";
+        items[count++] = "Back";
+        const int selected = choose_kept("Extended public key", items, count, true, &cursor);
+        if (selected < 0 || (size_t)selected == count - 1) {
             return;
         }
         if (selected == 0) {
-            seedtool_key_format_t format = SEEDTOOL_XPUB;
-            if (type == SEEDTOOL_BIP84) {
-                const char* const formats[] = { "xpub", "zpub" };
-                const int chosen = choose_menu("Account key format", formats, 2);
-                if (chosen < 0 || chosen == 2) {
-                    continue;
-                }
-                format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
-            }
-            char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
-            char origin[32];
-            (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
-            if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub))
-                == SEEDTOOL_OK) {
-                if (page_text(origin, xpub)) {
-                    export_qr(mnemonic, passphrase, fphex, type, account, format);
-                }
-            } else {
-                notice("Error", "Could not derive account key", NULL, "OK");
-            }
-            seedtool_zero(xpub, sizeof(xpub));
-        } else if (selected == 1) {
+            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_XPUB);
+        } else if (type == SEEDTOOL_BIP84 && selected == 1) {
+            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_ZPUB);
+        } else {
             show_descriptor(mnemonic, passphrase, fphex, type, account);
         }
-        if (selected != 2) {
-            continue;
-        }
-        /* Which branch, asked the same way and in the same shape the account
-         * key's xpub/zpub choice above is asked: the list itself is identical
-         * either way, so the question belongs before it rather than as a mode
-         * to toggle inside it. */
-        const char* const branches[] = { "Receive", "Change" };
-        const int branch = choose_menu("Addresses", branches, 2);
-        if (branch < 0 || branch == 2) {
-            continue;
-        }
-        const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
-        if (derive_addresses(mnemonic, passphrase, type, account, chain)) {
-            /* Loops back to the address list itself after each address's QR,
-             * rather than out to this menu: picking another address is the
-             * common next step, not re-choosing "Addresses" again - and,
-             * since derive_addresses ran once above rather than on every pass
-             * through this loop, coming straight back from one address's QR
-             * no longer costs the whole derivation again. Only backing out of
-             * the list (or a timeout) reaches the outer loop. `cursor` lives
-             * outside this loop so the list reopens wherever it was left,
-             * rather than back at address 0 every time. */
-            size_t cursor = 0;
-            for (;;) {
-                char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-                const int index = browse_addresses(address, sizeof(address), &cursor);
-                if (index < 0) {
-                    seedtool_zero(address, sizeof(address));
-                    break;
-                }
-                char path[32];
-                (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)type, (unsigned)account,
-                    (unsigned)chain, (unsigned)index);
-                if (page_text(path, address)) {
-                    show_address_qr(path, address);
-                }
-                seedtool_zero(address, sizeof(address));
-            }
-            seedtool_zero(addresses, sizeof(addresses));
-            seedtool_zero(address_labels, sizeof(address_labels));
-        }
     }
+}
+
+/* The address list for the type and account currently set, on whichever
+ * branch is asked for first. */
+static void show_addresses(
+    const char* mnemonic, const char* passphrase, const seedtool_address_type_t type, const uint32_t account)
+{
+    /* Which branch, asked the same way and in the same shape the account
+     * key's xpub/zpub choice is asked: the list itself is identical either
+     * way, so the question belongs before it rather than as a mode to toggle
+     * inside it. */
+    const char* const branches[] = { "Receive", "Change", "Back" };
+    const int branch = choose("Addresses", branches, 3, true);
+    if (branch < 0 || branch == 2) {
+        return;
+    }
+    const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
+    /* The path every row on this screen shares, and the screen's title. A list
+     * of a hundred addresses is the one place the reader stays long enough to
+     * forget what they are looking at, and its rows carry only an index and an
+     * address - so the type, the account and the branch live in the title
+     * rather than being remembered from the menu that opened it. Each address's
+     * own path is this same string plus its index, built from it rather than
+     * formatted a second time, so the title cannot drift from the rows. */
+    char prefix[24];
+    (void)snprintf(
+        prefix, sizeof(prefix), "m/%u'/0'/%u'/%u", (unsigned)type, (unsigned)account, (unsigned)chain);
+    if (!derive_addresses(mnemonic, passphrase, type, account, chain, prefix)) {
+        return;
+    }
+    /* Loops back to the address list itself after each address's QR, rather
+     * than out to the menu that opened it: picking another address is the
+     * common next step, not re-choosing "Addresses" again - and, since
+     * derive_addresses ran once above rather than on every pass through this
+     * loop, coming straight back from one address's QR no longer costs the
+     * whole derivation again. Only backing out of the list (or a timeout)
+     * leaves. `cursor` lives outside this loop so the list reopens wherever it
+     * was left, rather than back at address 0 every time. */
+    size_t cursor = 0;
+    for (;;) {
+        char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
+        const int index = browse_addresses(prefix, address, sizeof(address), &cursor);
+        if (index < 0) {
+            seedtool_zero(address, sizeof(address));
+            break;
+        }
+        /* The prefix, a separator and an index. Sized for a ten-digit index
+         * rather than the two SEEDTOOL_MAX_ADDRESS_INDEX actually allows:
+         * browse_addresses bounds the value, but that bound does not survive
+         * into this frame for the compiler's format-truncation analysis to
+         * see, and a buffer wide enough for what it can prove beats silencing
+         * what it cannot - the same trade the %.*s precisions in this file
+         * make. */
+        char path[sizeof(prefix) + 12];
+        (void)snprintf(path, sizeof(path), "%s/%u", prefix, (unsigned)index);
+        if (page_text(path, address)) {
+            show_address_qr(path, address);
+        }
+        seedtool_zero(address, sizeof(address));
+    }
+    seedtool_zero(addresses, sizeof(addresses));
+    seedtool_zero(address_labels, sizeof(address_labels));
+    /* A derivation path, not a secret - it is on screen the whole time and in
+     * the README. Wiped anyway so the wipe check stays mechanical: `prefix`
+     * holds a mnemonic elsewhere in this file, and a rule with one documented
+     * exception is a rule that grows a second one. */
+    seedtool_zero(prefix, sizeof(prefix));
 }
 
 /* One word per screen, stepped the same way show_qr steps between values:
@@ -2104,9 +2381,10 @@ done:
 
 static void show_backup_menu(const char* mnemonic)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR" };
-        const int selected = choose_menu("Backup", items, 4);
+        const int selected = choose_menu_at("Backup", items, 4, &cursor);
         if (selected < 0 || selected == 4) {
             return;
         }
@@ -2122,61 +2400,153 @@ static void show_backup_menu(const char* mnemonic)
     }
 }
 
-/* Returns false only when the reader steps back off the passphrase prompt,
- * the first screen here - so a caller can show whatever came before the
- * wallet again instead of treating that press as the end of the visit. */
-static bool show_wallet_data(const char* mnemonic)
+/* The three things that decide what every other wallet screen derives: which
+ * account, which script type, and which passphrase. They used to be scattered
+ * - account a row on the Wallet menu, type a fork into one of two sub-menus
+ * each owning its own copy of Account key/Descriptor/Addresses, and passphrase
+ * a gate asked once before the Wallet menu existed and unchangeable after -
+ * so setting all three meant crossing screens that had nothing else in common.
+ * Gathered here they read as what they are, and as what names the screen: the
+ * inputs to the derivation, editable in any order, none of them a place you
+ * pass *through*. The account and the type choose the path; the passphrase
+ * goes into the PBKDF2 above it, so it decides the seed the path is walked
+ * from. Different levels, one question - where the keys come from.
+ *
+ * `fp`/`fphex` come in by pointer because the passphrase is one of the two
+ * inputs to the master fingerprint: change it and the fingerprint titling the
+ * Wallet menu is stale, so it is re-derived here rather than left to disagree
+ * with what the device is now deriving from.
+ *
+ * Follows show_settings_menu's shape exactly - live-formatted labels rebuilt
+ * each pass, a row either toggling in place or opening a dedicated editor and
+ * returning. */
+static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
+    char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], uint8_t fp[4], char fphex[9])
+{
+    size_t cursor = 0;
+    for (;;) {
+        char account_item[16];
+        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)*account);
+        char type_item[32];
+        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(*type));
+        /* Says whether one is set, never anything about what it is. */
+        const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
+        /* Ordered by how deep each one cuts. The passphrase decides the seed
+         * itself, so changing it changes every key the device can produce and
+         * the fingerprint with them; the type picks a path from that seed; the
+         * account picks a branch of that path. Widest consequence first, and
+         * the fingerprint in the title above only ever moves for the first. */
+        const char* items[] = { passphrase_item, type_item, account_item, "Back" };
+        const int selected = choose_kept("Derivation", items, 4, true, &cursor);
+        if (selected < 0 || selected == 3) {
+            return;
+        }
+        if (selected == 0) {
+            if (edit_session_passphrase(passphrase)) {
+                if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
+                    notice("Error", "Derivation failed", NULL, "OK");
+                } else {
+                    hexstr(fp, 4, fphex);
+                }
+            }
+        } else if (selected == 1) {
+            (void)choose_address_type(type);
+        } else {
+            uint32_t chosen = *account;
+            if (enter_account(&chosen) == 1) {
+                *account = chosen;
+            }
+        }
+    }
+}
+
+static void show_wallet_data(const char* mnemonic)
 {
     uint8_t fp[4] = { 0 };
     char fphex[9] = { 0 };
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    bool stepped_back = false;
 
-    const int chosen = get_session_passphrase(passphrase);
-    if (chosen != 1) {
-        stepped_back = chosen == 0;
-        goto done;
-    }
+    /* Starts with no passphrase and derives immediately, rather than asking
+     * for one before anything can be seen. The passphrase is a parameter of
+     * the derivation like the account and the type, and it is set in the same
+     * place they are; a gate here made it the one parameter that had to be
+     * decided before the wallet existed and could not be revisited after.
+     * Which of the two is in force is stated rather than merely defaulted to:
+     * in full on Derivation's own row, and by the fingerprint titling the menu
+     * below, which is a function of it and moves whenever it changes. */
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
         notice("Error", "Derivation failed", NULL, "OK");
         goto done;
     }
     hexstr(fp, sizeof(fp), fphex);
 
-    /* m/type'/0'/account': lives for the whole wallet-viewing session, not
-     * one visit to Native SegWit or Taproot, so checking account 2 under
-     * both means setting it once - not resetting to 0 on the way from one
-     * type to the other. Neither Master fingerprint (always the root's, account-
-     * independent) nor Backup (about the mnemonic itself, not a derivation)
-     * reads it. */
+    /* m/type'/0'/account' and the passphrase above it: all three live for the
+     * whole wallet-viewing session rather than one visit to a screen, so
+     * checking account 2 under both types means setting it once - not
+     * resetting on the way from one to the other. They are edited together in
+     * Derivation, which is what they have in common: each is an input to what
+     * the other screens derive. Backup reads none of them, being about the
+     * mnemonic itself rather than anything derived from it, and neither does
+     * the fingerprint in the title, which is always the root's. */
     uint32_t account = 0;
+    seedtool_address_type_t type = SEEDTOOL_BIP84;
+    /* The fingerprint names this menu rather than sitting on a row of it: it
+     * is an identity, not an action, and a row that only displayed it was a
+     * screen entered to read one value and left again. In the title it is read
+     * without being asked for, which is what makes it the check it is for -
+     * it is a function of the passphrase in force and moves the moment that
+     * does, so a reader who knows their wallet's fingerprint can see at a
+     * glance whether the device is deriving that wallet. Whether a passphrase
+     * is set at all is said in full on Derivation's own row. */
+    char wallet_title[sizeof("Wallet @") + 8];
+    _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
+        "the wallet title must hold its label and all eight fingerprint hex digits");
+    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+    size_t cursor = 0;
     for (;;) {
-        char account_item[16];
-        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
-        const char* menu[] = { "Master fingerprint", account_item, "Native SegWit (BIP84)", "Taproot (BIP86)",
-            "Backup", "Done / erase" };
-        const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
-        if (selected < 0 || selected == 5) {
-            break;
+        const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
+        const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
+        /* Both ways out of a wallet session reboot: the row, and the timeout
+         * that means the reader walked away from a device with a seed on it.
+         * Unwinding instead would leave every buffer between here and the main
+         * menu holding what it last held, wiped only where someone remembered
+         * to wipe it. A restart re-runs C startup, which zeroes .bss - the
+         * address cache and the review rows live there - and leaves nothing on
+         * a stack that is about to be reused from the top. The explicit wipes
+         * below still run first: the reboot is the belt, not a reason to drop
+         * the braces.
+         *
+         * The cost is the display settings, which are RAM-only by design and
+         * so go back to their defaults. That is the trade this makes
+         * deliberately: brightness is a preference, and the seed is not. */
+        if (selected < 0 || selected == 4) {
+            seedtool_zero(fp, sizeof(fp));
+            seedtool_zero(fphex, sizeof(fphex));
+            seedtool_zero(passphrase, sizeof(passphrase));
+            seedtool_platform_restart();
         }
-        if (selected == 0) {
-            notice("Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none", "OK");
-        } else if (selected == 1) {
-            uint32_t chosen_account = account;
-            if (enter_account(&chosen_account) == 1) {
-                account = chosen_account;
-            }
-        } else if (selected == 4) {
+        switch (selected) {
+        case 0:
             show_backup_menu(mnemonic);
-        } else {
-            show_type_menu(mnemonic, passphrase, fphex, selected == 2 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86, account);
+            break;
+        case 1:
+            show_extended_keys(mnemonic, passphrase, fphex, type, account);
+            break;
+        case 2:
+            show_derivation_menu(mnemonic, &account, &type, passphrase, fp, fphex);
+            /* The passphrase may have changed under it, and with it the
+             * fingerprint this title states. */
+            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+            break;
+        default:
+            show_addresses(mnemonic, passphrase, type, account);
+            break;
         }
     }
 done:
     seedtool_zero(fp, sizeof(fp));
     seedtool_zero(fphex, sizeof(fphex));
     seedtool_zero(passphrase, sizeof(passphrase));
-    return !stepped_back;
 }
 
 /* A backup is only as good as its transcription: quizzes one word from every
@@ -2227,7 +2597,9 @@ static int confirm_backup(const char* mnemonic, const size_t count)
             const size_t index = n * 3 + 1;
             const char* const expected = seedtool_word(numbers[index] - 1);
             char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-            const int result = enter_word(index + 1, count, typed, sizeof(typed));
+            /* Unnarrowed on purpose: the quiz asks what the reader wrote down,
+             * and the words it asks for are never the last one anyway. */
+            const int result = enter_word(index + 1, count, NULL, typed, sizeof(typed));
             if (result < 0) {
                 seedtool_zero(typed, sizeof(typed));
                 seedtool_zero(numbers, sizeof(numbers));
@@ -2262,52 +2634,43 @@ static int confirm_backup(const char* mnemonic, const size_t count)
     }
 }
 
-/* Returns false only when the reader steps back off the very first screen -
- * the caller still holds the entropy that produced this, and throwing it away
- * to start the run over is not what one press should mean. */
-static bool show_generated(seedtool_generated_t* generated)
+/* The words, the reminder, the quiz, and the wallet the quiz unlocks. Returns
+ * false only when the reader steps back off the first of those, so a caller
+ * still holding what produced the mnemonic can show it again rather than
+ * treating one press as the end of the visit.
+ *
+ * Stages, not a chain of && and a while: back has to step back one screen,
+ * and a short-circuit chain has exactly one way out of it - the whole
+ * function. Each back here is the stage before it, and only the first leaves. */
+static bool review_backup_and_show_wallet(const char* mnemonic, const size_t words)
 {
-    char hash[65];
-    hexstr(generated->hash, sizeof(generated->hash), hash);
-    /* Stages, not a chain of && and a while: back has to step back one
-     * screen, and a short-circuit chain has exactly one way out of it - the
-     * whole function. Leaving the SHA256 used to land wherever the transcript
-     * had been entered from, skipping the transcript itself; the word list
-     * and the backup intro did the same. Now every stage's back is the stage
-     * before it, and only the first one leaves. */
-    enum { STAGE_TRANSCRIPT, STAGE_HASH, STAGE_WORDS, STAGE_INTRO, STAGE_QUIZ, STAGE_DONE };
-    int stage = STAGE_TRANSCRIPT;
+    enum { STAGE_WORDS, STAGE_INTRO, STAGE_QUIZ, STAGE_DONE };
+    int stage = STAGE_WORDS;
+    bool stepped_back = false;
     while (stage != STAGE_DONE) {
         switch (stage) {
-        case STAGE_TRANSCRIPT:
-            if (!page_text("Canonical transcript", generated->transcript)) {
-                seedtool_zero(hash, sizeof(hash));
-                return false;
-            }
-            stage = STAGE_HASH;
-            break;
-        case STAGE_HASH:
-            stage = page_text("SHA256", hash) ? STAGE_WORDS : STAGE_TRANSCRIPT;
-            break;
         case STAGE_WORDS:
-            stage = show_numbered_list(generated->mnemonic, true) ? STAGE_INTRO : STAGE_HASH;
+            if (!show_numbered_list(mnemonic, true)) {
+                stepped_back = true;
+                stage = STAGE_DONE;
+                break;
+            }
+            stage = STAGE_INTRO;
             break;
         case STAGE_INTRO: {
             /* The word list is left by taking its confirm bar, so without
              * this screen the quiz's keyboard simply appeared, with no
-             * warning that the words were about to leave the screen. The
-             * quiz's own "word N of M" title says which word it wants but
-             * never why it is asking, so the count is named here instead,
-             * before the words go away rather than after.
+             * warning that the words were about to leave. The quiz's own
+             * "word N of M" title says which word it wants but never why it
+             * is asking, so the count is named here instead.
              *
              * `intro` is sized for the format's worst case rather than its
              * real one: the counts are 4/12 or 8/24, but %u lets the compiler
              * assume ten digits apiece, and -Wformat-truncation is an error
-             * in the firmware build even though the host build lets it
-             * pass. */
+             * in the firmware build even though the host build lets it pass. */
             char intro[48];
-            (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
-                (unsigned)generated->words);
+            (void)snprintf(
+                intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
             const int taken
                 = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", true, false, NULL);
             /* A timeout ends it here rather than stepping back: repainting
@@ -2317,16 +2680,13 @@ static bool show_generated(seedtool_generated_t* generated)
             break;
         }
         case STAGE_QUIZ: {
-            const int outcome = confirm_backup(generated->mnemonic, generated->words);
+            const int outcome = confirm_backup(mnemonic, words);
             if (outcome == 1) {
-                /* Stepping back off the wallet's first screen lands on the
-                 * backup intro: the quiz itself is behind it and already
-                 * passed, so there is no screen between the two to go to. */
-                stage = show_wallet_data(generated->mnemonic) ? STAGE_DONE : STAGE_INTRO;
+                show_wallet_data(mnemonic);
+                stage = STAGE_DONE;
             } else {
                 /* Backing out of the quiz's first word lands on the intro,
-                 * one stage, as everywhere else - it used to jump two, back
-                 * to the word list. Two presses now reach the same place. */
+                 * one stage, as everywhere else. */
                 stage = outcome < 0 ? STAGE_DONE : STAGE_INTRO;
             }
             break;
@@ -2336,8 +2696,42 @@ static bool show_generated(seedtool_generated_t* generated)
             break;
         }
     }
+    return !stepped_back;
+}
+
+/* Returns false only when the reader steps back off the very first screen -
+ * the caller still holds the entropy that produced this, and throwing it away
+ * to start the run over is not what one press should mean. */
+static bool show_generated(seedtool_generated_t* generated)
+{
+    char hash[65];
+    hexstr(generated->hash, sizeof(generated->hash), hash);
+    enum { STAGE_TRANSCRIPT, STAGE_HASH, STAGE_REVIEW, STAGE_DONE };
+    int stage = STAGE_TRANSCRIPT;
+    bool stepped_back = false;
+    while (stage != STAGE_DONE) {
+        switch (stage) {
+        case STAGE_TRANSCRIPT:
+            if (!page_text("Canonical transcript", generated->transcript)) {
+                stepped_back = true;
+                stage = STAGE_DONE;
+                break;
+            }
+            stage = STAGE_HASH;
+            break;
+        case STAGE_HASH:
+            stage = page_text("SHA256", hash) ? STAGE_REVIEW : STAGE_TRANSCRIPT;
+            break;
+        case STAGE_REVIEW:
+            stage = review_backup_and_show_wallet(generated->mnemonic, generated->words) ? STAGE_DONE : STAGE_HASH;
+            break;
+        default:
+            stage = STAGE_DONE;
+            break;
+        }
+    }
     seedtool_zero(hash, sizeof(hash));
-    return true;
+    return !stepped_back;
 }
 
 /* Bits collected so far and whether the run looks patterned, for any of the
@@ -2570,16 +2964,325 @@ static int collect_entropy(const int source, const size_t words)
     return outcome;
 }
 
-/* Returns whether a seed was actually generated and carried all the way
- * through the wallet viewer to Done/erase (or a timeout) - as opposed to the
- * reader backing out of the source or length picker before ever starting.
+/* The BIP39 English wordlist is exactly 2048 long, so eleven coin flips name
+ * one word and every word is equally reachable - no rejection sampling, no
+ * modulo that would favour the front of the list. Most significant bit first,
+ * the same order seedtool_complete_checksum packs those indices back into
+ * entropy in (seedtool_core.c), so what the reader sees on screen is the
+ * arithmetic the seed is actually built from rather than a re-encoding of it. */
+#define COIN_WORD_BITS 11
+
+/* Eleven flipped words are 121 bits and twenty-three are 253; the entropy needs
+ * 128 and 256. The remainder is flipped loose at the end, and BIP39's checksum
+ * supplies the last 4 or 8 bits of the final word. */
+static size_t coin_flipped_words(const size_t words) { return words == 12 ? 11 : 23; }
+static size_t coin_tail_bits(const size_t words) { return words == 12 ? 7 : 3; }
+
+/* One word's worth of flips. Returns 1 with `*index_out` set to the zero-based
+ * wordlist index, 0 when the reader backed out of the word's first flip, and -1
+ * on timeout - the same contract as enter_value() and enter_word(). Backing out
+ * of any later flip undoes that flip rather than the whole word, so a slip on
+ * bit 9 of 11 costs one press, not eleven. */
+static int enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
+{
+    uint8_t bits[COIN_WORD_BITS] = { 0 };
+    /* Sized for the format's worst case, not its real one: the counts here are
+     * 11 or 23, but %u lets the compiler assume ten digits apiece, and
+     * -Wformat-truncation is an error in the firmware build. */
+    char title[48];
+    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    int outcome = 1;
+    size_t i = 0;
+    while (i < COIN_WORD_BITS) {
+        /* Rebuilt per flip rather than kept alongside `bits`: the flips are
+         * secret, and a single buffer that only ever holds what is currently
+         * on screen is one fewer copy to wipe. */
+        char history[COIN_WORD_BITS + 1] = { 0 };
+        for (size_t f = 0; f < i; ++f) {
+            history[f] = (char)('0' + bits[f]);
+        }
+        unsigned bit = 0;
+        const int result = enter_coin_flip(title, (unsigned)(i + 1), COIN_WORD_BITS, &bit, history, NULL);
+        seedtool_zero(history, sizeof(history));
+        if (result < 0) {
+            outcome = -1;
+            break;
+        }
+        if (result == 0) {
+            if (!i) {
+                outcome = 0;
+                break;
+            }
+            --i;
+            continue;
+        }
+        bits[i++] = (uint8_t)bit;
+    }
+    if (outcome == 1) {
+        uint16_t index = 0;
+        for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
+            index = (uint16_t)((index << 1) | bits[b]);
+        }
+        *index_out = index;
+    }
+    seedtool_zero(bits, sizeof(bits));
+    return outcome;
+}
+
+/* The flips, the wordlist number they spell, and the word itself, on one screen
+ * before moving on. This is the whole point of entering a word at a time: the
+ * reader can check this line against a printed wordlist with no device
+ * involved, which is exactly what the hashed coin path cannot offer.
+ *
+ * The number is one-based and zero-padded to four digits, matching
+ * show_numbered_list and enter_word_number - a printed list pads to four, and
+ * `abandon` is 1 there, not 0, even though the encoding above is zero-based.
+ *
+ * Going back from here costs eleven flips, so unlike every other back in the
+ * run it is asked about rather than acted on: Up/Down raises the question and
+ * BOTH answers it, which also means a stray press on a screen the reader is
+ * only reading cannot silently undo the word they just checked. The cheap
+ * backs - one flip inside a word - stay unguarded, since a guard there would
+ * cost more presses than the mistake does.
+ *
+ * Returns 1 to accept, 0 to flip the word again, -1 on timeout. */
+static int confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
+{
+    char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
+    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
+        bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
+    }
+    (void)snprintf(number, sizeof(number), "%04u", (unsigned)index + 1u);
+    char named[48];
+    (void)snprintf(named, sizeof(named), "%s  %s", number, seedtool_word(index));
+    int outcome;
+    for (;;) {
+        /* Number and word share a line so the chrome's two body lines carry
+         * all three facts the reader is checking: the flips, the position in
+         * the list, and what it spells. */
+        const int key = nav_screen(title, bitline, named, "Use this word", true, false, NULL);
+        if (key == NAV_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (key == NAV_CONFIRM) {
+            outcome = 1;
+            break;
+        }
+        /* The word is named again on the question rather than left to the
+         * screen behind it: this is the last place it is shown before those
+         * flips go, and a reader who pressed by accident should be able to see
+         * what they are about to discard without dismissing the question to
+         * find out. */
+        char question[48], subject[32];
+        (void)snprintf(question, sizeof(question), "Flip word %u again?", position);
+        (void)snprintf(subject, sizeof(subject), "%s  %s", number, seedtool_word(index));
+        /* Opens on the arrow: the bar throws eleven flips away. */
+        const int answer = nav_screen(question, subject, "These flips are lost", "Flip again", true, true, NULL);
+        seedtool_zero(subject, sizeof(subject));
+        if (answer == NAV_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (answer == NAV_CONFIRM) {
+            outcome = 0;
+            break;
+        }
+        /* Declined: back to the word, unchanged. */
+    }
+    seedtool_zero(bitline, sizeof(bitline));
+    seedtool_zero(number, sizeof(number));
+    return outcome;
+}
+
+/* Coins, but packed straight into the entropy instead of hashed: eleven flips
+ * per word for the first 11 (or 23) words, then the 7 (or 3) bits that finish
+ * the entropy, and BIP39's checksum completes the last word. Same arithmetic as
+ * complete_checksum()'s, and the same seedtool_complete_checksum() call - the
+ * difference is only that the words are flipped here rather than typed in from
+ * a wordlist the reader converted by hand.
+ *
+ * There is no quality bar and no Shannon gate on this path, unlike the hashed
+ * one. Nothing here is being estimated: eleven flips are eleven bits by
+ * construction, and a gate could only second-guess the reader's coin.
+ *
+ * Same contract as create_seed(): true once a mnemonic reached the wallet
+ * viewer or the session timed out, false for backing out before anything was
+ * flipped. */
+static bool flip_words(const size_t words)
+{
+    const size_t word_count = coin_flipped_words(words);
+    const size_t tail_count = coin_tail_bits(words);
+    uint16_t indices[23] = { 0 };
+    uint8_t tail[7] = { 0 };
+    char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    bool reached_wallet = false;
+    int outcome = 1;
+    size_t w = 0;
+
+    /* Set when the run steps backwards onto a word that was already flipped:
+     * that word reopens at its confirmation, showing what it still is, rather
+     * than throwing the flips away and demanding eleven more. Accepting there
+     * walks forward again with the word unchanged; declining reflips it. */
+    bool reopen = false;
+
+    for (;;) {
+        while (w < word_count) {
+            uint16_t index = indices[w];
+            if (reopen) {
+                reopen = false;
+            } else {
+                outcome = enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index);
+                if (outcome < 0) {
+                    break;
+                }
+                if (outcome == 0) {
+                    /* Backed out of this word's first flip, where the word has
+                     * no flip of its own left to undo. That press means "the
+                     * word before this one was wrong", so it reopens that word.
+                     * The run ends here only from the very first flip of the
+                     * very first word - the one point where nothing has been
+                     * entered yet.
+                     *
+                     * Ending it anywhere else was a bug: eight words in, one
+                     * press dropped the lot and landed back on the length
+                     * picker, which is exactly the mistake a word-at-a-time
+                     * screen exists to make cheap. */
+                    if (!w) {
+                        break;
+                    }
+                    --w;
+                    reopen = true;
+                    outcome = 1;
+                    continue;
+                }
+            }
+            outcome = confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index);
+            if (outcome < 0) {
+                break;
+            }
+            if (outcome == 0) {
+                /* Declined at the confirmation: flip this same word again. */
+                outcome = 1;
+                continue;
+            }
+            indices[w++] = index;
+        }
+        if (outcome != 1) {
+            break;
+        }
+
+        /* The loose bits that finish the entropy. Backing out of the first of
+         * them returns to the last word, so back walks the whole run in one
+         * direction instead of dead-ending here. */
+        bool back_to_words = false;
+        size_t t = 0;
+        while (t < tail_count) {
+            char history[8] = { 0 };
+            for (size_t f = 0; f < t; ++f) {
+                history[f] = (char)('0' + tail[f]);
+            }
+            unsigned bit = 0;
+            const int result
+                = enter_coin_flip("Final bits", (unsigned)(t + 1), (unsigned)tail_count, &bit, history, NULL);
+            seedtool_zero(history, sizeof(history));
+            if (result < 0) {
+                outcome = -1;
+                break;
+            }
+            if (result == 0) {
+                if (!t) {
+                    back_to_words = true;
+                    break;
+                }
+                --t;
+                continue;
+            }
+            tail[t++] = (uint8_t)bit;
+        }
+        if (outcome != 1) {
+            break;
+        }
+        if (back_to_words) {
+            /* Reopened at its confirmation, like every other backwards step:
+             * the last word is still perfectly good, and the reader who
+             * pressed back here may well have been after the word before it. */
+            w = word_count - 1;
+            reopen = true;
+            continue;
+        }
+
+        prefix[0] = '\0';
+        size_t used = 0;
+        for (size_t i = 0; i < word_count; ++i) {
+            const char* const word = seedtool_word(indices[i]);
+            const size_t len = strlen(word);
+            /* Bounded by SEEDTOOL_MAX_MNEMONIC_LEN, which holds 24 words -
+             * this builds at most 23 - but checked rather than assumed, since
+             * a silent truncation here would be a wrong seed, not a wrong
+             * screen. */
+            if (used + len + (i ? 1 : 0) >= sizeof(prefix)) {
+                outcome = -1;
+                break;
+            }
+            if (i) {
+                prefix[used++] = ' ';
+            }
+            memcpy(prefix + used, word, len);
+            used += len;
+            prefix[used] = '\0';
+        }
+        if (outcome != 1) {
+            break;
+        }
+
+        if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
+            notice("Error", "Could not complete", "the mnemonic", "OK");
+            break;
+        }
+        review_backup_and_show_wallet(completed, words);
+        reached_wallet = true;
+        break;
+    }
+
+    seedtool_zero(indices, sizeof(indices));
+    seedtool_zero(tail, sizeof(tail));
+    seedtool_zero(prefix, sizeof(prefix));
+    seedtool_zero(completed, sizeof(completed));
+    /* Backing out of the very first flip is the one exit that has produced
+     * nothing, and the only one that should leave the caller's menu open. */
+    return reached_wallet || outcome != 0;
+}
+
+/* Which of the two coin derivations to run. Only coins get this screen: they
+ * are the one source whose transcript a reader can convert to words by hand,
+ * so they are the only one where packing the bits directly buys anything over
+ * hashing them. Returns 0 for the flipped-word path, 1 for the hashed one, and
+ * -1 for back. */
+static int choose_coin_method(void)
+{
+    const char* methods[] = { "Flip each word", "Flip and hash", "Back" };
+    const int selected = choose("Coin method", methods, 3, true);
+    return selected < 0 || selected == 2 ? -1 : selected;
+}
+
+/* Returns whether a seed was actually generated, as opposed to the reader
+ * backing out of the source or length picker before ever starting.
  * show_new_seed_menu uses this to tell "done, go all the way home" apart from
- * plain "back one level". */
+ * plain "back one level".
+ *
+ * Since leaving the wallet viewer reboots, the true case now only reaches its
+ * caller when the viewer returned without ever opening - a derivation failure
+ * on the way in. The distinction still has to exist for that, and for the
+ * false case, which is the ordinary back-out. */
 static bool create_seed(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
-        const int source = choose_menu("Entropy source", sources, sizeof(sources) / sizeof(sources[0]));
+        const int source = choose_menu_at("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), &cursor);
         if (source < 0 || source == 4) {
             return false;
         }
@@ -2592,12 +3295,35 @@ static bool create_seed(void)
             if (length == 2) {
                 break;
             }
+            const size_t words = length ? 24 : 12;
+            if (source == SEEDTOOL_COIN) {
+                bool run_hashed = false;
+                for (;;) {
+                    const int method = choose_coin_method();
+                    if (method < 0) {
+                        break; /* Back: the length picker, one stage. */
+                    }
+                    if (method == 1) {
+                        run_hashed = true;
+                        break;
+                    }
+                    if (flip_words(words)) {
+                        return true;
+                    }
+                    /* Backed out of the very first flip, before anything was
+                     * entered: this menu again, one stage back, rather than
+                     * skipping past it to the length picker. */
+                }
+                if (!run_hashed) {
+                    continue;
+                }
+            }
             /* 24-word Cards can't reach 256 bits without replacement (one
              * deck tops out around 225 bits) - SEEDTOOL_CARDS_REPLACE draws
              * the same deck, but with the card returned and the deck
              * reshuffled after every draw, a genuine 52-sided die instead. */
             const int collect_source = length && source == SEEDTOOL_CARDS ? SEEDTOOL_CARDS_REPLACE : source;
-            if (collect_entropy(collect_source, length ? 24 : 12) != 0) {
+            if (collect_entropy(collect_source, words) != 0) {
                 return true;
             }
         }
@@ -2609,9 +3335,10 @@ static bool create_seed(void)
  * length picker or the very first word before anything was entered. */
 static bool complete_checksum(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins" };
-        const int selected = choose_menu("Complete checksum", lengths, 2);
+        const int selected = choose_menu_at("Complete checksum", lengths, 2, &cursor);
         if (selected < 0 || selected == 2) {
             return false;
         }
@@ -2675,13 +3402,8 @@ static bool complete_checksum(void)
                 break;
             }
             if (page_text("Completed mnemonic", completed)) {
-                if (show_wallet_data(completed)) {
-                    break;
-                }
-                /* Stepped back off the wallet's first screen: the completed
-                 * mnemonic again. `i` is untouched, so the flips behind it
-                 * are still there if the reader keeps going back. */
-                continue;
+                show_wallet_data(completed);
+                break;
             }
             /* Back off the completed mnemonic: the last flip again, with the
              * words and every flip before it still in hand. */
@@ -2705,18 +3427,21 @@ static bool complete_checksum(void)
  * menu, which is specifically about *entering* an already-complete seed. */
 static void show_new_seed_menu(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* items[] = { "From entropy", "Complete checksum" };
-        const int selected = choose_menu("New Seed", items, 2);
+        const int selected = choose_menu_at("New Seed", items, 2, &cursor);
         if (selected < 0 || selected == 2) {
             return;
         }
-        /* A seed that made it all the way to Done/erase (or a timeout) closes
-         * this menu too, straight back to the Origo/Home menu, rather than
-         * reopening "New Seed" - that reopening was the actual bug: pressing
-         * Done/erase landed back inside New Seed instead of at Home. Backing
-         * out of the source/length picker before anything was generated
-         * keeps the old "one level up" behaviour. */
+        /* A seed that was generated closes this menu too, straight back to the
+         * Origo/Home menu, rather than reopening "New Seed" - that reopening
+         * was the actual bug: ending a session landed back inside New Seed
+         * instead of at Home. Leaving the wallet viewer now reboots, which
+         * settles that case before it gets here; what is left for this to
+         * handle is the viewer failing to open at all. Backing out of the
+         * source/length picker before anything was generated keeps the old
+         * "one level up" behaviour. */
         if (selected == 0 ? create_seed() : complete_checksum()) {
             return;
         }
@@ -2725,9 +3450,10 @@ static void show_new_seed_menu(void)
 
 static void restore_seed(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "12 words", "24 words" };
-        const int selected = choose_menu("Restore mnemonic", lengths, 2);
+        const int selected = choose_menu_at("Restore mnemonic", lengths, 2, &cursor);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -2752,9 +3478,8 @@ static void restore_seed(void)
                 resume = true;
                 continue;
             }
-            if (show_wallet_data(mnemonic)) {
-                break;
-            }
+            show_wallet_data(mnemonic);
+            break;
             /* Back off the wallet's first screen: the verdict again. */
         }
         seedtool_zero(words, sizeof(words));
@@ -2801,6 +3526,7 @@ static void show_brightness(void)
 
 static void show_settings_menu(void)
 {
+    size_t cursor = 0;
     for (;;) {
         char orientation_item[32], brightness_fraction[8], brightness_item[24];
         (void)snprintf(orientation_item, sizeof(orientation_item), "Flip Orientation: %s",
@@ -2808,7 +3534,7 @@ static void show_settings_menu(void)
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
         const char* items[] = { orientation_item, brightness_item, "About" };
-        const int selected = choose_menu("Settings", items, 3);
+        const int selected = choose_menu_at("Settings", items, 3, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
@@ -2859,9 +3585,10 @@ void seedtool_run(void)
     seedtool_platform_flush_keys();
     last_action = seedtool_platform_milliseconds();
 
+    size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
-        const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
+        const int selected = choose_kept("Origo", menu, sizeof(menu) / sizeof(menu[0]), false, &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {

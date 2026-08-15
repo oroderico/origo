@@ -547,6 +547,38 @@ def complete(args):
     print(mnemonic_from_entropy(entropy))
 
 
+def coin_words(args):
+    """The device's Flip each word method, from the flips alone.
+
+    Eleven flips name one word: the wordlist is exactly 2048 long, so an
+    eleven-bit index is the whole of it, most significant bit first. Eleven
+    such words are 121 bits and the entropy needs 128, so seven loose flips
+    finish it; 24 words is twenty-three words and three loose flips for 256.
+
+    `complete` already does the arithmetic below the words - this exists so
+    the whole thing can be checked from what the reader actually wrote down,
+    which is a string of heads and tails, without converting each group of
+    eleven against a printed wordlist by hand first. Doing it by hand is the
+    point of the method; not being *required* to is the point of this.
+    """
+    flips = "".join(args.flips.split())
+    if any(character not in "01" for character in flips):
+        raise ValueError("flips are 1 for heads and 0 for tails")
+    word_count = 11 if args.words == 12 else 23
+    needed = word_count * 11 + (7 if args.words == 12 else 3)
+    if len(flips) != needed:
+        raise ValueError(f"{args.words} words need {needed} flips, got {len(flips)}")
+    wl = words()
+    indices = [int(flips[i * 11 : (i + 1) * 11], 2) for i in range(word_count)]
+    for position, index in enumerate(indices, start=1):
+        print(f"word {position:2}: {flips[(position - 1) * 11 : position * 11]}  {index + 1:4}  {wl[index]}")
+    tail = flips[word_count * 11 :]
+    entropy = ((int("".join(f"{i:011b}" for i in indices), 2) << len(tail)) | int(tail, 2)).to_bytes(
+        16 if args.words == 12 else 32, "big")
+    print(f"loose bits: {tail}")
+    print("mnemonic:  ", mnemonic_from_entropy(entropy))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(required=True)
@@ -567,6 +599,10 @@ def main():
     comp.add_argument("prefix")
     comp.add_argument("bits")
     comp.set_defaults(func=complete)
+    coin = sub.add_parser("coin-words")
+    coin.add_argument("flips", help="128 or 256 flips, 1 for heads and 0 for tails; spaces ignored")
+    coin.add_argument("--words", type=int, choices=(12, 24), default=12)
+    coin.set_defaults(func=coin_words)
     args = parser.parse_args()
     try:
         args.func(args)
