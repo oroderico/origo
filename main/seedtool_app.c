@@ -2341,6 +2341,13 @@ static int enter_flipped_word(const unsigned position, const unsigned total, uin
  * show_numbered_list and enter_word_number - a printed list pads to four, and
  * `abandon` is 1 there, not 0, even though the encoding above is zero-based.
  *
+ * Going back from here costs eleven flips, so unlike every other back in the
+ * run it is asked about rather than acted on: Up/Down raises the question and
+ * BOTH answers it, which also means a stray press on a screen the reader is
+ * only reading cannot silently undo the word they just checked. The cheap
+ * backs - one flip inside a word - stay unguarded, since a guard there would
+ * cost more presses than the mistake does.
+ *
  * Returns 1 to accept, 0 to flip the word again, -1 on timeout. */
 static int confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
 {
@@ -2357,8 +2364,33 @@ static int confirm_flipped_word(const unsigned position, const unsigned total, c
         if (key == KEY_REDRAW) {
             continue;
         }
-        outcome = key == KEY_TIMEOUT ? -1 : key == KEY_SELECT ? 1 : 0;
-        break;
+        if (key == KEY_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (key == KEY_SELECT) {
+            outcome = 1;
+            break;
+        }
+        /* The word is named again on the question rather than left to the
+         * screen behind it: this is the last place it is shown before those
+         * flips go, and a reader who pressed by accident should be able to see
+         * what they are about to discard without dismissing the question to
+         * find out. */
+        char question[48], subject[32];
+        (void)snprintf(question, sizeof(question), "Flip word %u again?", position);
+        (void)snprintf(subject, sizeof(subject), "%s  %s", number, seedtool_word(index));
+        const seedtool_key_t answer = confirm(question, subject, "These flips are lost");
+        seedtool_zero(subject, sizeof(subject));
+        if (answer == KEY_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (answer == KEY_SELECT) {
+            outcome = 0;
+            break;
+        }
+        /* Declined: back to the word, unchanged. */
     }
     seedtool_zero(bitline, sizeof(bitline));
     seedtool_zero(number, sizeof(number));

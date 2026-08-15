@@ -351,7 +351,7 @@ static bool word_numbers_round_trip_is_sound(void)
 static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
     "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "New Seed", "From entropy",
     "Restore Seed", "Complete checksum", "About", "Settings", "11 words + 7 coins", "23 words + 3 coins",
-    "Coin method", "Flip each word", "Flip and hash", "Final bits", "Word 11 of 23",
+    "Coin method", "Flip each word", "Flip and hash",
     "No passphrase", "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words",
     "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers", "Plain text", "Backup",
     "Stackbit 1248", "Compact SeedQR", "Simple grid", "Physical layout" };
@@ -361,6 +361,37 @@ static bool labels_fit_a_row(void)
 {
     for (size_t i = 0; i < MENU_LABEL_COUNT; ++i) {
         if (seedtool_render_fit_row(menu_labels[i]) != strlen(menu_labels[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The coin-word screens are not choice lists, but they are stacked text at a
+ * fixed y: draw_centered wraps a line too wide for the display rather than
+ * cutting it, and the wrapped remainder would land on top of the line below.
+ * The word's number and the word itself are on one of those lines, so the
+ * check runs over all 2048 rather than over a chosen few.
+ *
+ * seedtool_render_fit_row measures against the choice list's text column,
+ * which is narrower than the full width these screens centre in - a
+ * conservative bound, and the one measurement this file can reach. */
+static bool coin_word_screens_fit(void)
+{
+    static const char* const fixed[] = { "Word 11 of 23", "Final bits", "Flip word 11 again?",
+        "These flips are lost", "11111111111", "Heads (up)   Tails (down)" };
+    for (size_t i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
+        if (seedtool_render_fit_row(fixed[i]) != strlen(fixed[i])) {
+            return false;
+        }
+    }
+    for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        char subject[32];
+        (void)snprintf(subject, sizeof(subject), "%04u  %s", (unsigned)index + 1u, seedtool_word(index));
+        if (seedtool_render_fit_row(subject) != strlen(subject)) {
+            return false;
+        }
+        if (seedtool_render_fit_row(seedtool_word(index)) != strlen(seedtool_word(index))) {
             return false;
         }
     }
@@ -1498,6 +1529,10 @@ static int self_test(void)
     }
     if (!coin_word_encoding_is_sound()) {
         fputs("Origo coin word encoding self-test failed\n", stderr);
+        return 1;
+    }
+    if (!coin_word_screens_fit()) {
+        fputs("Origo coin word screen fit self-test failed\n", stderr);
         return 1;
     }
     if (!stackbit_grid_is_sound()) {
