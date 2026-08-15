@@ -66,7 +66,7 @@
 #define NAV_BACK_X 2
 #define NAV_BACK_Y 1
 #define NAV_BACK_WIDTH 20
-#define NAV_BACK_HEIGHT 18
+#define NAV_BACK_HEIGHT 19
 #define NAV_ARROW_WIDTH 7
 #define NAV_ARROW_HEIGHT 11
 #define NAV_ROW_HEIGHT 32
@@ -513,11 +513,17 @@ void seedtool_render_list(const char* title, const char* const* items, const siz
         const char* const item = items[top + row];
         const bool highlighted = top + row == selected;
         const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
-        /* The last row of every list is the way out of it — Back, Erase and
-         * restart, [delete]. A rule above it lifts it out of the choices,
-         * which is what it is not. It goes in the gap between cells so the
-         * selection bar never paints over it. */
-        if (top + row == count - 1 && count > 1) {
+        /* A rule between rows, matching the nav lists and Jade's own menus:
+         * the rows read as cells rather than as stacked lines of text, and it
+         * sits in the gap between them so the selection bar never paints over
+         * it. Between them and not above the first, so this list and a nav one
+         * carry the same line in the same places - a screen that gained the
+         * chrome should not also change how its rows are drawn.
+         *
+         * It used to be drawn above the last row alone, to set the way out
+         * apart from the choices. That distinction now rests on position,
+         * which the last row has always had and which every list here keeps. */
+        if (row) {
             fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         }
         if (highlighted) {
@@ -547,6 +553,14 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
     }
 }
 
+static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    fill_rect(x, y, width, 1, color);
+    fill_rect(x, y + height - 1, width, 1, color);
+    fill_rect(x, y, 1, height, color);
+    fill_rect(x + width - 1, y, 1, height, color);
+}
+
 /* The chrome itself, drawn the same way for every screen that wears it - the
  * point of the thing being that the arrow and the bar are found in one place
  * regardless of what sits between them. Split from the screens so a new one
@@ -561,6 +575,18 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         if (on_back) {
             fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
         }
+        /* Sides and top, no bottom - Jade's own header buttons are bordered
+         * that way on a full menu, its comment giving the reason: "bottom edge
+         * will be covered by upper line above top menu item" (ui/dialogs.c).
+         * The rule above the first row sits directly under this box, so the
+         * two meet and the chrome reads as one frame rather than as a button
+         * hovering above an unrelated list. Drawn whether or not the arrow is
+         * selected, dim when idle: a bare arrow in the corner reads as
+         * decoration, a box reads as something that can be taken. */
+        const uint16_t edge = on_back ? COLOR_HIGHLIGHT : COLOR_DIM;
+        fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
+        fill_rect(NAV_BACK_X, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        fill_rect(NAV_BACK_X + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
             on_back ? COLOR_BLACK : COLOR_WHITE);
@@ -652,8 +678,15 @@ void seedtool_render_nav_list(
         const char* const item = items[top + row];
         const bool highlighted = top + row == nav->selected;
         const int y = LIST_TOP + (int)row * NAV_ROW_HEIGHT;
-        /* No rule above the last row here: what a plain list sets apart that
-         * way is its way out, and on this screen the way out is the arrow. */
+        /* A rule above every row, the first included, so they read as cells
+         * rather than as lines of text that happen to be stacked - Jade draws
+         * a border under each menu item and above the top one (ui/dialogs.c).
+         * It sits in the gap between cells, so the selection bar never paints
+         * over it, and the topmost one is what closes the bottom of the back
+         * button's box: that box is drawn without a bottom edge precisely so
+         * this line can be it. The last cell is closed by the confirm bar's
+         * own rule, so three rules here and that one frame three rows. */
+        fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
         }
@@ -758,14 +791,6 @@ static const char* key_label(const char key, char* scratch)
         scratch[1] = '\0';
         return scratch;
     }
-}
-
-static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
-{
-    fill_rect(x, y, width, 1, color);
-    fill_rect(x, y + height - 1, width, 1, color);
-    fill_rect(x, y, 1, height, color);
-    fill_rect(x + width - 1, y, 1, height, color);
 }
 
 static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }

@@ -1483,11 +1483,22 @@ static bool backup_confirm_screen_lines_do_not_wrap(void)
  * of running off the glass, exactly the failure the dice-hint check above
  * exists for. Bands are the geometry in seedtool_render.c (NAV_BACK_HEIGHT,
  * LIST_TOP, NAV_ROW_HEIGHT, NAV_BAR_Y), kept in sync with the numbers here. */
+/* Chrome the bands are allowed to hold: the 1px rules that separate the cells
+ * and close the back button's box are deliberate and land exactly in these
+ * gaps. What the bands exist to catch is text - a wrapped title or an overlong
+ * button label - so a rule is permitted by colour and anything brighter is
+ * not. COLOR_DIM in seedtool_render.c; a lit glyph is white or the highlight,
+ * both of which still fail. */
+#define NAV_RULE_COLOR UINT16_C(0x39e7)
+
 static bool nav_band_is_clear(const int from, const int to)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
     for (int y = from; y < to; ++y) {
         for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == NAV_RULE_COLOR) {
+                continue;
+            }
             if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
                 return false;
             }
