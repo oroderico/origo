@@ -6,6 +6,11 @@
  * prove they cover what they must — a rearranged layout that quietly dropped a
  * character would otherwise leave a passphrase impossible to retype. */
 #define SEEDTOOL_WORD_LAYOUT "qwertyuiop\nasdfghjkl\nzxcvbnm\b"
+/* The same keys in alphabetical order, offered from Settings for readers who
+ * do not touch-type and find QWERTY a scatter to hunt through. Same 10/9/8
+ * shape as the layout above, so it fits the three rows the keyboard is drawn
+ * in without the renderer knowing either of them apart. */
+#define SEEDTOOL_WORD_LAYOUT_ALPHA "abcdefghij\nklmnopqrs\ntuvwxyz\b"
 /* Accept before Backspace, not after: nearest_enabled (seedtool_app.c) walks
  * the keyboard as a circular ring, so whichever of the two sits closer to the
  * digit row is what a disabled key's cursor snaps to first. Backspace is
@@ -15,6 +20,13 @@
 #define SEEDTOOL_WORD_NUMBER_LAYOUT "1234567890\n\r\b"
 #define SEEDTOOL_PASSPHRASE_PAGES 4
 extern const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES];
+/* The alphabetical passphrase pages. Only the two letter pages differ; the
+ * digit and symbol pages are the same strings, since there is no alphabetical
+ * order for punctuation. Both arrays must still cover every printable ASCII
+ * character between them - the self-test and the Python suite check each one
+ * separately, because a page dropped from one arrangement and not the other
+ * would leave a passphrase typeable only under the setting it was made with. */
+extern const char* const seedtool_passphrase_layouts_alpha[SEEDTOOL_PASSPHRASE_PAGES];
 
 void seedtool_run(void);
 
