@@ -1266,9 +1266,11 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
      * address_labels: these rows are the mnemonic in plain text, one word
      * each, and they live in .bss rather than on a stack frame that the next
      * screen would overwrite anyway. Leaving them behind kept a restored seed
-     * readable in RAM for the rest of the session - past "Erase and exit" and
-     * past the session-timeout screen, which erases nothing here. Clearing on
-     * entry as well as exit keeps a 12-word restore from leaving rows 12..23
+     * readable in RAM for the rest of the session. Both ways out of the wallet
+     * now reboot, and C startup zeroes .bss, so that particular leak would no
+     * longer outlive the session - but this wipe is what makes the rows gone
+     * while the session is still running, which the reboot cannot do. Clearing
+     * on entry as well as exit keeps a 12-word restore from leaving rows 12..23
      * of a previous 24-word one on show. */
     seedtool_zero(review_labels, sizeof(review_labels));
     for (;;) {
@@ -2149,10 +2151,26 @@ static void show_wallet_data(const char* mnemonic)
     (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
     size_t cursor = 0;
     for (;;) {
-        const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and exit" };
+        const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
         const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
+        /* Both ways out of a wallet session reboot: the row, and the timeout
+         * that means the reader walked away from a device with a seed on it.
+         * Unwinding instead would leave every buffer between here and the main
+         * menu holding what it last held, wiped only where someone remembered
+         * to wipe it. A restart re-runs C startup, which zeroes .bss - the
+         * address cache and the review rows live there - and leaves nothing on
+         * a stack that is about to be reused from the top. The explicit wipes
+         * below still run first: the reboot is the belt, not a reason to drop
+         * the braces.
+         *
+         * The cost is the display settings, which are RAM-only by design and
+         * so go back to their defaults. That is the trade this makes
+         * deliberately: brightness is a preference, and the seed is not. */
         if (selected < 0 || selected == 4) {
-            break;
+            seedtool_zero(fp, sizeof(fp));
+            seedtool_zero(fphex, sizeof(fphex));
+            seedtool_zero(passphrase, sizeof(passphrase));
+            seedtool_platform_restart();
         }
         switch (selected) {
         case 0:
@@ -2538,11 +2556,15 @@ static int collect_entropy(const int source, const size_t words)
     return outcome;
 }
 
-/* Returns whether a seed was actually generated and carried all the way
- * through the wallet viewer to Erase and exit (or a timeout) - as opposed to the
- * reader backing out of the source or length picker before ever starting.
+/* Returns whether a seed was actually generated, as opposed to the reader
+ * backing out of the source or length picker before ever starting.
  * show_new_seed_menu uses this to tell "done, go all the way home" apart from
- * plain "back one level". */
+ * plain "back one level".
+ *
+ * Since leaving the wallet viewer reboots, the true case now only reaches its
+ * caller when the viewer returned without ever opening - a derivation failure
+ * on the way in. The distinction still has to exist for that, and for the
+ * false case, which is the ordinary back-out. */
 static bool create_seed(void)
 {
     size_t cursor = 0;
@@ -2643,12 +2665,14 @@ static void show_new_seed_menu(void)
         if (selected < 0 || selected == 2) {
             return;
         }
-        /* A seed that made it all the way to Erase and exit (or a timeout) closes
-         * this menu too, straight back to the Origo/Home menu, rather than
-         * reopening "New Seed" - that reopening was the actual bug: pressing
-         * Erase and exit landed back inside New Seed instead of at Home. Backing
-         * out of the source/length picker before anything was generated
-         * keeps the old "one level up" behaviour. */
+        /* A seed that was generated closes this menu too, straight back to the
+         * Origo/Home menu, rather than reopening "New Seed" - that reopening
+         * was the actual bug: ending a session landed back inside New Seed
+         * instead of at Home. Leaving the wallet viewer now reboots, which
+         * settles that case before it gets here; what is left for this to
+         * handle is the viewer failing to open at all. Backing out of the
+         * source/length picker before anything was generated keeps the old
+         * "one level up" behaviour. */
         if (selected == 0 ? create_seed() : complete_checksum()) {
             return;
         }
