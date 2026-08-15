@@ -1290,8 +1290,8 @@ static int enter_mnemonic_words(
 
 /* words[0..count) joined with single spaces, the same layout seedtool_generate's
  * transcript-to-mnemonic conversion and every published BIP39 vector use.
- * Shared by enter_mnemonic (once, after entry) and review_and_confirm (again
- * after every edit), so a mid-review fix is checked against the exact string
+ * Called once after entry and again by review_and_confirm after every edit,
+ * so a mid-review fix is checked against the exact string
  * seedtool_validate_mnemonic will see. */
 static bool join_words(
     char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
@@ -1310,17 +1310,6 @@ static bool join_words(
         used += n;
     }
     return true;
-}
-
-static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
-{
-    char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
-    int outcome = enter_mnemonic_words(count, words, NULL);
-    if (outcome == 1 && !join_words(words, count, mnemonic, mnemonic_len)) {
-        outcome = -1;
-    }
-    seedtool_zero(words, sizeof(words));
-    return outcome;
 }
 
 static char review_labels[24][32];
@@ -1416,11 +1405,63 @@ done:
     return outcome;
 }
 
+/* The 11 or 23 words of a checksum completion, shown again when the reader
+ * steps back out of the coin flips. review_and_confirm's list without its
+ * checksum gate: a prefix this long is missing the very word the flips are
+ * about to name, so it can never validate on its own - Continue is always
+ * available here and the title never carries a verdict.
+ *
+ * What this exists for is that the words survive. complete_checksum used to
+ * answer a step back from the first flip by entering the mnemonic again from
+ * scratch - an empty array and the method menu: eleven words typed and gone,
+ * for one press. */
+static int review_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number)
+{
+    size_t cursor = SEEDTOOL_NAV_CONFIRM;
+    int outcome;
+    seedtool_zero(review_labels, sizeof(review_labels));
+    for (;;) {
+        for (size_t i = 0; i < count; ++i) {
+            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%02u. %.*s", (unsigned)(i + 1),
+                (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
+            review_items[i] = review_labels[i];
+        }
+        const int selected = choose_nav("Review words", review_items, count, "Continue", true, &cursor);
+        if (selected == NAV_TIMEOUT) {
+            outcome = -1;
+            goto done;
+        }
+        if (selected == NAV_BACK) {
+            outcome = 0;
+            goto done;
+        }
+        if (selected == NAV_CONFIRM) {
+            outcome = 1;
+            goto done;
+        }
+        char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
+        const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
+                                     : enter_word(selected + 1, count, word, sizeof(word));
+        if (result == 1) {
+            strcpy(words[selected], word);
+        } else if (result < 0) {
+            seedtool_zero(word, sizeof(word));
+            outcome = -1;
+            goto done;
+        }
+        seedtool_zero(word, sizeof(word));
+    }
+done:
+    seedtool_zero(review_labels, sizeof(review_labels));
+    return outcome;
+}
+
 /* enter_mnemonic_words, then review_and_confirm on the result: the two-step
- * restore_seed actually wants. Not folded into enter_mnemonic itself since
- * complete_checksum also calls that for a still-partial (11 or 23 word)
- * mnemonic that could never pass seedtool_validate_mnemonic yet - the review
- * gate belongs only where the mnemonic is meant to be whole and correct.
+ * restore_seed actually wants. Kept apart from complete_checksum's own path,
+ * which enters a still-partial (11 or 23 word) mnemonic that could never pass
+ * seedtool_validate_mnemonic yet - the checksum gate belongs only where the
+ * mnemonic is meant to be whole and correct, which is why that flow reviews
+ * through review_prefix instead.
  * join_words and seedtool_validate_mnemonic are the same pair review_and_
  * confirm itself calls every time it redraws; reused once more here, before
  * the first draw, so an invalid checksum is announced up front rather than
@@ -2458,7 +2499,16 @@ static bool complete_checksum(void)
         char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
         char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
         uint8_t bits[7] = { 0 };
-        int outcome = enter_mnemonic(count, prefix, sizeof(prefix));
+        /* The words are held here rather than inside the entry helper, so that
+         * stepping back out of the flips can hand them back instead of
+         * starting over. `by_number` rides along for the same reason: a
+         * re-opened word should be fixed the way it was typed. */
+        char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+        bool by_number = false;
+        int outcome = enter_mnemonic_words(count, words, &by_number);
+        if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
+            outcome = -1;
+        }
         for (size_t i = 0; outcome == 1 && i < bits_count;) {
             unsigned bit = 0;
             char flips[8] = { 0 };
@@ -2471,9 +2521,14 @@ static bool complete_checksum(void)
             if (result < 0) {
                 outcome = -1;
             } else if (result == 0) {
-                /* Backing out of the first flip returns to the words. */
+                /* Backing out of the first flip returns to the words - to the
+                 * list of them, with every one still there, rather than to an
+                 * empty entry screen. */
                 if (!i) {
-                    outcome = enter_mnemonic(count, prefix, sizeof(prefix));
+                    outcome = review_prefix(words, count, by_number);
+                    if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
+                        outcome = -1;
+                    }
                 } else {
                     --i;
                 }
@@ -2487,6 +2542,7 @@ static bool complete_checksum(void)
             && page_text("Completed mnemonic", completed)) {
             show_wallet_data(completed);
         }
+        seedtool_zero(words, sizeof(words));
         seedtool_zero(prefix, sizeof(prefix));
         seedtool_zero(completed, sizeof(completed));
         seedtool_zero(bits, sizeof(bits));
