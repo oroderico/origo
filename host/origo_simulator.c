@@ -1422,6 +1422,28 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
+    /* The notices: no arrow, so the title centres across the whole glass and
+     * has the full width to fit in - but the bar is still there, and the body
+     * still wraps rather than clips. Strings from seedtool_app.c. */
+    static const struct {
+        const char* title;
+        const char* line1;
+        const char* line2;
+        const char* label;
+    } notices[] = {
+        { "Invalid checksum", "Check your words", "Fix one to continue", "Fix a word" },
+        { "Passphrase mismatch", "Nothing was derived", "Try again", "Try again" },
+        { "Backup confirmed", "Words matched", NULL, "Continue" },
+        { "Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK" },
+        { "Error", "Could not derive addresses", NULL, "OK" },
+        { "Error", "Could not compute", "word numbers", "OK" },
+    };
+    for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
+        seedtool_render_nav_notice(notices[i].title, notices[i].line1, notices[i].line2, notices[i].label);
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)) {
+            return false;
+        }
+    }
     /* The paged screens. Their bodies run lower than the two-line ones -
      * screen4's fourth row ends at 103 - and the page counter goes in what is
      * left, so the band that must stay clear is only 116..118. Body lines are

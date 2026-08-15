@@ -47,7 +47,6 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
  * backspace key's own fix for the same gap) would mean the footer stops
  * being plain text, which every screen that draws one currently assumes. */
 #define NAV_FOOTER "Up/Down move   BOTH select"
-#define ACK_FOOTER "BOTH continue   Up/Down back"
 
 /* Word entry keyboard: the letters plus backspace. */
 #define WORD_LAYOUT SEEDTOOL_WORD_LAYOUT
@@ -182,22 +181,23 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
-/* A screen the reader has to leave deliberately. Returns the key that left it,
- * so a caller that must tell "went back" from "timed out" can. */
-static seedtool_key_t confirm(const char* title, const char* one, const char* two)
+/* A notice the reader can only take in: the eighteen screens whose answer
+ * every caller discarded. They used to carry "BOTH continue   Up/Down back"
+ * over a screen where back and continue did the same thing, so the footer was
+ * describing a way out that was not there. One bar, no arrow, and up/down do
+ * nothing rather than pretending to. */
+static void notice(const char* title, const char* one, const char* two, const char* label)
 {
     for (;;) {
-        screen_text(title, one, two, ACK_FOOTER);
+        seedtool_display_nav_notice(title, one, two, label);
         const seedtool_key_t key = wait_key();
-        if (key != KEY_REDRAW) {
-            return key;
+        /* A timeout leaves too: wait_key has already shown the session
+         * warning by then, and holding this screen open past it would keep
+         * the notice on a display that is about to be wiped. */
+        if (key == KEY_SELECT || key == KEY_TIMEOUT) {
+            return;
         }
     }
-}
-
-static bool acknowledge(const char* title, const char* one, const char* two)
-{
-    return confirm(title, one, two) == KEY_SELECT;
 }
 
 /* Every choice in the firmware is made here, on a list that shows five options
@@ -809,7 +809,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
     const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity(BBQR_FRAME_MAX_VERSION);
     const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
     if (!parts) {
-        (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+        notice("Too long for a QR", title, "Read it as text instead", "OK");
         return KEY_SELECT;
     }
     size_t part = 0;
@@ -838,7 +838,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             && seedtool_display_qr(frame_title, frame);
         seedtool_zero(frame, sizeof(frame));
         if (!ok) {
-            (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+            notice("Too long for a QR", title, "Read it as text instead", "OK");
             return KEY_SELECT;
         }
         if (manual) {
@@ -965,9 +965,12 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             for (size_t i = 0; i < matches; ++i) {
                 items[i] = seedtool_word(candidates[i]);
             }
-            items[matches] = "[delete]";
+            /* No [delete] row: the arrow is that control now. Deleting the
+             * last letter of a stem is a step back, and on an empty stem it
+             * always was one - it left the word entirely. The arrow returns
+             * the index that row held, so the branch below is unchanged. */
             (void)snprintf(listing, sizeof(listing), "%s  %s", title, stem_len ? stem : "-");
-            const int chosen = choose(listing, items, matches + 1, true);
+            const int chosen = choose_menu(listing, items, matches);
             seedtool_zero(listing, sizeof(listing));
             if (chosen < 0) {
                 seedtool_zero(stem, sizeof(stem));
@@ -1481,6 +1484,28 @@ done:
     return outcome;
 }
 
+/* The words stage of a checksum completion: the list, with the entry screen
+ * behind it. Returns 1 once the reader comes forward again, 0 only when they
+ * step back past the entry screen too, and -1 on timeout.
+ *
+ * The two are chained here rather than at the call site so that back means
+ * one screen at every point of it: the list's arrow reopens the entry screen,
+ * and only the entry screen's own arrow reaches the length menu. Backing out
+ * of the list used to drop straight there, two stages at once. */
+static int revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number)
+{
+    for (;;) {
+        const int reviewed = review_prefix(words, count, *by_number);
+        if (reviewed != 0) {
+            return reviewed;
+        }
+        const int entered = enter_mnemonic_words(count, words, by_number);
+        if (entered != 1) {
+            return entered;
+        }
+    }
+}
+
 /* enter_mnemonic_words, then review_and_confirm on the result: the two-step
  * restore_seed actually wants. Kept apart from complete_checksum's own path,
  * which enters a still-partial (11 or 23 word) mnemonic that could never pass
@@ -1505,7 +1530,7 @@ static int restore_mnemonic(const size_t count, char* mnemonic, const size_t mne
     if (outcome == 1) {
         if (join_words(words, count, mnemonic, mnemonic_len)
             && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
-            (void)acknowledge("Invalid checksum", "Check your words", "Fix one to continue");
+            notice("Invalid checksum", "Check your words", "Fix one to continue", "Fix a word");
         }
         outcome = review_and_confirm(words, count, by_number, mnemonic, mnemonic_len);
     }
@@ -1576,7 +1601,7 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
     seedtool_zero(confirmation, sizeof(confirmation));
     if (!ok) {
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
-        (void)acknowledge("Passphrase mismatch", "Nothing was derived", "Try again");
+        notice("Passphrase mismatch", "Nothing was derived", "Try again", "Try again");
     }
     return ok;
 }
@@ -1600,7 +1625,7 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
         show_account_key_qr(title, value);
     } else {
         seedtool_zero(xpub, sizeof(xpub));
-        (void)acknowledge("Error", "Could not derive", NULL);
+        notice("Error", "Could not derive", NULL, "OK");
     }
     seedtool_zero(value, sizeof(value));
 }
@@ -1642,11 +1667,11 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
                 show_account_key_qr("Descriptor", value);
             }
         } else {
-            (void)acknowledge("Error", "Could not derive", NULL);
+            notice("Error", "Could not derive", NULL, "OK");
         }
     } else {
         seedtool_zero(xpub, sizeof(xpub));
-        (void)acknowledge("Error", "Could not derive", NULL);
+        notice("Error", "Could not derive", NULL, "OK");
     }
     seedtool_zero(body, sizeof(body));
     seedtool_zero(value, sizeof(value));
@@ -1659,7 +1684,7 @@ static void show_address_qr(const char* title, const char* address)
 {
     for (;;) {
         if (!seedtool_display_qr(title, address)) {
-            (void)acknowledge("Too long for a QR", title, "Read it as text instead");
+            notice("Too long for a QR", title, "Read it as text instead", "OK");
             return;
         }
         if (wait_key() != KEY_REDRAW) {
@@ -1706,7 +1731,7 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
-        (void)acknowledge("Error", "Could not derive addresses", NULL);
+        notice("Error", "Could not derive addresses", NULL, "OK");
         return false;
     }
     for (uint32_t i = 0; i < ADDRESS_SHOWN_ROWS; ++i) {
@@ -1810,7 +1835,7 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
                     export_qr(mnemonic, passphrase, fphex, type, account, format);
                 }
             } else {
-                (void)acknowledge("Error", "Could not derive account key", NULL);
+                notice("Error", "Could not derive account key", NULL, "OK");
             }
             seedtool_zero(xpub, sizeof(xpub));
         } else if (selected == 1) {
@@ -1869,7 +1894,7 @@ static void show_stackbit(const char* mnemonic)
     uint16_t numbers[24];
     size_t count = 0;
     if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
-        (void)acknowledge("Error", "Could not compute", "word numbers");
+        notice("Error", "Could not compute", "word numbers", "OK");
         return;
     }
     const char* const layouts[] = { "Simple grid", "Physical layout" };
@@ -1924,7 +1949,7 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
     uint16_t numbers[24];
     size_t count = 0;
     if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
-        (void)acknowledge("Error", "Could not compute", "word numbers");
+        notice("Error", "Could not compute", "word numbers", "OK");
         return false;
     }
     const size_t pages = (count + 3) / 4;
@@ -2021,7 +2046,7 @@ static void export_seed_qr(const char* mnemonic)
                 : selected == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
                                 : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 2);
             if (!ok) {
-                (void)acknowledge("Too long for a QR", "Compact SeedQR", "Read it as text instead");
+                notice("Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK");
                 break;
             }
             switch (wait_key()) {
@@ -2038,7 +2063,7 @@ static void export_seed_qr(const char* mnemonic)
             }
         }
     } else {
-        (void)acknowledge("Error", "Could not derive entropy", NULL);
+        notice("Error", "Could not derive entropy", NULL, "OK");
     }
 done:
     seedtool_zero(entropy, sizeof(entropy));
@@ -2074,7 +2099,7 @@ static void show_wallet_data(const char* mnemonic)
         goto done;
     }
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
-        (void)acknowledge("Error", "Derivation failed", NULL);
+        notice("Error", "Derivation failed", NULL, "OK");
         goto done;
     }
     hexstr(fp, sizeof(fp), fphex);
@@ -2096,8 +2121,7 @@ static void show_wallet_data(const char* mnemonic)
             break;
         }
         if (selected == 0) {
-            (void)acknowledge(
-                "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
+            notice("Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none", "OK");
         } else if (selected == 1) {
             uint32_t chosen_account = account;
             if (enter_account(&chosen_account) == 1) {
@@ -2188,7 +2212,7 @@ static int confirm_backup(const char* mnemonic, const size_t count)
         }
         if (!wrong) {
             seedtool_zero(numbers, sizeof(numbers));
-            (void)acknowledge("Backup confirmed", "Words matched", NULL);
+            notice("Backup confirmed", "Words matched", NULL, "Continue");
             return 1;
         }
         if (!nav_acknowledge("Word doesn't match", "Check your backup", NULL, "Try again", false)) {
@@ -2202,45 +2226,64 @@ static void show_generated(seedtool_generated_t* generated)
 {
     char hash[65];
     hexstr(generated->hash, sizeof(generated->hash), hash);
-    if (page_text("Canonical transcript", generated->transcript) && page_text("SHA256", hash)) {
-        /* Backing out of the quiz's first word (confirm_backup's 0) shows
-         * the words again rather than falling through, so back always steps
-         * back one stage instead of skipping past confirmation into the
-         * wallet's passphrase prompt. */
-        while (show_numbered_list(generated->mnemonic, true)) {
-            /* The word list is left by paging forward off its last page - the
-             * same press that meant "next page" for the whole list - so
-             * without this screen the quiz's keyboard simply appeared, with
-             * no way to tell "show me more" from "I have written these down"
-             * and no warning that the words were about to leave the screen.
-             * The quiz's own "word N of M" title says which word it wants but
+    /* Stages, not a chain of && and a while: back has to step back one
+     * screen, and a short-circuit chain has exactly one way out of it - the
+     * whole function. Leaving the SHA256 used to land wherever the transcript
+     * had been entered from, skipping the transcript itself; the word list
+     * and the backup intro did the same. Now every stage's back is the stage
+     * before it, and only the first one leaves. */
+    enum { STAGE_TRANSCRIPT, STAGE_HASH, STAGE_WORDS, STAGE_INTRO, STAGE_QUIZ, STAGE_DONE };
+    int stage = STAGE_TRANSCRIPT;
+    while (stage != STAGE_DONE) {
+        switch (stage) {
+        case STAGE_TRANSCRIPT:
+            stage = page_text("Canonical transcript", generated->transcript) ? STAGE_HASH : STAGE_DONE;
+            break;
+        case STAGE_HASH:
+            stage = page_text("SHA256", hash) ? STAGE_WORDS : STAGE_TRANSCRIPT;
+            break;
+        case STAGE_WORDS:
+            stage = show_numbered_list(generated->mnemonic, true) ? STAGE_INTRO : STAGE_HASH;
+            break;
+        case STAGE_INTRO: {
+            /* The word list is left by taking its confirm bar, so without
+             * this screen the quiz's keyboard simply appeared, with no
+             * warning that the words were about to leave the screen. The
+             * quiz's own "word N of M" title says which word it wants but
              * never why it is asking, so the count is named here instead,
              * before the words go away rather than after.
              *
              * `intro` is sized for the format's worst case rather than its
              * real one: the counts are 4/12 or 8/24, but %u lets the compiler
-             * assume ten digits apiece, and -Wformat-truncation is an error in
-             * the firmware build even though the host build lets it pass. */
+             * assume ten digits apiece, and -Wformat-truncation is an error
+             * in the firmware build even though the host build lets it
+             * pass. */
             char intro[48];
             (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
                 (unsigned)generated->words);
-            const int intro_taken = nav_confirm("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
-            if (intro_taken == NAV_TIMEOUT) {
-                /* Not `continue`: that would repaint the whole mnemonic on
-                 * the way out of a session that has already expired. */
-                break;
-            }
-            if (intro_taken != NAV_CONFIRM) {
-                continue; /* Back: the words again, one stage, as everywhere else. */
-            }
+            const int taken = nav_confirm("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
+            /* A timeout ends it here rather than stepping back: repainting
+             * the whole mnemonic on the way out of an expired session is the
+             * one thing this must not do. */
+            stage = taken == NAV_TIMEOUT ? STAGE_DONE : taken == NAV_CONFIRM ? STAGE_QUIZ : STAGE_WORDS;
+            break;
+        }
+        case STAGE_QUIZ: {
             const int outcome = confirm_backup(generated->mnemonic, generated->words);
-            if (outcome < 0) {
-                break;
-            }
             if (outcome == 1) {
                 show_wallet_data(generated->mnemonic);
-                break;
+                stage = STAGE_DONE;
+            } else {
+                /* Backing out of the quiz's first word lands on the intro,
+                 * one stage, as everywhere else - it used to jump two, back
+                 * to the word list. Two presses now reach the same place. */
+                stage = outcome < 0 ? STAGE_DONE : STAGE_INTRO;
             }
+            break;
+        }
+        default:
+            stage = STAGE_DONE;
+            break;
         }
     }
     seedtool_zero(hash, sizeof(hash));
@@ -2463,7 +2506,7 @@ static int collect_entropy(const int source, const size_t words)
         if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) == SEEDTOOL_OK) {
             show_generated(&generated);
         } else {
-            (void)acknowledge("Error", "Could not generate seed", NULL);
+            notice("Error", "Could not generate seed", NULL, "OK");
         }
     }
     seedtool_zero(values, sizeof(values));
@@ -2549,7 +2592,7 @@ static bool complete_checksum(void)
                  * list of them, with every one still there, rather than to an
                  * empty entry screen. */
                 if (!i) {
-                    outcome = review_prefix(words, count, by_number);
+                    outcome = revisit_prefix(words, count, &by_number);
                     if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
                         outcome = -1;
                     }

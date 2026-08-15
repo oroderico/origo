@@ -131,6 +131,10 @@ void seedtool_render_nav_list(const char* title, const char* const* items, size_
 void seedtool_render_nav_screen(
     const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
 
+/* The same body, one control and no arrow: for a notice the reader can only
+ * acknowledge. The bar is drawn selected, being the only thing to select. */
+void seedtool_render_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm);
+
 /* The same again with the dice/coin quality bar drawn in, for the two screens
  * that bracket an entropy run: the one before it showing the bar empty, and
  * the one after showing it full. */

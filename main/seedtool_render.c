@@ -784,6 +784,21 @@ void seedtool_render_nav_screen4(const char* title, const char* line1, const cha
     draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, true);
 }
 
+/* A screen with one control and no way back, for the notices and errors whose
+ * answer the caller discards. The title is centred across the whole glass
+ * rather than around an arrow, because there is no arrow: on these screens
+ * back and continue always did the same thing, and drawing a control that
+ * leads nowhere would restate in the chrome the very promise the old footer's
+ * "Up/Down back" was making falsely. */
+void seedtool_render_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm)
+{
+    seedtool_render_clear();
+    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    draw_centered(tft_Ubuntu16, line1, 39);
+    draw_centered(tft_Ubuntu16, line2, 65);
+    draw_nav_bar(confirm, true, true);
+}
+
 void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
     const char* confirm, const seedtool_progress_t* progress)
 {

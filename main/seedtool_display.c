@@ -236,6 +236,12 @@ void seedtool_display_nav_screen(
     flush();
 }
 
+void seedtool_display_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm)
+{
+    seedtool_render_nav_notice(title, line1, line2, confirm);
+    flush();
+}
+
 void seedtool_display_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
     const char* confirm, const seedtool_progress_t* progress)
 {
