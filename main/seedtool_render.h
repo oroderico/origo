@@ -136,6 +136,16 @@ void seedtool_render_nav_screen(
  * the one after showing it full. */
 void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, bool on_back,
     const char* confirm, const seedtool_progress_t* progress);
+/* Paged screens under the chrome: three centred body lines (a long value) or
+ * four left-aligned ones (a numbered word list), with the page counter in the
+ * gap above the bar. `selected` is SEEDTOOL_NAV_BACK, SEEDTOOL_NAV_CONFIRM, or
+ * anything else for a cursor that is on the body itself - where neither
+ * control is highlighted, because what the reader is on is the page. */
+void seedtool_render_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
+    size_t selected, const char* confirm, const char* counter);
+void seedtool_render_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
+    const char* line4, size_t selected, const char* confirm, const char* counter);
+
 
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole

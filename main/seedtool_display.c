@@ -243,6 +243,20 @@ void seedtool_display_nav_dice_screen(const char* title, const char* line1, cons
     flush();
 }
 
+void seedtool_display_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
+    const size_t selected, const char* confirm, const char* counter)
+{
+    seedtool_render_nav_screen3(title, line1, line2, line3, selected, confirm, counter);
+    flush();
+}
+
+void seedtool_display_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
+    const char* line4, const size_t selected, const char* confirm, const char* counter)
+{
+    seedtool_render_nav_screen4(title, line1, line2, line3, line4, selected, confirm, counter);
+    flush();
+}
+
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     const size_t selected, const size_t position, const size_t total)
 {

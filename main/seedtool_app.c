@@ -101,8 +101,6 @@ static bool chord_learned;
 static bool orientation_flipped;
 static unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT;
 
-static const char* nav_hint(void) { return chord_learned ? "" : "   " NAV_FOOTER; }
-
 static void seedtool_require(const bool condition)
 {
     if (!condition) {
@@ -113,18 +111,6 @@ static void seedtool_require(const bool condition)
 static void screen_text(const char* title, const char* line1, const char* line2, const char* footer)
 {
     seedtool_display_screen(title, line1, line2, footer);
-}
-
-static void screen_text3(
-    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
-{
-    seedtool_display_screen3(title, line1, line2, line3, footer);
-}
-
-static void screen_text4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer)
-{
-    seedtool_display_screen4(title, line1, line2, line3, line4, footer);
 }
 
 /* A flipped orientation means the case, and the buttons wired to it, are
@@ -311,6 +297,31 @@ static int nav_confirm(
             return NAV_TIMEOUT;
         }
     }
+}
+
+/* Where the cursor sits on a paged screen: 0 is the back arrow, 1..pages are
+ * the pages themselves, and pages + 1 is the confirm bar. Moving down is
+ * therefore reading forward - the cursor *is* the reading position - and the
+ * first page's neighbour above is the arrow rather than the way out. That is
+ * the fix these screens needed: pressing up on a one-page transcript used to
+ * leave it altogether, which from show_generated meant falling all the way
+ * back to the menu with no warning that a press had done it. */
+static size_t page_step(const size_t position, const size_t pages, const bool forward)
+{
+    const size_t ring = pages + 2;
+    return (position + (forward ? 1 : ring - 1)) % ring;
+}
+
+/* The page the body shows for a cursor position: the arrow reads with the
+ * first page behind it, the bar with the last. */
+static size_t page_shown(const size_t position, const size_t pages)
+{
+    return !position ? 0 : position > pages ? pages - 1 : position - 1;
+}
+
+static size_t page_selection(const size_t position, const size_t pages)
+{
+    return !position ? SEEDTOOL_NAV_BACK : position > pages ? SEEDTOOL_NAV_CONFIRM : position - 1;
 }
 
 /* nav_confirm() with the entropy quality bar drawn in: the two screens that
@@ -655,7 +666,9 @@ static bool page_text(const char* title, const char* text)
         ++lines;
     }
     const size_t pages = (lines + 2) / 3;
-    size_t page = 0;
+    /* Opens on the first page, not on the confirm bar: reading is what this
+     * screen is for, so the cursor starts where the reading does. */
+    size_t position = 1;
     bool advanced;
     /* Hoisted out of the loop so the single exit below can wipe them: what
      * these three hold is whatever the caller is paging, and the callers page
@@ -665,6 +678,7 @@ static bool page_text(const char* title, const char* text)
     char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1];
     for (;;) {
         char footer[48];
+        const size_t page = page_shown(position, pages);
         const size_t first = page * 3;
         memcpy(line1, text + start[first], length[first]);
         line1[length[first]] = '\0';
@@ -678,25 +692,29 @@ static bool page_text(const char* title, const char* text)
             memcpy(line3, text + start[first + 2], length[first + 2]);
             line3[length[first + 2]] = '\0';
         }
-        (void)snprintf(footer, sizeof(footer), "%u/%u%s", (unsigned)(page + 1), (unsigned)pages, nav_hint());
-        screen_text3(title, line1, line2, line3, footer);
+        (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
+        seedtool_display_nav_screen3(
+            title, line1, line2, line3, page_selection(position, pages), "Continue", footer);
         switch (wait_key()) {
         case KEY_SELECT:
-            advanced = true;
-            goto done;
-        case KEY_NEXT:
-            if (page + 1 >= pages) {
-                advanced = true;
-                goto done;
-            }
-            ++page;
-            break;
-        case KEY_PREV:
-            if (!page) {
+            if (!position) {
                 advanced = false;
                 goto done;
             }
-            --page;
+            if (position > pages) {
+                advanced = true;
+                goto done;
+            }
+            /* The chord on a page reads on rather than doing nothing: it is
+             * the same direction the old one went, one step at a time now
+             * instead of straight out of the screen. */
+            position = page_step(position, pages, true);
+            break;
+        case KEY_NEXT:
+            position = page_step(position, pages, true);
+            break;
+        case KEY_PREV:
+            position = page_step(position, pages, false);
             break;
         case KEY_REDRAW:
             break;
@@ -1845,7 +1863,11 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
         return false;
     }
     const size_t pages = (count + 3) / 4;
-    size_t page = 0;
+    /* Opens on the first page, like page_text: these are words to be written
+     * down, so the cursor starts where the reading does rather than on the
+     * way out. `cursor`, not `position` - that name is taken below by the
+     * word's own place in the mnemonic. */
+    size_t cursor = 1;
     bool advanced;
     /* Hoisted for the same reason as page_text's: every exit already wiped
      * `numbers`, the dictionary positions, while leaving the words those
@@ -1853,6 +1875,7 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
     char lines[4][24] = { { 0 } };
     for (;;) {
         memset(lines, 0, sizeof(lines));
+        const size_t page = page_shown(cursor, pages);
         const size_t first = page * 4;
         for (size_t i = 0; i < 4 && first + i < count; ++i) {
             const size_t position = first + i + 1;
@@ -1872,25 +1895,25 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
         }
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        screen_text4(show_words ? "BIP39 words" : "BIP39 word numbers", lines[0], lines[1], lines[2], lines[3],
-            footer);
+        seedtool_display_nav_screen4(show_words ? "BIP39 words" : "BIP39 word numbers", lines[0], lines[1], lines[2],
+            lines[3], page_selection(cursor, pages), "Continue", footer);
         switch (wait_key()) {
         case KEY_SELECT:
-            advanced = true;
-            goto done;
-        case KEY_NEXT:
-            if (page + 1 >= pages) {
-                advanced = true;
-                goto done;
-            }
-            ++page;
-            break;
-        case KEY_PREV:
-            if (!page) {
+            if (!cursor) {
                 advanced = false;
                 goto done;
             }
-            --page;
+            if (cursor > pages) {
+                advanced = true;
+                goto done;
+            }
+            cursor = page_step(cursor, pages, true);
+            break;
+        case KEY_NEXT:
+            cursor = page_step(cursor, pages, true);
+            break;
+        case KEY_PREV:
+            cursor = page_step(cursor, pages, false);
             break;
         case KEY_REDRAW:
             break;

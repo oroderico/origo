@@ -1410,6 +1410,39 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
+    /* The paged screens. Their bodies run lower than the two-line ones -
+     * screen4's fourth row ends at 103 - and the page counter goes in what is
+     * left, so the band that must stay clear is only 116..118. Body lines are
+     * already held to their own widths by seedtool_render_fit, which is what
+     * page_text splits by; what is new here is the counter, and whether the
+     * two together clear the bar. */
+    static const size_t cursors[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
+    for (size_t c = 0; c < sizeof(cursors) / sizeof(cursors[0]); ++c) {
+        /* A full-width transcript line, and the widest counter either paged
+         * screen can reach: MAX_PAGE_LINES=24 gives page_text eight pages. */
+        seedtool_render_nav_screen3("Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1", cursors[c], "Continue", "8/8");
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+            return false;
+        }
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            return false;
+        }
+        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            return false;
+        }
+        seedtool_render_nav_screen4("BIP39 word numbers", "21. mosquito", "22. mosquito", "23. mosquito",
+            "24. mosquito", cursors[c], "Continue", "6/6");
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+            return false;
+        }
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            return false;
+        }
+        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            return false;
+        }
+    }
     return true;
 }
 

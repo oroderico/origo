@@ -76,6 +76,10 @@
 #define NAV_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * NAV_ROW_HEIGHT - 2)
 #define NAV_BAR_Y 118
 #define NAV_BAR_HEIGHT 17
+/* Between the lowest body line a paged screen draws (screen4's fourth, ending
+ * at 103) and the bar. The small face fits the 14px left over; the 16px one
+ * would not. */
+#define NAV_COUNTER_Y 105
 
 /* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
  * xpub in one image. Raising it again is a compile error rather than a code
@@ -746,6 +750,40 @@ void seedtool_render_dice_screen(const char* title, const char* line1, const cha
     seedtool_render_screen(title, line1, line2, footer);
     draw_quality_bar(progress);
 }
+/* The page counter, in the gap the body lines leave above the confirm bar.
+ * Small face: it is a position indicator, not a value to transcribe. */
+static void draw_nav_counter(const char* counter)
+{
+    if (counter) {
+        draw_centered_in(tft_DefaultFont, counter, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_COUNTER_Y, COLOR_WHITE);
+    }
+}
+
+void seedtool_render_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
+    const size_t selected, const char* confirm, const char* counter)
+{
+    seedtool_render_clear();
+    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
+    draw_centered(tft_Ubuntu16, line1, 33);
+    draw_centered(tft_Ubuntu16, line2, 58);
+    draw_centered(tft_Ubuntu16, line3, 83);
+    draw_nav_counter(counter);
+    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, true);
+}
+
+void seedtool_render_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
+    const char* line4, const size_t selected, const char* confirm, const char* counter)
+{
+    seedtool_render_clear();
+    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
+    draw_left(tft_Ubuntu16, line1, SCREEN4_TEXT_X, 28);
+    draw_left(tft_Ubuntu16, line2, SCREEN4_TEXT_X, 48);
+    draw_left(tft_Ubuntu16, line3, SCREEN4_TEXT_X, 68);
+    draw_left(tft_Ubuntu16, line4, SCREEN4_TEXT_X, 88);
+    draw_nav_counter(counter);
+    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, true);
+}
+
 void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
     const char* confirm, const seedtool_progress_t* progress)
 {
