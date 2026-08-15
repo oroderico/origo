@@ -347,7 +347,15 @@ static int enter_value(const char* title, const unsigned position, const unsigne
          * mis-keyed roll is caught against the paper now rather than at the end
          * of ninety-nine of them. Only its tail fits, which is the part that
          * just changed. */
-        if (progress) {
+        /* A plain number scrolls in its own box, the same shape the word-number
+         * field uses - up and down are the value, and there is nothing else on
+         * screen to hunt through. A formatted value (a card, "A Clubs") is too
+         * wide for a box and stays on the text screen, where the running
+         * transcript sits under it. */
+        if (!format) {
+            seedtool_display_value_box(
+                heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
+        } else if (progress) {
             seedtool_display_dice_screen(
                 heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
         } else {
@@ -871,93 +879,123 @@ static int enter_word(const size_t position, const size_t total, char* output, c
 /* One BIP39 word, entered as its one-based number instead of its letters, for a
  * backup that records numbers. Same contract as enter_word(): 1 when a word was
  * chosen, 0 when the user deleted back out of this word, -1 on timeout or
- * overflow. Only digits that still lead to a word number are reachable, and the
- * number is shown as its word before it is accepted: a digit misread off paper
- * is otherwise a different seed with no sign that anything went wrong. */
+ * overflow. The number is shown as its word before it is accepted: a digit
+ * misread off paper is otherwise a different seed with no sign that anything
+ * went wrong.
+ *
+ * Four boxes, always four, scrolled one at a time - the printed wordlist pads
+ * to four digits and whoever reads `0004` off it types all four, so a fixed
+ * width costs nothing and removes the Accept key along with the question of
+ * when a number is finished. Only digits that still leave a word number
+ * reachable are on the ring, which is what keeps 2049 untypeable while 2048
+ * stays reachable; the ring carries a backspace past the last digit, the way
+ * enter_value's own ring carries [back].
+ *
+ * Replaces a twelve-key keypad the reader had to walk a cursor across. Two
+ * buttons that mean "the digit goes up" and "the digit goes down" need no
+ * hunting, and the row of boxes shows how much is left to type without a
+ * separate readout. */
 static int enter_word_number(const size_t position, const size_t total, char* output, const size_t output_len)
 {
     char digits[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
-    size_t digits_len = 0;
-    size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
-    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
+    /* What each box shows, including the one being scrolled. */
+    char shown[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
+    size_t at = 0;
     char title[24];
     (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)position, (unsigned)total);
 
+    /* The ring for the current box: the digits still reachable, then backspace.
+     * Rebuilt whenever the box changes, since which digits are reachable
+     * depends on the ones already set. */
+    char ring[SEEDTOOL_DIGITS + 1];
+    size_t ring_len = 0, on = 0;
+    bool rebuild = true;
+
     for (;;) {
-        bool reachable[SEEDTOOL_DIGITS] = { false };
-        bool enabled[WORD_NUMBER_KEYS] = { false };
-        (void)seedtool_next_digits(digits, digits_len, reachable);
-        const unsigned number = seedtool_word_number(digits, digits_len);
-        for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
-            const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
-            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
-                : key == SEEDTOOL_KEY_ACCEPT           ? number != 0
-                                                       : reachable[key - '0'];
-        }
-        /* Once the typed digits are themselves a complete valid number and
-         * cannot be extended any further, every digit key goes dark at once
-         * and the cursor has to land somewhere. nearest_enabled's ring
-         * distance to Accept vs. Backspace from here depends on exactly
-         * which key the reader was last on - circumstantial, and it lands on
-         * Backspace as often as not. Accept is the deliberate target
-         * whenever it's actually reachable; only fall back to the generic
-         * search when it isn't (still mid-prefix, no complete number yet). */
-        selected = !enabled[selected] && number ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
-        bool picked = false;
-        while (!picked) {
-            seedtool_display_keyboard(
-                title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, position, total);
-            switch (wait_key()) {
-            case KEY_SELECT:
-                picked = true;
-                break;
-            case KEY_PREV:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
-                break;
-            case KEY_NEXT:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
-                break;
-            case KEY_REDRAW:
-                break;
-            default:
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
+        if (rebuild) {
+            bool reachable[SEEDTOOL_DIGITS] = { false };
+            (void)seedtool_next_digits(digits, at, reachable);
+            ring_len = 0;
+            for (size_t d = 0; d < SEEDTOOL_DIGITS; ++d) {
+                if (reachable[d]) {
+                    ring[ring_len++] = (char)('0' + d);
+                }
             }
+            ring[ring_len++] = SEEDTOOL_KEY_BACKSPACE;
+            on = 0;
+            rebuild = false;
         }
 
-        const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
-        if (pressed == SEEDTOOL_KEY_ACCEPT) {
-            const char* const word = seedtool_word(number - 1);
-            char counted[32];
-            (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
-            const seedtool_key_t key = confirm(title, word, counted);
-            seedtool_zero(counted, sizeof(counted));
-            if (key == KEY_SELECT) {
-                const int result = !word || strlen(word) + 1 > output_len ? -1 : 1;
-                if (result == 1) {
-                    strcpy(output, word);
-                }
-                seedtool_zero(digits, sizeof(digits));
-                return result;
-            }
-            if (key == KEY_TIMEOUT) {
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
-            }
-            /* Went back: the number is cleared rather than left half-entered, so
-             * what is on screen is always the whole of what was typed. */
+        memset(shown, 0, sizeof(shown));
+        memcpy(shown, digits, at);
+        shown[at] = ring[on];
+        for (size_t i = at + 1; i < SEEDTOOL_MAX_WORD_DIGITS; ++i) {
+            shown[i] = ' ';
+        }
+        seedtool_display_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, ACK_FOOTER, NULL);
+
+        seedtool_key_t key = wait_key();
+        if (key == KEY_REDRAW) {
+            continue;
+        }
+        if (key == KEY_TIMEOUT) {
             seedtool_zero(digits, sizeof(digits));
-            digits_len = 0;
-        } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
-            if (!digits_len) {
+            seedtool_zero(shown, sizeof(shown));
+            return -1;
+        }
+        if (key == KEY_PREV) {
+            on = on ? on - 1 : ring_len - 1;
+            continue;
+        }
+        if (key == KEY_NEXT) {
+            on = on + 1 < ring_len ? on + 1 : 0;
+            continue;
+        }
+
+        /* KEY_SELECT: commit whatever the box is showing. */
+        if (ring[on] == SEEDTOOL_KEY_BACKSPACE) {
+            if (!at) {
                 seedtool_zero(digits, sizeof(digits));
+                seedtool_zero(shown, sizeof(shown));
                 return 0;
             }
-            digits[--digits_len] = '\0';
-        } else if (digits_len < SEEDTOOL_MAX_WORD_DIGITS) {
-            digits[digits_len++] = pressed;
-            digits[digits_len] = '\0';
+            digits[--at] = '\0';
+            rebuild = true;
+            continue;
         }
+        digits[at++] = ring[on];
+        digits[at] = '\0';
+        rebuild = true;
+        if (at < SEEDTOOL_MAX_WORD_DIGITS) {
+            continue;
+        }
+
+        /* Four digits in: the number is complete by construction, since the
+         * ring never offered a digit that could not lead to one. */
+        const unsigned number = seedtool_word_number(digits, at);
+        const char* const word = number ? seedtool_word(number - 1) : NULL;
+        char counted[32];
+        (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
+        const seedtool_key_t answer = word ? confirm(title, word, counted) : KEY_PREV;
+        seedtool_zero(counted, sizeof(counted));
+        if (answer == KEY_SELECT) {
+            const int result = strlen(word) + 1 > output_len ? -1 : 1;
+            if (result == 1) {
+                strcpy(output, word);
+            }
+            seedtool_zero(digits, sizeof(digits));
+            seedtool_zero(shown, sizeof(shown));
+            return result;
+        }
+        if (answer == KEY_TIMEOUT) {
+            seedtool_zero(digits, sizeof(digits));
+            seedtool_zero(shown, sizeof(shown));
+            return -1;
+        }
+        /* Went back from the confirmation: the last digit reopens, so a wrong
+         * final digit costs one press rather than the whole number. */
+        digits[--at] = '\0';
+        rebuild = true;
     }
 }
 
