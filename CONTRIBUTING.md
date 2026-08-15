@@ -34,10 +34,19 @@ exactly what CI (`.github/workflows/build.yml`) checks:
 # plus the RNG-absence and pure-function checks.
 python3 -m unittest discover -s tests -v
 
-# QR encoder, built standalone with warnings as errors.
-cc -std=c11 -Wall -Wextra -Werror -DLOCK_VERSION=5 -Imain \
+# QR encoder, built standalone with warnings as errors. No -DLOCK_VERSION:
+# the firmware does not define it either, so qrcode.h's version guards are
+# preprocessed out here exactly as they are there.
+cc -std=c11 -Wall -Wextra -Werror -Imain \
   main/qrcode.c tests/qrcode_smoke.c -o /tmp/origo-qrcode-smoke
 /tmp/origo-qrcode-smoke
+
+# The same self-test again, instrumented: the out-of-bounds access and the
+# undefined behaviour that reading the code did not think to look for.
+cmake -S host -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DORIGO_SANITIZE=ON
+cmake --build build-sanitize --parallel
+./build-sanitize/origo-simulator --self-test
 
 # Firmware build, twice, independently audited and then compared
 # byte-for-byte: a non-reproducible build is treated as a failure.
