@@ -79,7 +79,8 @@ comments before writing your own.
 ## Adding a dependency
 
 Treat this as an exceptional change, not a routine one. `tools/audit_origo_elf.py`
-enforces a 295 KiB firmware image and rejects linked wallet, radio, OTA,
+enforces a 512 KiB firmware image — an auditability budget, not a hardware
+limit: the partition holds twice that — and rejects linked wallet, radio, OTA,
 persistence, battery, generic-graphics, transaction, PSBT and Elements symbols
 by name — a dependency has to be justified against that list, not just against
 whether it compiles. Origo has turned down a two-kilobyte size win before

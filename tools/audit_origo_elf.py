@@ -90,7 +90,18 @@ def main():
     parser.add_argument("elf", type=Path)
     parser.add_argument("--map", dest="map_file", type=Path)
     parser.add_argument("--bin", dest="bin_file", type=Path)
-    parser.add_argument("--max-bin-size", type=int, default=295 * 1024)
+    # An auditability budget, not a hardware limit: the factory partition holds
+    # 1 MiB (partitions.csv), so this is half of what would actually fit. The
+    # project's claim is that it is small enough to read in full, and an image
+    # that grows without anyone noticing is one nobody rereads - so the ceiling
+    # exists to make growth a conversation rather than an accident.
+    #
+    # It was 285 KiB in the first commit and 295 from the one that raised it "to
+    # fit", neither of which was a chosen number. 512 KiB is: half the
+    # partition, roughly 70% headroom over today's image, and far enough away
+    # that hitting it means something has genuinely changed shape rather than
+    # that the last feature was unlucky.
+    parser.add_argument("--max-bin-size", type=int, default=512 * 1024)
     parser.add_argument("--nm", default="xtensa-esp32-elf-nm")
     args = parser.parse_args()
 

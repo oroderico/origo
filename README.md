@@ -611,9 +611,10 @@ The application component contains only the deterministic core, TTGO display
 driver, two fonts and a version-6 QR encoder. Its libwally component is built
 without Elements. The audit rejects linked wallet, radio, persistence, OTA update,
 battery, generic graphics, transaction, PSBT and Elements symbols and enforces
-a 295 KiB image limit. LEDC is the one peripheral driver let through that list,
-solely for the backlight's brightness PWM - it carries no wallet, radio or
-persistence surface of its own. The partition table contains only the factory
+a 512 KiB image ceiling — half the 1 MiB factory partition, so a budget for
+keeping the firmware readable rather than a limit of the hardware. LEDC is the
+one peripheral driver let through that list, solely for the backlight's
+brightness PWM - it carries no wallet, radio or persistence surface of its own. The partition table contains only the factory
 application: there is no NVS, PHY-data or OTA slot.
 
 Wi-Fi and Bluetooth are absent rather than disabled. Neither appears in
