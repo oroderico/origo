@@ -1510,14 +1510,14 @@ static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Bac
  * only the derivation a type or account change costs today. Returns false
  * (having already told the reader) on a derivation error. */
 static bool derive_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    const uint32_t account, const seedtool_chain_t chain)
+    const uint32_t account, const seedtool_chain_t chain, const char* const prefix)
 {
     /* Cleared on entry as well as on the way out, exactly as review_labels is
      * and for the same reason: these are .bss, so a failed derivation must not
      * leave the previous account's rows sitting here to be wiped by a caller
      * that this time never gets far enough to do it. */
     seedtool_zero(address_labels, sizeof(address_labels));
-    screen_text("Addresses", "Deriving addresses...", NULL, NULL);
+    screen_text(prefix, "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
@@ -1550,10 +1550,11 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
  * top of the list. Go to index only moves `cursor` when it lands inside the
  * shown rows - an index past ADDRESS_SHOWN_ROWS has no row of its own to
  * leave the cursor on. */
-static int browse_addresses(char* address_out, const size_t address_out_len, size_t* cursor)
+static int browse_addresses(
+    const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
 {
     for (;;) {
-        const int selected = choose_at("Addresses", address_items, ADDRESS_SHOWN_ROWS + 2, true, *cursor);
+        const int selected = choose_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 2, true, *cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
             const int result = enter_address_index(&index);
@@ -1690,7 +1691,17 @@ static void show_addresses(
         return;
     }
     const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
-    if (!derive_addresses(mnemonic, passphrase, type, account, chain)) {
+    /* The path every row on this screen shares, and the screen's title. A list
+     * of a hundred addresses is the one place the reader stays long enough to
+     * forget what they are looking at, and its rows carry only an index and an
+     * address - so the type, the account and the branch live in the title
+     * rather than being remembered from the menu that opened it. Each address's
+     * own path is this same string plus its index, built from it rather than
+     * formatted a second time, so the title cannot drift from the rows. */
+    char prefix[24];
+    (void)snprintf(
+        prefix, sizeof(prefix), "m/%u'/0'/%u'/%u", (unsigned)type, (unsigned)account, (unsigned)chain);
+    if (!derive_addresses(mnemonic, passphrase, type, account, chain, prefix)) {
         return;
     }
     /* Loops back to the address list itself after each address's QR, rather
@@ -1704,14 +1715,20 @@ static void show_addresses(
     size_t cursor = 0;
     for (;;) {
         char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        const int index = browse_addresses(address, sizeof(address), &cursor);
+        const int index = browse_addresses(prefix, address, sizeof(address), &cursor);
         if (index < 0) {
             seedtool_zero(address, sizeof(address));
             break;
         }
-        char path[32];
-        (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)type, (unsigned)account, (unsigned)chain,
-            (unsigned)index);
+        /* The prefix, a separator and an index. Sized for a ten-digit index
+         * rather than the two SEEDTOOL_MAX_ADDRESS_INDEX actually allows:
+         * browse_addresses bounds the value, but that bound does not survive
+         * into this frame for the compiler's format-truncation analysis to
+         * see, and a buffer wide enough for what it can prove beats silencing
+         * what it cannot - the same trade the %.*s precisions in this file
+         * make. */
+        char path[sizeof(prefix) + 12];
+        (void)snprintf(path, sizeof(path), "%s/%u", prefix, (unsigned)index);
         if (page_text(path, address)) {
             show_address_qr(path, address);
         }
