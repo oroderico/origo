@@ -1254,11 +1254,14 @@ static bool nav_title_stays_in_its_column(const int x)
 
 /* The confirm bar's band (NAV_BAR_Y..the bottom of the glass), with its label
  * required to stay a few pixels clear of both edges. */
+/* NAV_BAR_Y in seedtool_render.c, kept in sync with this. */
+#define NAV_BAR_BAND_Y 118
+
 static bool nav_bar_label_fits(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
     int leftmost = SEEDTOOL_DISPLAY_WIDTH, rightmost = -1;
-    for (int y = 118; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+    for (int y = NAV_BAR_BAND_Y; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
         for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
             if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0x0000) {
                 continue;
@@ -1266,7 +1269,7 @@ static bool nav_bar_label_fits(void)
             /* The rule drawn along the top of an unfilled bar spans the whole
              * width and is not the label; skipped by row, not by colour, so a
              * label sharing the rule's colour still counts. */
-            if (y == 118) {
+            if (y == NAV_BAR_BAND_Y) {
                 continue;
             }
             if (x < leftmost) {
@@ -1333,6 +1336,15 @@ static bool nav_chrome_bands_do_not_collide(void)
      * towards the bar - and the bar's own label is the widest this chrome
      * carries anywhere. Strings copied from seedtool_app.c, the same way the
      * dice hints above are. */
+    /* A menu wears the chrome with no confirm bar at all: its rows are its
+     * actions, so the arrow is the only control and the bar's band must stay
+     * dark rather than holding an empty outline. */
+    for (size_t s = 0; s < 2; ++s) {
+        seedtool_render_nav_list("Word entry", words, 2, s ? SEEDTOOL_NAV_BACK : 0, 0, NULL, false);
+        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT)) {
+            return false;
+        }
+    }
     static const struct {
         const char* title;
         const char* line1;

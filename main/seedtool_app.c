@@ -404,6 +404,31 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
     }
 }
 
+/* A menu under the nav chrome: what used to be a Back row at the bottom of
+ * the list is the arrow in the title bar instead, where every other screen
+ * now keeps it. No confirm bar - a menu's rows are its actions, and there is
+ * nothing left to confirm once one is picked.
+ *
+ * Taking the arrow returns `count`, the index the Back row itself used to
+ * occupy, so a caller keeps the dispatch it already had: drop "Back" from the
+ * array and the checks against its old index still read the same answer.
+ * `cursor` opens on the first option rather than on the arrow - a menu has no
+ * confirm for the usual default to land on, and the options are the point. */
+static int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
+{
+    const int selected = choose_nav(title, items, count, NULL, false, cursor);
+    if (selected == NAV_BACK) {
+        return (int)count;
+    }
+    return selected == NAV_TIMEOUT ? -1 : selected;
+}
+
+static int choose_menu(const char* title, const char* const* items, const size_t count)
+{
+    size_t cursor = 0;
+    return choose_menu_at(title, items, count, &cursor);
+}
+
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
 {
@@ -1253,8 +1278,8 @@ static int enter_address_index(uint32_t* value)
 static int enter_mnemonic_words(
     const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
 {
-    const char* methods[] = { "Type the letters", "Enter word numbers", "Back" };
-    const int method = choose("Word entry", methods, 3, true);
+    const char* methods[] = { "Type the letters", "Enter word numbers" };
+    const int method = choose_menu("Word entry", methods, 2);
     if (method < 0) {
         return -1;
     }
@@ -1537,8 +1562,8 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
 
 static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
-    const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
-    const int selected = choose("Optional passphrase", options, 3, true);
+    const char* options[] = { "No passphrase", "Enter passphrase" };
+    const int selected = choose_menu("Optional passphrase", options, 2);
     if (selected != 1) {
         passphrase[0] = '\0';
         /* Only "No passphrase" derives; back and timeout both leave without. */
@@ -1698,7 +1723,6 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
         address_items[i] = address_labels[i];
     }
     address_items[ADDRESS_SHOWN_ROWS] = "Go to index";
-    address_items[ADDRESS_SHOWN_ROWS + 1] = "Back";
     return true;
 }
 
@@ -1713,7 +1737,7 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
 static int browse_addresses(char* address_out, const size_t address_out_len, size_t* cursor)
 {
     for (;;) {
-        const int selected = choose_at("Addresses", address_items, ADDRESS_SHOWN_ROWS + 2, true, *cursor);
+        const int selected = choose_menu_at("Addresses", address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
             const int result = enter_address_index(&index);
@@ -1743,9 +1767,9 @@ static int browse_addresses(char* address_out, const size_t address_out_len, siz
                 addresses[index]);
             return (int)index;
         }
-        if (selected >= 0) {
-            *cursor = (size_t)selected;
-        }
+        /* No cursor assignment here: choose_menu_at has already left it on
+         * whatever was taken, and writing the arrow's own return value back
+         * would park it past the end of the list. */
         if (selected >= 0 && selected < (int)ADDRESS_SHOWN_ROWS) {
             (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
                 addresses[selected]);
@@ -1762,16 +1786,16 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
 {
     const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
     for (;;) {
-        const char* items[] = { "Account key", "Descriptor", "Addresses", "Back" };
-        const int selected = choose(title, items, 4, true);
+        const char* items[] = { "Account key", "Descriptor", "Addresses" };
+        const int selected = choose_menu(title, items, 3);
         if (selected < 0 || selected == 3) {
             return;
         }
         if (selected == 0) {
             seedtool_key_format_t format = SEEDTOOL_XPUB;
             if (type == SEEDTOOL_BIP84) {
-                const char* const formats[] = { "xpub", "zpub", "Back" };
-                const int chosen = choose("Account key format", formats, 3, true);
+                const char* const formats[] = { "xpub", "zpub" };
+                const int chosen = choose_menu("Account key format", formats, 2);
                 if (chosen < 0 || chosen == 2) {
                     continue;
                 }
@@ -1799,8 +1823,8 @@ static void show_type_menu(const char* mnemonic, const char* passphrase, const c
          * key's xpub/zpub choice above is asked: the list itself is identical
          * either way, so the question belongs before it rather than as a mode
          * to toggle inside it. */
-        const char* const branches[] = { "Receive", "Change", "Back" };
-        const int branch = choose("Addresses", branches, 3, true);
+        const char* const branches[] = { "Receive", "Change" };
+        const int branch = choose_menu("Addresses", branches, 2);
         if (branch < 0 || branch == 2) {
             continue;
         }
@@ -1848,8 +1872,8 @@ static void show_stackbit(const char* mnemonic)
         (void)acknowledge("Error", "Could not compute", "word numbers");
         return;
     }
-    const char* const layouts[] = { "Simple grid", "Physical layout", "Back" };
-    const int layout = choose("Stackbit 1248", layouts, 3, true);
+    const char* const layouts[] = { "Simple grid", "Physical layout" };
+    const int layout = choose_menu("Stackbit 1248", layouts, 2);
     if (layout < 0 || layout == 2) {
         seedtool_zero(numbers, sizeof(numbers));
         return;
@@ -2023,8 +2047,8 @@ done:
 static void show_backup_menu(const char* mnemonic)
 {
     for (;;) {
-        const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR", "Back" };
-        const int selected = choose("Backup", items, 5, true);
+        const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR" };
+        const int selected = choose_menu("Backup", items, 4);
         if (selected < 0 || selected == 4) {
             return;
         }
@@ -2457,14 +2481,14 @@ static int collect_entropy(const int source, const size_t words)
 static bool create_seed(void)
 {
     for (;;) {
-        const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Back" };
-        const int source = choose("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), true);
+        const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
+        const int source = choose_menu("Entropy source", sources, sizeof(sources) / sizeof(sources[0]));
         if (source < 0 || source == 4) {
             return false;
         }
         for (;;) {
-            const char* lengths[] = { "12 words", "24 words", "Back" };
-            const int length = choose("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]), true);
+            const char* lengths[] = { "12 words", "24 words" };
+            const int length = choose_menu("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]));
             if (length < 0) {
                 return false;
             }
@@ -2489,8 +2513,8 @@ static bool create_seed(void)
 static bool complete_checksum(void)
 {
     for (;;) {
-        const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins", "Back" };
-        const int selected = choose("Complete checksum", lengths, 3, true);
+        const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins" };
+        const int selected = choose_menu("Complete checksum", lengths, 2);
         if (selected < 0 || selected == 2) {
             return false;
         }
@@ -2561,8 +2585,8 @@ static bool complete_checksum(void)
 static void show_new_seed_menu(void)
 {
     for (;;) {
-        const char* items[] = { "From entropy", "Complete checksum", "Back" };
-        const int selected = choose("New Seed", items, 3, true);
+        const char* items[] = { "From entropy", "Complete checksum" };
+        const int selected = choose_menu("New Seed", items, 2);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -2581,8 +2605,8 @@ static void show_new_seed_menu(void)
 static void restore_seed(void)
 {
     for (;;) {
-        const char* lengths[] = { "12 words", "24 words", "Back" };
-        const int selected = choose("Restore mnemonic", lengths, 3, true);
+        const char* lengths[] = { "12 words", "24 words" };
+        const int selected = choose_menu("Restore mnemonic", lengths, 2);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -2644,8 +2668,8 @@ static void show_settings_menu(void)
             orientation_flipped ? "On" : "Off");
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
-        const char* items[] = { orientation_item, brightness_item, "About", "Back" };
-        const int selected = choose("Settings", items, 4, true);
+        const char* items[] = { orientation_item, brightness_item, "About" };
+        const int selected = choose_menu("Settings", items, 3);
         if (selected < 0 || selected == 3) {
             return;
         }
