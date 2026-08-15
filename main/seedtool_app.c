@@ -268,6 +268,27 @@ static int choose(const char* title, const char* const* items, const size_t coun
     return choose_at(title, items, count, hint, 0);
 }
 
+/* A menu that reopens where it was left rather than at its first row. Every
+ * looping menu here wants this: the row just chosen is the one whose result
+ * the reader is coming back from, and it is far more often the neighbour of
+ * their next choice than the top of the list is. `cursor` lives in the
+ * caller's frame for as long as that screen does, so a fresh visit still
+ * starts at the top - the same span the address list keeps its own position
+ * over, and for the same reason.
+ *
+ * Back and a timeout leave `cursor` alone: they end the screen, so there is
+ * nothing to come back to, and writing the Back row's index there would mean
+ * a screen re-entered later opened on the way out of itself. */
+static int choose_kept(
+    const char* title, const char* const* items, const size_t count, const bool hint, size_t* cursor)
+{
+    const int selected = choose_at(title, items, count, hint, *cursor);
+    if (selected >= 0) {
+        *cursor = (size_t)selected;
+    }
+    return selected;
+}
+
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
 {
@@ -1917,9 +1938,10 @@ done:
 
 static void show_backup_menu(const char* mnemonic)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR", "Back" };
-        const int selected = choose("Backup", items, 5, true);
+        const int selected = choose_kept("Backup", items, 5, true, &cursor);
         if (selected < 0 || selected == 4) {
             return;
         }
@@ -1955,6 +1977,7 @@ static void show_backup_menu(const char* mnemonic)
 static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
     char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], uint8_t fp[4], char fphex[9])
 {
+    size_t cursor = 0;
     for (;;) {
         char account_item[16];
         (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)*account);
@@ -1963,7 +1986,7 @@ static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtoo
         /* Says whether one is set, never anything about what it is. */
         const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
         const char* items[] = { account_item, type_item, passphrase_item, "Back" };
-        const int selected = choose("Customize", items, 4, true);
+        const int selected = choose_kept("Customize", items, 4, true, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
@@ -2013,10 +2036,11 @@ static void show_wallet_data(const char* mnemonic)
      * itself, not a derivation) reads account or type. */
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
+    size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "Master fingerprint", "Customize", "Account key", "Descriptor", "Addresses", "Backup",
             "Done / erase" };
-        const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
+        const int selected = choose_kept("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
         if (selected < 0 || selected == 6) {
             break;
         }
@@ -2413,9 +2437,10 @@ static int collect_entropy(const int source, const size_t words)
  * plain "back one level". */
 static bool create_seed(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "Back" };
-        const int source = choose("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), true);
+        const int source = choose_kept("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), true, &cursor);
         if (source < 0 || source == 4) {
             return false;
         }
@@ -2445,9 +2470,10 @@ static bool create_seed(void)
  * length picker or the very first word before anything was entered. */
 static bool complete_checksum(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins", "Back" };
-        const int selected = choose("Complete checksum", lengths, 3, true);
+        const int selected = choose_kept("Complete checksum", lengths, 3, true, &cursor);
         if (selected < 0 || selected == 2) {
             return false;
         }
@@ -2502,9 +2528,10 @@ static bool complete_checksum(void)
  * menu, which is specifically about *entering* an already-complete seed. */
 static void show_new_seed_menu(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* items[] = { "From entropy", "Complete checksum", "Back" };
-        const int selected = choose("New Seed", items, 3, true);
+        const int selected = choose_kept("New Seed", items, 3, true, &cursor);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -2522,9 +2549,10 @@ static void show_new_seed_menu(void)
 
 static void restore_seed(void)
 {
+    size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "12 words", "24 words", "Back" };
-        const int selected = choose("Restore mnemonic", lengths, 3, true);
+        const int selected = choose_kept("Restore mnemonic", lengths, 3, true, &cursor);
         if (selected < 0 || selected == 2) {
             return;
         }
@@ -2580,6 +2608,7 @@ static void show_brightness(void)
 
 static void show_settings_menu(void)
 {
+    size_t cursor = 0;
     for (;;) {
         char orientation_item[32], brightness_fraction[8], brightness_item[24];
         (void)snprintf(orientation_item, sizeof(orientation_item), "Flip Orientation: %s",
@@ -2587,7 +2616,7 @@ static void show_settings_menu(void)
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
         const char* items[] = { orientation_item, brightness_item, "About", "Back" };
-        const int selected = choose("Settings", items, 4, true);
+        const int selected = choose_kept("Settings", items, 4, true, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
@@ -2638,9 +2667,10 @@ void seedtool_run(void)
     seedtool_platform_flush_keys();
     last_action = seedtool_platform_milliseconds();
 
+    size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
-        const int selected = choose("Origo", menu, sizeof(menu) / sizeof(menu[0]), false);
+        const int selected = choose_kept("Origo", menu, sizeof(menu) / sizeof(menu[0]), false, &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {
