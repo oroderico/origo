@@ -38,6 +38,80 @@ static const char mnemonic24[]
 static const char bad_checksum_mnemonic[]
     = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
 
+/* Eleven flips name one word, most significant bit first, and the words they
+ * name are handed to seedtool_complete_checksum - the same call the typed-word
+ * flow makes. The screen that shows the reader "these eleven flips are word
+ * 0819" is only telling the truth if that index survives into the finished
+ * mnemonic unchanged, so that is what is checked, for every one of the 2048
+ * words rather than for a chosen few.
+ *
+ * The all-zero case is pinned to the published vectors the rest of this file
+ * already uses: eleven words of index 0 plus seven zero bits are 128 zero
+ * entropy bits, and twenty-three plus three zero bits are 256 - `mnemonic` and
+ * `mnemonic24`. That is the one case where the whole chain, checksum included,
+ * is fixed by something outside this project. */
+static bool coin_words_build_the_entropy(const size_t words, const uint16_t index, char* out, const size_t out_len)
+{
+    const size_t word_count = words == 12 ? 11 : 23;
+    const size_t tail_count = words == 12 ? 7 : 3;
+    char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    uint8_t tail[7] = { 0 };
+    size_t used = 0;
+    for (size_t i = 0; i < word_count; ++i) {
+        const char* const word = seedtool_word(index);
+        const size_t len = strlen(word);
+        if (used + len + (i ? 1 : 0) >= sizeof(prefix)) {
+            return false;
+        }
+        if (i) {
+            prefix[used++] = ' ';
+        }
+        memcpy(prefix + used, word, len);
+        used += len;
+        prefix[used] = '\0';
+    }
+    return seedtool_complete_checksum(prefix, tail, tail_count, out, out_len) == SEEDTOOL_OK;
+}
+
+static bool coin_word_encoding_is_sound(void)
+{
+    char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
+
+    /* Zero flips, both lengths, against the published vectors. */
+    if (!coin_words_build_the_entropy(12, 0, completed, sizeof(completed)) || strcmp(completed, mnemonic) != 0) {
+        return false;
+    }
+    if (!coin_words_build_the_entropy(24, 0, completed, sizeof(completed)) || strcmp(completed, mnemonic24) != 0) {
+        return false;
+    }
+
+    /* Every word survives the trip, at both lengths: whatever the reader was
+     * shown on the confirmation screen is what the finished mnemonic spells. */
+    for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        const size_t lengths[] = { 12, 24 };
+        for (size_t l = 0; l < 2; ++l) {
+            const size_t word_count = lengths[l] == 12 ? 11 : 23;
+            uint16_t numbers[24];
+            size_t count = 0;
+            if (!coin_words_build_the_entropy(lengths[l], index, completed, sizeof(completed))
+                || seedtool_mnemonic_word_numbers(completed, numbers, 24, &count) != SEEDTOOL_OK
+                || count != lengths[l]) {
+                return false;
+            }
+            for (size_t i = 0; i < word_count; ++i) {
+                if (numbers[i] != index + 1) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    /* An eleven-bit index is the whole wordlist and nothing past it: the top
+     * index must be reachable, and the encoding must not overflow into a
+     * twelfth bit. */
+    return SEEDTOOL_WORDLIST_LEN == (1u << 11);
+}
+
 /* The word-entry keyboard is only usable if every reachable letter really does
  * lead to a word, and if narrowing always terminates in a listable candidate
  * set. Both are checked exhaustively rather than by example. */
@@ -277,6 +351,7 @@ static bool word_numbers_round_trip_is_sound(void)
 static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
     "Account key", "Addresses", "Account key format", "xpub", "zpub", "Done / erase", "New Seed", "From entropy",
     "Restore Seed", "Complete checksum", "About", "Settings", "11 words + 7 coins", "23 words + 3 coins",
+    "Coin method", "Flip each word", "Flip and hash", "Final bits", "Word 11 of 23",
     "No passphrase", "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words",
     "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers", "Plain text", "Backup",
     "Stackbit 1248", "Compact SeedQR", "Simple grid", "Physical layout" };
@@ -1419,6 +1494,10 @@ static int self_test(void)
     }
     if (!word_numbers_round_trip_is_sound()) {
         fputs("Origo word number round-trip self-test failed\n", stderr);
+        return 1;
+    }
+    if (!coin_word_encoding_is_sound()) {
+        fputs("Origo coin word encoding self-test failed\n", stderr);
         return 1;
     }
     if (!stackbit_grid_is_sound()) {
