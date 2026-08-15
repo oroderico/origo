@@ -546,6 +546,28 @@ class SeedToolVerifierTests(unittest.TestCase):
         ):
             self.assertFalse(fragment in app, why)
 
+    def test_number_entry_narrows_by_the_same_set_the_letters_do(self):
+        # The checksum filter is proved exact by the C self-test, but that
+        # proves the *function*, not that the screen calls it. enter_word_number
+        # is the screen, and a rewrite of it that reached for the unnarrowed
+        # seedtool_word_number would leave the number pad accepting last words
+        # the letter keyboard refuses - the exact asymmetry the filter exists to
+        # prevent, and invisible to every other test here, since the function it
+        # stopped calling still works perfectly.
+        #
+        # That is not hypothetical: it is what a rewrite of this screen did.
+        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
+        start = source.index("static int enter_word_number(")
+        body = source[start : source.index("\n}\n", start)]
+        self.assertIn("const seedtool_wordset_t* allowed", body, "enter_word_number no longer takes the allowed set")
+        for narrowed, plain in (("seedtool_next_digits_in", "seedtool_next_digits"),
+                                ("seedtool_word_number_in", "seedtool_word_number")):
+            self.assertIn(narrowed, body, f"enter_word_number no longer calls {narrowed}")
+            # The plain name is a prefix of the narrowed one, so count the calls
+            # rather than searching for the string: `foo(` never matches `foo_in(`.
+            self.assertEqual(
+                body.count(f"{plain}("), 0, f"enter_word_number calls {plain} directly, bypassing the filter")
+
     def test_passphrase_keyboards_cover_printable_ascii(self):
         source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
         layouts = source.split("passphrase_layouts[PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]

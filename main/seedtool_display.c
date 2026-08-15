@@ -202,6 +202,20 @@ void seedtool_display_screen4(const char* title, const char* line1, const char* 
     flush();
 }
 
+void seedtool_display_digits(const char* title, const char* digits, const size_t count, const size_t active,
+    const char* footer, const seedtool_progress_t* progress)
+{
+    seedtool_render_digits(title, digits, count, active, footer, progress);
+    flush();
+}
+
+void seedtool_display_value_box(
+    const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
+{
+    seedtool_render_value_box(title, text, back, footer, progress);
+    flush();
+}
+
 void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
     const seedtool_progress_t* progress)
 {
