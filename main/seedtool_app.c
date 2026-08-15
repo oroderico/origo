@@ -214,20 +214,6 @@ static bool acknowledge(const char* title, const char* one, const char* two)
     return confirm(title, one, two) == KEY_SELECT;
 }
 
-/* Same contract as acknowledge(), but for the dice-entry screen with its
- * quality bar drawn in, rather than plain text — used before a D6/D20 run
- * starts, showing the bar empty, and once more after it ends, showing it full. */
-static bool dice_confirm(const char* title, const char* one, const char* two, const seedtool_progress_t* progress)
-{
-    for (;;) {
-        seedtool_display_dice_screen(title, one, two, ACK_FOOTER, progress);
-        const seedtool_key_t key = wait_key();
-        if (key != KEY_REDRAW) {
-            return key == KEY_SELECT;
-        }
-    }
-}
-
 /* Every choice in the firmware is made here, on a list that shows five options
  * at once. Which rows are on screen follows from the count and the selection
  * alone, so a choice screen is reproducible from what the user has done.
@@ -323,6 +309,29 @@ static int nav_confirm(
             break;
         default:
             return NAV_TIMEOUT;
+        }
+    }
+}
+
+/* nav_confirm() with the entropy quality bar drawn in: the two screens that
+ * bracket a dice/coin run, showing the bar empty before it and full after. */
+static bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label,
+    const bool start_on_back, const seedtool_progress_t* progress)
+{
+    bool on_back = start_on_back;
+    for (;;) {
+        seedtool_display_nav_dice_screen(title, one, two, on_back, label, progress);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            return !on_back;
+        case KEY_PREV:
+        case KEY_NEXT:
+            on_back = !on_back;
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            return false;
         }
     }
 }
@@ -2261,7 +2270,7 @@ static int collect_entropy(const int source, const size_t words)
         const char* const hint
             = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
         const seedtool_progress_t empty = { 0 };
-        if (!dice_confirm(names[source], needed, hint, &empty)) {
+        if (!nav_dice_confirm(names[source], needed, hint, "Start", false, &empty)) {
             outcome = 0;
         }
     }
@@ -2347,7 +2356,7 @@ static int collect_entropy(const int source, const size_t words)
              * lighting condition) tells a green outline from a dim one at a
              * glance. */
             const seedtool_progress_t complete = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
-            proceed = dice_confirm(names[source], bits_line, "Looks good - generate?", &complete);
+            proceed = nav_dice_confirm(names[source], bits_line, "Looks good", "Generate seed", false, &complete);
         }
         if (proceed) {
             break;

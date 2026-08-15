@@ -1377,6 +1377,39 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
+    /* The same chrome with the entropy quality bar drawn in. Its band is
+     * different: the bar occupies DICE_BAR_Y=90..103, so what is checked here
+     * is the 104..118 gap between it and the confirm bar. A body line wrapping
+     * *into* the quality bar is not checked here and does not need to be -
+     * dice_screen_hints_clear_the_bar above already holds these same hints to
+     * that, at the same body heights this chrome inherits. */
+    static const struct {
+        const char* title;
+        const char* line1;
+        const char* line2;
+        const char* label;
+    } dice[] = {
+        { "Coins", "256 flips needed", "Red bar = non-random", "Start" },
+        { "D6 dice", "99 rolls needed", "Red bar = non-random", "Start" },
+        { "Diamonds", "99 cards needed", "Return & reshuffle each card", "Start" },
+        { "Coins", "256 of 256 bits", "Looks good", "Generate seed" },
+    };
+    const seedtool_progress_t full = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
+    for (size_t i = 0; i < sizeof(dice) / sizeof(dice[0]); ++i) {
+        for (int on_back = 0; on_back < 2; ++on_back) {
+            seedtool_render_nav_dice_screen(
+                dice[i].title, dice[i].line1, dice[i].line2, on_back, dice[i].label, &full);
+            if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
+                return false;
+            }
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+                return false;
+            }
+            if (on_back && !nav_bar_label_fits()) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 

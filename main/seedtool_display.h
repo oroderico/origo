@@ -38,6 +38,8 @@ void seedtool_display_nav_list(const char* title, const char* const* items, size
     const char* confirm, bool confirm_enabled);
 void seedtool_display_nav_screen(
     const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
+void seedtool_display_nav_dice_screen(const char* title, const char* line1, const char* line2, bool on_back,
+    const char* confirm, const seedtool_progress_t* progress);
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 bool seedtool_display_qr(const char* title, const char* text);

@@ -717,10 +717,11 @@ static void draw_border(const int x, const int y, const int width, const int hei
 
 static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
 
-void seedtool_render_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
-    const seedtool_progress_t* progress)
+/* The quality bar itself, split from the screen that carries it so the plain
+ * dice screen and the one under the nav chrome draw the same bar rather than
+ * each holding a copy of this arithmetic. */
+static void draw_quality_bar(const seedtool_progress_t* progress)
 {
-    seedtool_render_screen(title, line1, line2, footer);
     if (!progress) {
         return;
     }
@@ -738,6 +739,24 @@ void seedtool_render_dice_screen(const char* title, const char* line1, const cha
     }
     draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
 }
+
+void seedtool_render_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_progress_t* progress)
+{
+    seedtool_render_screen(title, line1, line2, footer);
+    draw_quality_bar(progress);
+}
+void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
+    const char* confirm, const seedtool_progress_t* progress)
+{
+    /* The quality bar sits at DICE_BAR_Y=90..103 and the confirm bar starts at
+     * 118, so the two clear each other without either moving: what the nav
+     * chrome takes here is the footer's row, which is exactly what it
+     * replaces. */
+    seedtool_render_nav_screen(title, line1, line2, on_back, confirm);
+    draw_quality_bar(progress);
+}
+
 
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     const size_t selected, const size_t position, const size_t total)

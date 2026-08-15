@@ -131,6 +131,12 @@ void seedtool_render_nav_list(const char* title, const char* const* items, size_
 void seedtool_render_nav_screen(
     const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
 
+/* The same again with the dice/coin quality bar drawn in, for the two screens
+ * that bracket an entropy run: the one before it showing the bar empty, and
+ * the one after showing it full. */
+void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, bool on_back,
+    const char* confirm, const seedtool_progress_t* progress);
+
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole
  * layout, ignoring the separators; disabled keys are drawn dimmed and are meant

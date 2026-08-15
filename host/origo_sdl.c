@@ -140,6 +140,13 @@ void seedtool_display_nav_screen(
     present();
 }
 
+void seedtool_display_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
+    const char* confirm, const seedtool_progress_t* progress)
+{
+    seedtool_render_nav_dice_screen(title, line1, line2, on_back, confirm, progress);
+    present();
+}
+
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     const size_t selected, const size_t position, const size_t total)
 {
