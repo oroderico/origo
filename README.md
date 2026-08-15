@@ -351,10 +351,17 @@ for that derivation session only.
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
 address viewer entirely. For a valid mnemonic the viewer shows the master
-fingerprint, then one wallet type at a time — Native SegWit (BIP84) or Taproot
-(BIP86) — chosen up front, so the account key and its addresses are always read
-for the type just picked rather than interleaved with the other one's. Each
-type shows:
+fingerprint and a **Customize** screen holding the three things that decide
+what everything else derives: the account index (`m/type'/0'/account'`, 0
+through 999), the wallet type — Native SegWit (BIP84) or Taproot (BIP86) — and
+the optional passphrase. All three last for the whole viewing session rather
+than one visit to a screen, so checking account 2 under both types means
+setting it once. The passphrase can be changed or removed at any point without
+leaving the session; the master fingerprint is re-derived when it is, since
+that fingerprint is a function of it. One type is in force at a time, named on
+the menu row that opens its data, so an account key and its addresses are
+always read for the type currently set rather than interleaved with the other
+one's. That row shows:
 
 - its watch-only account key at `m/84'/0'/0'` or `m/86'/0'/0'`, titled with its
   key origin such as `[73c5da0a/84'/0'/0']`. Native SegWit can be shown as

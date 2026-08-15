@@ -1349,6 +1349,36 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
     }
 }
 
+/* Type a passphrase twice and keep it only if both attempts agree, writing it
+ * to `output` untouched unless they do. Shared by the session gate below and
+ * by the Customize screen's editor: the gate and the editor differ in what
+ * Back means and in what an empty passphrase means, but the typing itself -
+ * and the mismatch that must discard both attempts - is one piece of logic,
+ * not two copies to keep in step. `failure_detail` is the second line of the
+ * mismatch notice, which is the one thing that genuinely differs: the gate has
+ * derived nothing yet, while the editor may be leaving an earlier passphrase
+ * in place. */
+static bool enter_passphrase_confirmed(
+    char output[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], const char* const failure_detail)
+{
+    char attempt[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
+    const bool ok = enter_passphrase_once(attempt, sizeof(attempt))
+        && acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required")
+        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(attempt, confirmation) == 0;
+    if (ok) {
+        /* The old value goes before the new one lands, not after: this buffer
+         * holds a live session secret and must never briefly hold a mix. */
+        seedtool_zero(output, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
+        memcpy(output, attempt, sizeof(attempt));
+    } else {
+        (void)acknowledge("Passphrase mismatch", failure_detail, "Try again");
+    }
+    seedtool_zero(attempt, sizeof(attempt));
+    seedtool_zero(confirmation, sizeof(confirmation));
+    return ok;
+}
+
 static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
     const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
@@ -1358,16 +1388,34 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
         /* Only "No passphrase" derives; back and timeout both leave without. */
         return selected == 0;
     }
-    char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
-    const bool ok = enter_passphrase_once(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1)
-        && acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required")
-        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(passphrase, confirmation) == 0;
-    seedtool_zero(confirmation, sizeof(confirmation));
-    if (!ok) {
+    if (!enter_passphrase_confirmed(passphrase, "Nothing was derived")) {
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
-        (void)acknowledge("Passphrase mismatch", "Nothing was derived", "Try again");
+        return false;
     }
-    return ok;
+    return true;
+}
+
+/* The same passphrase, changed part-way through a session rather than asked
+ * for once on the way in. Returns true only when `passphrase` actually
+ * changed, so the caller knows to re-derive the fingerprint it has cached;
+ * Back, a timeout and a mismatch all leave the acting passphrase exactly as
+ * it was rather than dropping the session to no passphrase in silence, which
+ * would change every derived key without saying so. */
+static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
+{
+    const char* options[] = { "No passphrase", "Enter passphrase", "Back" };
+    const int selected = choose("Passphrase", options, 3, true);
+    if (selected < 0 || selected == 2) {
+        return false;
+    }
+    if (selected == 0) {
+        if (!passphrase[0]) {
+            return false;
+        }
+        seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
+        return true;
+    }
+    return enter_passphrase_confirmed(passphrase, "Passphrase unchanged");
 }
 
 /* The account key's own QR, warned about up front since a photo of it reveals
@@ -1847,6 +1895,57 @@ static void show_backup_menu(const char* mnemonic)
     }
 }
 
+/* The three things that decide what every other wallet screen derives: which
+ * account, which script type, and which passphrase. They used to be scattered
+ * - account a row on the Wallet menu, type a fork into one of two sub-menus
+ * each owning its own copy of Account key/Descriptor/Addresses, and passphrase
+ * a gate asked once before the Wallet menu existed and unchangeable after -
+ * so setting all three meant crossing screens that had nothing else in common.
+ * Gathered here they read as what they are: the parameters of the derivation,
+ * editable in any order, none of them a place you pass *through*.
+ *
+ * `fp`/`fphex` come in by pointer because the passphrase is one of the two
+ * inputs to the master fingerprint: change it and the cached fingerprint the
+ * Wallet menu shows is stale, so it is re-derived here rather than left to
+ * disagree with what the device is now deriving from.
+ *
+ * Follows show_settings_menu's shape exactly - live-formatted labels rebuilt
+ * each pass, a row either toggling in place or opening a dedicated editor and
+ * returning. */
+static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
+    char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], uint8_t fp[4], char fphex[9])
+{
+    for (;;) {
+        char account_item[16];
+        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)*account);
+        const char* const type_item = *type == SEEDTOOL_BIP84 ? "Type: Native SegWit" : "Type: Taproot";
+        /* Says whether one is set, never anything about what it is. */
+        const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
+        const char* items[] = { account_item, type_item, passphrase_item, "Back" };
+        const int selected = choose("Customize", items, 4, true);
+        if (selected < 0 || selected == 3) {
+            return;
+        }
+        if (selected == 0) {
+            uint32_t chosen = *account;
+            if (enter_account(&chosen) == 1) {
+                *account = chosen;
+            }
+        } else if (selected == 1) {
+            /* Toggled in place rather than through a chooser: there are two
+             * types and the row already names the one in force, so a submenu
+             * would be a screen to say what the label says. */
+            *type = *type == SEEDTOOL_BIP84 ? SEEDTOOL_BIP86 : SEEDTOOL_BIP84;
+        } else if (edit_session_passphrase(passphrase)) {
+            if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
+                (void)acknowledge("Error", "Derivation failed", NULL);
+            } else {
+                hexstr(fp, 4, fphex);
+            }
+        }
+    }
+}
+
 static void show_wallet_data(const char* mnemonic)
 {
     uint8_t fp[4] = { 0 };
@@ -1862,34 +1961,32 @@ static void show_wallet_data(const char* mnemonic)
     }
     hexstr(fp, sizeof(fp), fphex);
 
-    /* m/type'/0'/account': lives for the whole wallet-viewing session, not
-     * one visit to Native SegWit or Taproot, so checking account 2 under
-     * both means setting it once - not resetting to 0 on the way from one
-     * type to the other. Neither Master fingerprint (always the root's, account-
-     * independent) nor Backup (about the mnemonic itself, not a derivation)
-     * reads it. */
+    /* m/type'/0'/account' and the passphrase above it: all three live for the
+     * whole wallet-viewing session, not one visit to a type's screens, so
+     * checking account 2 under both types means setting it once - not
+     * resetting on the way from one to the other. They are edited together in
+     * Customize; the row below names the type in force so the menu says what
+     * it will show before it is opened. Neither Master fingerprint (always the
+     * root's, account- and type-independent) nor Backup (about the mnemonic
+     * itself, not a derivation) reads account or type. */
     uint32_t account = 0;
+    seedtool_address_type_t type = SEEDTOOL_BIP84;
     for (;;) {
-        char account_item[16];
-        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
-        const char* menu[] = { "Master fingerprint", account_item, "Native SegWit (BIP84)", "Taproot (BIP86)",
-            "Backup", "Done / erase" };
+        const char* const view_item = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+        const char* menu[] = { "Master fingerprint", "Customize", view_item, "Backup", "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
-        if (selected < 0 || selected == 5) {
+        if (selected < 0 || selected == 4) {
             break;
         }
         if (selected == 0) {
             (void)acknowledge(
                 "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
         } else if (selected == 1) {
-            uint32_t chosen_account = account;
-            if (enter_account(&chosen_account) == 1) {
-                account = chosen_account;
-            }
-        } else if (selected == 4) {
-            show_backup_menu(mnemonic);
+            show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
+        } else if (selected == 2) {
+            show_type_menu(mnemonic, passphrase, fphex, type, account);
         } else {
-            show_type_menu(mnemonic, passphrase, fphex, selected == 2 ? SEEDTOOL_BIP84 : SEEDTOOL_BIP86, account);
+            show_backup_menu(mnemonic);
         }
     }
 done:
