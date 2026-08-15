@@ -711,7 +711,9 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
 
         const char shown = digits[i];
         const int glyph_y = DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2;
-        if (shown == SEEDTOOL_KEY_BACKSPACE) {
+        if (shown == SEEDTOOL_KEY_ACCEPT) {
+            draw_centered_in(tft_Ubuntu16, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
+        } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
             /* The way out of the field rides the same ring as the digits, so
              * the box shows the backspace glyph the keypad already uses for
              * it rather than a letter the reader has to decode. */

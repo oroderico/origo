@@ -883,13 +883,16 @@ static int enter_word(const size_t position, const size_t total, char* output, c
  * misread off paper is otherwise a different seed with no sign that anything
  * went wrong.
  *
- * Four boxes, always four, scrolled one at a time - the printed wordlist pads
- * to four digits and whoever reads `0004` off it types all four, so a fixed
- * width costs nothing and removes the Accept key along with the question of
- * when a number is finished. Only digits that still leave a word number
- * reachable are on the ring, which is what keeps 2049 untypeable while 2048
- * stays reachable; the ring carries a backspace past the last digit, the way
- * enter_value's own ring carries [back].
+ * Up to four boxes, scrolled one at a time, and a number ends where the reader
+ * says it does: `240` is typed as three digits, not as `0240`. The ring for the
+ * current box carries the digits that still lead somewhere, then OK once what
+ * is typed is already a word number, then backspace - the same ring Jade's
+ * index entry uses, where a short number also has to be able to stop early.
+ *
+ * A fixed four-box field was tried first and was wrong: it made 240 a dead end,
+ * since no fourth digit takes 240x into 1..2048, so the reader who typed it
+ * found a box with nothing in it but backspace. Ending the number early is not
+ * a convenience here, it is what makes three-digit numbers reachable at all.
  *
  * Replaces a twelve-key keypad the reader had to walk a cursor across. Two
  * buttons that mean "the digit goes up" and "the digit goes down" need no
@@ -907,7 +910,7 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
     /* The ring for the current box: the digits still reachable, then backspace.
      * Rebuilt whenever the box changes, since which digits are reachable
      * depends on the ones already set. */
-    char ring[SEEDTOOL_DIGITS + 1];
+    char ring[SEEDTOOL_DIGITS + 2];
     size_t ring_len = 0, on = 0;
     bool rebuild = true;
 
@@ -920,6 +923,14 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
                 if (reachable[d]) {
                     ring[ring_len++] = (char)('0' + d);
                 }
+            }
+            /* OK only once the digits already name a word - so it is absent on
+             * an empty field and on a prefix like `20`, which is a real number
+             * but is offered here as a step towards 200x rather than as 20
+             * itself... which it also is. Both readings are live, which is
+             * exactly why the reader has to say which one they meant. */
+            if (seedtool_word_number(digits, at)) {
+                ring[ring_len++] = SEEDTOOL_KEY_ACCEPT;
             }
             ring[ring_len++] = SEEDTOOL_KEY_BACKSPACE;
             on = 0;
@@ -963,15 +974,19 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
             rebuild = true;
             continue;
         }
-        digits[at++] = ring[on];
-        digits[at] = '\0';
-        rebuild = true;
-        if (at < SEEDTOOL_MAX_WORD_DIGITS) {
-            continue;
+        bool typed_last = false;
+        if (ring[on] != SEEDTOOL_KEY_ACCEPT) {
+            digits[at++] = ring[on];
+            digits[at] = '\0';
+            rebuild = true;
+            /* A fourth digit has nowhere left to go, so it confirms itself
+             * rather than asking for an OK the field has no box to show. */
+            if (at < SEEDTOOL_MAX_WORD_DIGITS) {
+                continue;
+            }
+            typed_last = true;
         }
 
-        /* Four digits in: the number is complete by construction, since the
-         * ring never offered a digit that could not lead to one. */
         const unsigned number = seedtool_word_number(digits, at);
         const char* const word = number ? seedtool_word(number - 1) : NULL;
         char counted[32];
@@ -992,9 +1007,13 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
             seedtool_zero(shown, sizeof(shown));
             return -1;
         }
-        /* Went back from the confirmation: the last digit reopens, so a wrong
-         * final digit costs one press rather than the whole number. */
-        digits[--at] = '\0';
+        /* Went back from the confirmation. A number that confirmed itself on a
+         * fourth digit reopens that digit, so a wrong last one costs a press
+         * rather than the whole number; one the reader ended with OK returns to
+         * the field exactly as it was, with the OK still on the ring. */
+        if (typed_last) {
+            digits[--at] = '\0';
+        }
         rebuild = true;
     }
 }
