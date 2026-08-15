@@ -327,6 +327,16 @@ static int nav_confirm(
     }
 }
 
+/* acknowledge(), under the nav chrome: for the sites that act on the answer.
+ * The ones that discard it keep the old widget for now - an arrow that leads
+ * nowhere would restate in a control the same false promise the footer's
+ * "Up/Down back" makes on those screens. */
+static bool nav_acknowledge(
+    const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
+{
+    return nav_confirm(title, one, two, label, start_on_back) == NAV_CONFIRM;
+}
+
 /* A choice made under the back-arrow-and-confirm-bar chrome. `cursor` carries
  * the selection in and out so a caller that reopens the same screen after an
  * edit lands where it left off; seed it with SEEDTOOL_NAV_CONFIRM for the
@@ -1468,7 +1478,7 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
     }
     char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
     const bool ok = enter_passphrase_once(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1)
-        && acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required")
+        && nav_acknowledge("Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
         && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(passphrase, confirmation) == 0;
     seedtool_zero(confirmation, sizeof(confirmation));
     if (!ok) {
@@ -1484,7 +1494,7 @@ static bool get_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN +
 static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
 {
-    if (!acknowledge("QR export", "Account key included", "A photo reveals every address")) {
+    if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", false)) {
         return;
     }
     char title[24];
@@ -1522,7 +1532,8 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
 static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
-    if (!acknowledge("Descriptor export", "Account key included", "A photo reveals every address")) {
+    if (!nav_acknowledge(
+            "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor", false)) {
         return;
     }
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
@@ -1897,7 +1908,8 @@ done:
  * carousel convention stays one shape everywhere a QR is shown. */
 static void export_seed_qr(const char* mnemonic)
 {
-    if (!acknowledge("Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds")) {
+    if (!nav_acknowledge(
+            "Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds", "Show QR", true)) {
         return;
     }
     uint8_t entropy[SEEDTOOL_HASH_LEN] = { 0 };
@@ -2082,7 +2094,7 @@ static int confirm_backup(const char* mnemonic, const size_t count)
             (void)acknowledge("Backup confirmed", "Words matched", NULL);
             return 1;
         }
-        if (!acknowledge("Word doesn't match", "Check your backup", "Try again")) {
+        if (!nav_acknowledge("Word doesn't match", "Check your backup", NULL, "Try again", false)) {
             seedtool_zero(numbers, sizeof(numbers));
             return 0;
         }
@@ -2115,13 +2127,13 @@ static void show_generated(seedtool_generated_t* generated)
             char intro[48];
             (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
                 (unsigned)generated->words);
-            const seedtool_key_t intro_key = confirm("Confirm backup", intro, "Have your backup ready");
-            if (intro_key == KEY_TIMEOUT) {
+            const int intro_taken = nav_confirm("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
+            if (intro_taken == NAV_TIMEOUT) {
                 /* Not `continue`: that would repaint the whole mnemonic on
                  * the way out of a session that has already expired. */
                 break;
             }
-            if (intro_key != KEY_SELECT) {
+            if (intro_taken != NAV_CONFIRM) {
                 continue; /* Back: the words again, one stage, as everywhere else. */
             }
             const int outcome = confirm_backup(generated->mnemonic, generated->words);
@@ -2322,10 +2334,10 @@ static int collect_entropy(const int source, const size_t words)
         char bits_line[24];
         (void)snprintf(bits_line, sizeof(bits_line), "%d of %u bits", bits, (unsigned)min_bits);
         if (poor) {
-            proceed = acknowledge("Poor entropy!", bits_line, "Proceed anyway?");
+            proceed = nav_acknowledge("Poor entropy!", bits_line, NULL, "Proceed anyway", true);
         }
         if (proceed && pattern) {
-            proceed = acknowledge("Pattern detected!", "Proceed anyway?", NULL);
+            proceed = nav_acknowledge("Pattern detected!", NULL, NULL, "Proceed anyway", true);
         }
         if (proceed && !poor && !pattern) {
             /* The positive case: the bar's outline goes green, the one point in
@@ -2492,7 +2504,7 @@ static void restore_seed(void)
          * other 11 or 23, and one who can't gets to keep trying instead of
          * being dropped straight back to "12 words / 24 words / Back". */
         const int outcome = restore_mnemonic(selected ? 24 : 12, mnemonic, sizeof(mnemonic));
-        if (outcome == 1 && acknowledge("Checksum valid", "BIP39 English", "Derivation unlocked")) {
+        if (outcome == 1 && nav_acknowledge("Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet", false)) {
             show_wallet_data(mnemonic);
         }
         seedtool_zero(mnemonic, sizeof(mnemonic));
