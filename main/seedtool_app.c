@@ -1669,21 +1669,11 @@ static bool choose_address_type(seedtool_address_type_t* type)
     return true;
 }
 
-/* The watch-only account key for the type and account currently set, in
- * whichever format was asked for. SLIP-132 defines no taproot version prefix,
- * so BIP86 never offers a format choice, only BIP84 does. */
+/* The watch-only account key for the type and account currently set, in the
+ * format asked for. */
 static void show_account_key(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const uint32_t account)
+    const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
 {
-    seedtool_key_format_t format = SEEDTOOL_XPUB;
-    if (type == SEEDTOOL_BIP84) {
-        const char* const formats[] = { "xpub", "zpub", "Back" };
-        const int chosen = choose("Account key format", formats, 3, true);
-        if (chosen < 0 || chosen == 2) {
-            return;
-        }
-        format = chosen == 0 ? SEEDTOOL_XPUB : SEEDTOOL_ZPUB;
-    }
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
     char origin[32];
     (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
@@ -1695,6 +1685,43 @@ static void show_account_key(const char* mnemonic, const char* passphrase, const
         (void)acknowledge("Error", "Could not derive account key", NULL);
     }
     seedtool_zero(xpub, sizeof(xpub));
+}
+
+/* Everything that hands out the account's extended public key, gathered behind
+ * one row. xpub, zpub and the descriptor are the same 78 bytes three ways -
+ * the plain BIP32 serialisation, the same key with SLIP-132's version bytes,
+ * and the same key again with its script type and derivation stated inline for
+ * a wallet to import - so they belong together rather than as separate rows
+ * that look unrelated while carrying identical risk. Each one reveals every
+ * address of the account, and each says so before it is shown.
+ *
+ * SLIP-132 defines no taproot version prefix, so zpub is offered for BIP84
+ * only; under BIP86 the row is absent rather than present and refusing. */
+static void show_extended_keys(const char* mnemonic, const char* passphrase, const char* fphex,
+    const seedtool_address_type_t type, const uint32_t account)
+{
+    size_t cursor = 0;
+    for (;;) {
+        const char* items[4];
+        size_t count = 0;
+        items[count++] = "xpub";
+        if (type == SEEDTOOL_BIP84) {
+            items[count++] = "zpub";
+        }
+        items[count++] = "Descriptor";
+        items[count++] = "Back";
+        const int selected = choose_kept("Extended public key", items, count, true, &cursor);
+        if (selected < 0 || (size_t)selected == count - 1) {
+            return;
+        }
+        if (selected == 0) {
+            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_XPUB);
+        } else if (type == SEEDTOOL_BIP84 && selected == 1) {
+            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_ZPUB);
+        } else {
+            show_descriptor(mnemonic, passphrase, fphex, type, account);
+        }
+    }
 }
 
 /* The address list for the type and account currently set, on whichever
@@ -2038,31 +2065,28 @@ static void show_wallet_data(const char* mnemonic)
     seedtool_address_type_t type = SEEDTOOL_BIP84;
     size_t cursor = 0;
     for (;;) {
-        const char* menu[] = { "Master fingerprint", "Customize", "Account key", "Descriptor", "Addresses", "Backup",
+        const char* menu[] = { "Backup", "Extended public key", "Customize", "Addresses", "Master fingerprint",
             "Done / erase" };
         const int selected = choose_kept("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
-        if (selected < 0 || selected == 6) {
+        if (selected < 0 || selected == 5) {
             break;
         }
         switch (selected) {
         case 0:
-            (void)acknowledge(
-                "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
+            show_backup_menu(mnemonic);
             break;
         case 1:
-            show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
+            show_extended_keys(mnemonic, passphrase, fphex, type, account);
             break;
         case 2:
-            show_account_key(mnemonic, passphrase, fphex, type, account);
+            show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
             break;
         case 3:
-            show_descriptor(mnemonic, passphrase, fphex, type, account);
-            break;
-        case 4:
             show_addresses(mnemonic, passphrase, type, account);
             break;
         default:
-            show_backup_menu(mnemonic);
+            (void)acknowledge(
+                "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
             break;
         }
     }

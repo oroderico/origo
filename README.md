@@ -370,13 +370,16 @@ every value names it, so what is on screen says which type produced it rather
 than leaving it to be remembered. The wallet menu itself then offers, for
 whatever is set:
 
-- its watch-only account key at `m/84'/0'/0'` or `m/86'/0'/0'`, titled with its
-  key origin such as `[73c5da0a/84'/0'/0']`. Native SegWit can be shown as
-  either standard BIP32 `xpub` or, on request, its SLIP-132 `zpub` — the same
-  78 bytes with the four version bytes swapped, since libwally itself
-  serialises only the plain BIP32 versions and has no notion of SLIP-132.
-  Taproot is `xpub` only: SLIP-132 defines no taproot version prefix, so there
-  is no `zpub`-equivalent to offer it as;
+- **Extended public key**, holding every way the account's watch-only key at
+  `m/84'/0'/0'` or `m/86'/0'/0'` leaves the device — they are the same 78 bytes
+  three ways, so they sit together rather than as separate rows that look
+  unrelated while carrying identical risk. As `xpub`, titled with its key
+  origin such as `[73c5da0a/84'/0'/0']`; as SLIP-132's `zpub`, the same 78
+  bytes with the four version bytes swapped, since libwally serialises only the
+  plain BIP32 versions and has no notion of SLIP-132 — Native SegWit only,
+  since SLIP-132 defines no taproot prefix, and under Taproot that row is
+  absent rather than present and refusing; or as the output descriptor
+  described below;
 - its mainnet addresses for indices 0 through 99, on whichever branch is asked
   for: `Addresses` opens a Receive/Change choice first, and the list that
   follows is `m/84'/0'/0'/0/i` or `m/86'/0'/0'/0/i` for receive,
@@ -392,7 +395,8 @@ whatever is set:
   account already costs and keeps the cache the size it was. The chain step
   sits below the account key, so only the cheap half of the derivation
   actually repeats;
-- its BIP380 output descriptor — script type, key origin, account key and an
+- its BIP380 output descriptor, the third entry under Extended public key —
+  script type, key origin, account key and an
   8-character checksum in the one string a watch-only wallet imports directly,
   as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`
   equivalent. The chain step is BIP389's multipath `<0;1>`, so the single
