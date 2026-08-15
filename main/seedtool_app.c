@@ -2391,21 +2391,49 @@ static bool flip_words(const size_t words)
     int outcome = 1;
     size_t w = 0;
 
+    /* Set when the run steps backwards onto a word that was already flipped:
+     * that word reopens at its confirmation, showing what it still is, rather
+     * than throwing the flips away and demanding eleven more. Accepting there
+     * walks forward again with the word unchanged; declining reflips it. */
+    bool reopen = false;
+
     for (;;) {
         while (w < word_count) {
-            uint16_t index = 0;
-            outcome = enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index);
-            if (outcome != 1) {
-                break;
+            uint16_t index = indices[w];
+            if (reopen) {
+                reopen = false;
+            } else {
+                outcome = enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index);
+                if (outcome < 0) {
+                    break;
+                }
+                if (outcome == 0) {
+                    /* Backed out of this word's first flip, where the word has
+                     * no flip of its own left to undo. That press means "the
+                     * word before this one was wrong", so it reopens that word.
+                     * The run ends here only from the very first flip of the
+                     * very first word - the one point where nothing has been
+                     * entered yet.
+                     *
+                     * Ending it anywhere else was a bug: eight words in, one
+                     * press dropped the lot and landed back on the length
+                     * picker, which is exactly the mistake a word-at-a-time
+                     * screen exists to make cheap. */
+                    if (!w) {
+                        break;
+                    }
+                    --w;
+                    reopen = true;
+                    outcome = 1;
+                    continue;
+                }
             }
             outcome = confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index);
             if (outcome < 0) {
                 break;
             }
             if (outcome == 0) {
-                /* Declined at the confirmation: flip this same word again
-                 * rather than stepping back to the previous one, which is
-                 * still correct and already confirmed. */
+                /* Declined at the confirmation: flip this same word again. */
                 outcome = 1;
                 continue;
             }
@@ -2447,7 +2475,11 @@ static bool flip_words(const size_t words)
             break;
         }
         if (back_to_words) {
+            /* Reopened at its confirmation, like every other backwards step:
+             * the last word is still perfectly good, and the reader who
+             * pressed back here may well have been after the word before it. */
             w = word_count - 1;
+            reopen = true;
             continue;
         }
 
@@ -2529,14 +2561,24 @@ static bool create_seed(void)
             }
             const size_t words = length ? 24 : 12;
             if (source == SEEDTOOL_COIN) {
-                const int method = choose_coin_method();
-                if (method < 0) {
-                    continue; /* Back: the length picker, one stage. */
-                }
-                if (method == 0) {
+                bool run_hashed = false;
+                for (;;) {
+                    const int method = choose_coin_method();
+                    if (method < 0) {
+                        break; /* Back: the length picker, one stage. */
+                    }
+                    if (method == 1) {
+                        run_hashed = true;
+                        break;
+                    }
                     if (flip_words(words)) {
                         return true;
                     }
+                    /* Backed out of the very first flip, before anything was
+                     * entered: this menu again, one stage back, rather than
+                     * skipping past it to the length picker. */
+                }
+                if (!run_hashed) {
                     continue;
                 }
             }
