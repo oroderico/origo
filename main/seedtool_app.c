@@ -1590,13 +1590,66 @@ static int browse_addresses(char* address_out, const size_t address_out_len, siz
     }
 }
 
+/* Every script type the viewer derives, in the order they are offered. Adding
+ * one is a row here and nothing else: the Customize row, the Wallet row, the
+ * type menu's own title and the chooser all read their name from this table
+ * rather than each carrying its own conditional to be found and updated. */
+static const struct {
+    seedtool_address_type_t type;
+    const char* name;
+} ADDRESS_TYPES[] = {
+    { SEEDTOOL_BIP84, "Native SegWit" },
+    { SEEDTOOL_BIP86, "Taproot" },
+};
+#define ADDRESS_TYPE_COUNT (sizeof(ADDRESS_TYPES) / sizeof(ADDRESS_TYPES[0]))
+
+static const char* address_type_name(const seedtool_address_type_t type)
+{
+    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
+        if (ADDRESS_TYPES[i].type == type) {
+            return ADDRESS_TYPES[i].name;
+        }
+    }
+    return "";
+}
+
+/* Which script type to derive: a list naming every type on offer, opened on
+ * the one in force. Not a value cycled in place by pressing the row - two
+ * types cycle tolerably and more do not, and a cycle never shows what it is
+ * cycling through, so a reader would have to press past their choice to find
+ * out what else existed. Returns false, leaving `*type` alone, on Back or a
+ * timeout. */
+static bool choose_address_type(seedtool_address_type_t* type)
+{
+    char labels[ADDRESS_TYPE_COUNT][32];
+    const char* items[ADDRESS_TYPE_COUNT + 1];
+    size_t current = 0;
+    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
+        /* The enumerator is the BIP number itself, so the label states it
+         * rather than the table repeating it as text. */
+        (void)snprintf(
+            labels[i], sizeof(labels[i]), "%s (BIP%u)", ADDRESS_TYPES[i].name, (unsigned)ADDRESS_TYPES[i].type);
+        items[i] = labels[i];
+        if (ADDRESS_TYPES[i].type == *type) {
+            current = i;
+        }
+    }
+    items[ADDRESS_TYPE_COUNT] = "Back";
+    const int selected = choose_at("Type", items, ADDRESS_TYPE_COUNT + 1, true, current);
+    if (selected < 0 || (size_t)selected >= ADDRESS_TYPE_COUNT) {
+        return false;
+    }
+    *type = ADDRESS_TYPES[selected].type;
+    return true;
+}
+
 /* One address type's worth of the wallet viewer: its account key, in whichever
  * format was asked for, and its addresses. SLIP-132 defines no taproot version
  * prefix, so BIP86 never offers a format choice, only BIP84 does. */
 static void show_type_menu(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
-    const char* const title = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+    const char* const title = address_type_name(type);
     for (;;) {
         const char* items[] = { "Account key", "Descriptor", "Addresses", "Back" };
         const int selected = choose(title, items, 4, true);
@@ -1893,7 +1946,8 @@ static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtoo
     for (;;) {
         char account_item[16];
         (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)*account);
-        const char* const type_item = *type == SEEDTOOL_BIP84 ? "Type: Native SegWit" : "Type: Taproot";
+        char type_item[32];
+        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(*type));
         /* Says whether one is set, never anything about what it is. */
         const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
         const char* items[] = { account_item, type_item, passphrase_item, "Back" };
@@ -1907,10 +1961,7 @@ static void show_customize_menu(const char* mnemonic, uint32_t* account, seedtoo
                 *account = chosen;
             }
         } else if (selected == 1) {
-            /* Toggled in place rather than through a chooser: there are two
-             * types and the row already names the one in force, so a submenu
-             * would be a screen to say what the label says. */
-            *type = *type == SEEDTOOL_BIP84 ? SEEDTOOL_BIP86 : SEEDTOOL_BIP84;
+            (void)choose_address_type(type);
         } else if (edit_session_passphrase(passphrase)) {
             if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
                 (void)acknowledge("Error", "Derivation failed", NULL);
@@ -1951,7 +2002,7 @@ static void show_wallet_data(const char* mnemonic)
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
     for (;;) {
-        const char* const view_item = type == SEEDTOOL_BIP84 ? "Native SegWit" : "Taproot";
+        const char* const view_item = address_type_name(type);
         const char* menu[] = { "Master fingerprint", "Customize", view_item, "Backup", "Done / erase" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
         if (selected < 0 || selected == 4) {
