@@ -538,11 +538,12 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
     }
 }
 
-void seedtool_render_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
-    const size_t top, const char* confirm, const bool confirm_enabled)
+/* The chrome itself, drawn the same way for every screen that wears it - the
+ * point of the thing being that the arrow and the bar are found in one place
+ * regardless of what sits between them. Split from the screens so a new one
+ * inherits the geometry rather than restating it. */
+static void draw_nav_header(const char* title, const bool on_back)
 {
-    seedtool_render_clear();
-    const bool on_back = selected == SEEDTOOL_NAV_BACK;
     if (on_back) {
         fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
     }
@@ -554,6 +555,44 @@ void seedtool_render_nav_list(const char* title, const char* const* items, const
      * against the arrow, and a long one would paint into it. */
     (void)draw_centered_box(tft_Ubuntu16, title, NAV_BACK_X + NAV_BACK_WIDTH,
         SEEDTOOL_DISPLAY_WIDTH - 2 * (NAV_BACK_X + NAV_BACK_WIDTH), LIST_TITLE_Y);
+}
+
+static void draw_nav_bar(const char* confirm, const bool on_confirm, const bool confirm_enabled)
+{
+    if (!confirm) {
+        return;
+    }
+    /* Filled when it is both selectable and selected, outlined when it is
+     * selectable but not selected, dimmed when it cannot be taken at all - so
+     * the bar is in the same place either way and only its state says whether
+     * confirming is available yet. */
+    const uint16_t ink = !confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
+    if (on_confirm && confirm_enabled) {
+        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_HEIGHT, COLOR_HIGHLIGHT);
+    } else {
+        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, confirm_enabled ? COLOR_WHITE : COLOR_DIM);
+    }
+    draw_centered_in(
+        tft_Ubuntu16, confirm, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
+}
+
+void seedtool_render_nav_screen(
+    const char* title, const char* line1, const char* line2, const bool on_back, const char* confirm)
+{
+    seedtool_render_clear();
+    draw_nav_header(title, on_back);
+    /* The same two body lines at the same two heights seedtool_render_screen
+     * uses, so a screen gaining the chrome does not also move its own text. */
+    draw_centered(tft_Ubuntu16, line1, 39);
+    draw_centered(tft_Ubuntu16, line2, 65);
+    draw_nav_bar(confirm, !on_back, true);
+}
+
+void seedtool_render_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
+    const size_t top, const char* confirm, const bool confirm_enabled)
+{
+    seedtool_render_clear();
+    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
 
     for (size_t row = 0; row < SEEDTOOL_LIST_ROWS && top + row < count; ++row) {
         const char* const item = items[top + row];
@@ -573,21 +612,7 @@ void seedtool_render_nav_list(const char* title, const char* const* items, const
         fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
     }
 
-    if (confirm) {
-        const bool on_confirm = selected == SEEDTOOL_NAV_CONFIRM;
-        /* Filled when it is both selectable and selected, outlined when it is
-         * selectable but not selected, dimmed when it cannot be taken at all -
-         * so the bar is in the same place either way and only its state says
-         * whether confirming is available yet. */
-        const uint16_t ink = !confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
-        if (on_confirm && confirm_enabled) {
-            fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_HEIGHT, COLOR_HIGHLIGHT);
-        } else {
-            fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, confirm_enabled ? COLOR_WHITE : COLOR_DIM);
-        }
-        draw_centered_in(
-            tft_Ubuntu16, confirm, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
-    }
+    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, confirm_enabled);
 }
 
 /* One past the last key of the row starting at `row`. */

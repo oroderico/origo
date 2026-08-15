@@ -300,6 +300,33 @@ static size_t nav_selection(const size_t position, const size_t count)
     return position > count ? SEEDTOOL_NAV_CONFIRM : position - 1;
 }
 
+/* confirm(), under the nav chrome: a screen the reader takes or leaves, with
+ * nothing on it to pick between. Only the arrow and the bar can be selected,
+ * so up and down just move between the two - which is the whole point, since
+ * this is the screen where up/down used to mean "back" while the chord meant
+ * "continue", the pairing that reads differently on every screen that uses
+ * it. `start_on_back` is the opt-out from opening on the bar. */
+static int nav_confirm(
+    const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
+{
+    bool on_back = start_on_back;
+    for (;;) {
+        seedtool_display_nav_screen(title, one, two, on_back, label);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            return on_back ? NAV_BACK : NAV_CONFIRM;
+        case KEY_PREV:
+        case KEY_NEXT:
+            on_back = !on_back;
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            return NAV_TIMEOUT;
+        }
+    }
+}
+
 /* A choice made under the back-arrow-and-confirm-bar chrome. `cursor` carries
  * the selection in and out so a caller that reopens the same screen after an
  * edit lands where it left off; seed it with SEEDTOOL_NAV_CONFIRM for the
@@ -1009,9 +1036,12 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
             const char* const word = seedtool_word(number - 1);
             char counted[32];
             (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
-            const seedtool_key_t key = confirm(title, word, counted);
+            /* The number that was typed is the thing being checked here, so
+             * the bar names it rather than saying "Continue": what the reader
+             * is agreeing to is that this word is the one they meant. */
+            const int taken = nav_confirm(title, word, counted, "Use this word", false);
             seedtool_zero(counted, sizeof(counted));
-            if (key == KEY_SELECT) {
+            if (taken == NAV_CONFIRM) {
                 const int result = !word || strlen(word) + 1 > output_len ? -1 : 1;
                 if (result == 1) {
                     strcpy(output, word);
@@ -1019,7 +1049,7 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
                 seedtool_zero(digits, sizeof(digits));
                 return result;
             }
-            if (key == KEY_TIMEOUT) {
+            if (taken == NAV_TIMEOUT) {
                 seedtool_zero(digits, sizeof(digits));
                 return -1;
             }

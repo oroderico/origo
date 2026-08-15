@@ -122,6 +122,15 @@ void seedtool_render_list(const char* title, const char* const* items, size_t co
 void seedtool_render_nav_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
     const char* confirm, bool confirm_enabled);
 
+/* The same chrome over the two-line text screen rather than a list: for a
+ * screen the reader has to take or leave, with nothing to pick between. Only
+ * two things can be selected, so the selection is `on_back` rather than an
+ * index - the confirm bar is whatever the arrow is not. Body lines sit where
+ * seedtool_render_screen puts them, so this is that screen with the footer's
+ * two hints replaced by the controls they described. */
+void seedtool_render_nav_screen(
+    const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
+
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole
  * layout, ignoring the separators; disabled keys are drawn dimmed and are meant

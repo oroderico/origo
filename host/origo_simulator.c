@@ -1327,6 +1327,31 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
+    /* The text screen wearing the same chrome: enter_word_number's check of
+     * the number just typed. Its body is drawn by draw_centered, which wraps
+     * rather than clips, so line 2 growing to two lines would march down
+     * towards the bar - and the bar's own label is the widest this chrome
+     * carries anywhere. Strings copied from seedtool_app.c, the same way the
+     * dice hints above are. */
+    for (int on_back = 0; on_back < 2; ++on_back) {
+        /* The longest word in the list, and the widest counted line the screen
+         * can build: every digit of the largest number, twice over. */
+        seedtool_render_nav_screen("Word 12/24", "mosquito", "Number 2048 of 2048", on_back, "Use this word");
+        /* Line 2 sits at 65 and the 16px face is that tall again, so a wrap
+         * lands at 81 - which is why the clear band starts there rather than
+         * just above the bar. Anything lit below 80 is a second line. */
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(81, 118)) {
+            return false;
+        }
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            return false;
+        }
+        /* Measured only with the arrow selected, for the same reason as above:
+         * a selected bar is filled and would swamp the measurement. */
+        if (on_back && !nav_bar_label_fits()) {
+            return false;
+        }
+    }
     return true;
 }
 

@@ -229,6 +229,13 @@ void seedtool_display_nav_list(const char* title, const char* const* items, cons
     flush();
 }
 
+void seedtool_display_nav_screen(
+    const char* title, const char* line1, const char* line2, const bool on_back, const char* confirm)
+{
+    seedtool_render_nav_screen(title, line1, line2, on_back, confirm);
+    flush();
+}
+
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     const size_t selected, const size_t position, const size_t total)
 {
