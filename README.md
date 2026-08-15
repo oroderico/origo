@@ -383,11 +383,16 @@ type shows:
   as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`
   equivalent. The chain step is BIP389's multipath `<0;1>`, so the single
   descriptor describes the receive and the change branch together: a wallet
-  imported from a receive-only descriptor has nowhere to put its change.
-  Always plain `xpub`, never `zpub` — SLIP-132's version bytes are a display
-  convention BIP380 has no notion of. It carries the same account key the QR
-  does, so it reveals every address of the account exactly as that does, and
-  the device says so before showing one.
+  imported from a receive-only descriptor has nowhere to put its change. That
+  is a deliberate trade rather than a free upgrade — BIP389 is newer than
+  BIP380, and a wallet that predates it (Bitcoin Core before v26.0, among
+  others) rejects the `<0;1>` outright rather than reading half of it. Such a
+  wallet wants the receive-only form, `.../0/*`, which is the same string with
+  the multipath step replaced and its checksum recomputed; `tools/origo_verify.py`
+  is the offline way to produce one. Always plain `xpub`, never `zpub` —
+  SLIP-132's version bytes are a display convention BIP380 has no notion of. It
+  carries the same account key the QR does, so it reveals every address of the
+  account exactly as that does, and the device says so before showing one.
 
 Long values are paged three lines at a time in the 16px face, split by what
 actually fits the display rather than by a character count, so a proportional
@@ -616,7 +621,10 @@ both account key QR codes, both addresses and both output descriptors, so
 every value the device can display has an independent second implementation to
 be compared against. `--change` derives the change branch instead of receive,
 so an address read off the device's Change list can be checked against the
-same second implementation the receive one is.
+same second implementation the receive one is. It also prints each descriptor's
+pre-BIP389 receive-only form, which the device itself does not show — that
+line is byte for byte what the device exported before the multipath change,
+and it is what to hand a wallet that rejects `<0;1>`.
 
 Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and

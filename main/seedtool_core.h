@@ -89,6 +89,14 @@ typedef enum {
     SEEDTOOL_CHANGE = 1,
 } seedtool_chain_t;
 
+/* Held rather than described. Because these values are written into the path
+ * directly, renumbering them silently changes every address the device
+ * derives and shows - the build would stay green, the vectors below would
+ * still be the vectors, and the only symptom would be a reader sending coins
+ * to a branch nobody meant. BIP44 fixes the numbering; this fixes it here. */
+_Static_assert(SEEDTOOL_RECEIVE == 0 && SEEDTOOL_CHANGE == 1,
+    "BIP44 numbers the receive branch 0 and the change branch 1, and these values are the path component");
+
 /* SLIP-132 defines a zpub version prefix for native segwit (BIP84) accounts
  * and none for taproot: SEEDTOOL_BIP86 with SEEDTOOL_ZPUB is SEEDTOOL_EINVAL
  * rather than a silent fall-back to xpub. */

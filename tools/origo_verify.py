@@ -139,14 +139,21 @@ def descriptor_checksum(desc):
     return "".join(DESCRIPTOR_CHECKSUM_CHARSET[(checksum >> (5 * (7 - i))) & 31] for i in range(8))
 
 
-def descriptor(fingerprint, purpose, xpub, account=0):
+def descriptor(fingerprint, purpose, xpub, account=0, multipath=True):
     """The full wpkh()/tr() output descriptor Origo's own Descriptor export
     shows, checksum included - script fragment matches the address type,
     always plain xpub (BIP380 has no notion of SLIP-132's zpub). The chain
     step is BIP389's multipath <0;1>, so one descriptor carries both the
-    receive and the change branch, exactly as the firmware writes it."""
+    receive and the change branch, exactly as the firmware writes it.
+
+    multipath=False emits the older receive-only /0/* form instead, for a
+    wallet predating BIP389 that rejects <0;1> rather than reading it. The
+    firmware has no such setting - it is the one descriptor shape the device
+    shows - so this exists to let a reader produce the fallback offline
+    rather than hand-editing a string whose checksum then no longer matches."""
     fragment = "wpkh" if purpose == 84 else "tr"
-    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/<0;1>/*)"
+    chain = "<0;1>" if multipath else "0"
+    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/{chain}/*)"
     return f"{body}#{descriptor_checksum(body)}"
 
 
@@ -517,6 +524,11 @@ def inspect(args):
         print(f"m/{purpose}'/0'/{args.account}'/{chain}/{args.index}: {addrs[purpose]}")
     for purpose in (84, 86):
         print(f"descriptor {purpose}: {descriptor(fingerprint, purpose, accounts[purpose], args.account)}")
+    # The pre-BIP389 fallback, for a wallet that rejects the multipath form.
+    # Not what the device shows; printed so it never has to be hand-edited.
+    for purpose in (84, 86):
+        receive_only = descriptor(fingerprint, purpose, accounts[purpose], args.account, multipath=False)
+        print(f"descriptor {purpose} (receive-only): {receive_only}")
 
 
 def complete(args):
