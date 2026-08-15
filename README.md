@@ -302,7 +302,7 @@ never padded with blank rows. Only labels are listed. Values meant to be transcr
 instead, split by what fits the display.
 
 The last row of every list with somewhere to return to is the way out of it —
-`Back`, `Done / erase`, `[delete]` — and a rule is drawn above it so it is not
+`Back`, `Erase and restart`, `[delete]` — and a rule is drawn above it so it is not
 read as one more choice. That row is always last, in every such list, so
 leaving a screen is always in the same place. The one list with nowhere to
 return to is the main menu itself: there is no `Back` row there, and the
@@ -319,6 +319,21 @@ once ten or fewer words remain they are listed outright. Typed as numbers, only
 digits that still lead to a word number are reachable, and the number is shown as
 the word it means, to be confirmed, before the next word is asked for. In both
 cases deleting past the start of a word steps back to the previous one.
+
+Restoring a mnemonic narrows the **last** word further still. That word carries
+the checksum, so most of the wordlist cannot end a given eleven or twenty-three:
+its eleven bits are the leftover entropy bits followed by the checksum bits,
+which leaves 128 of the 2048 words possible for a 12-word mnemonic and only 8
+for a 24-word one. The keyboard offers those and nothing else — so a word misread
+off a metal plate is not typeable in the first place, rather than being reported
+as `Invalid checksum` after the whole mnemonic has been entered. Few enough
+remain for a 24-word restore that entry lists them outright instead of asking
+for a letter. The narrowing is exact in both directions: everything it excludes
+genuinely fails validation, and no correct seed becomes harder to enter. It
+applies to both entry methods and to the last word on the review screen, where
+it is rebuilt from the words currently entered — but not to "Complete checksum",
+whose 11 or 23 words have no checksum in them yet, and not to the backup quiz,
+which asks what the reader wrote down.
 
 A word number is one-based: the position in a printed BIP39 English wordlist,
 where `abandon` is 1 and `zoo` is 2048. It is one more than the zero-based index
@@ -345,24 +360,50 @@ screen in the entry path may depend on the device RNG.
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
 four-page keyboard covering the whole printable range, entered twice, and exists
-for that derivation session only.
+for that derivation session only. It is set from the wallet viewer's Derivation
+screen rather than asked for on the way in: a session begins with none, and the
+screen states which of the two is in force rather than leaving it to be assumed.
+Changing or clearing it re-derives the master fingerprint, since that
+fingerprint is a function of it — so the fingerprint is also the check that the
+passphrase in force is the intended one.
 
 ## Restore and inspect
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
-address viewer entirely. For a valid mnemonic the viewer shows the master
-fingerprint, then one wallet type at a time — Native SegWit (BIP84) or Taproot
-(BIP86) — chosen up front, so the account key and its addresses are always read
-for the type just picked rather than interleaved with the other one's. Each
-type shows:
+address viewer entirely. For a valid mnemonic the viewer's own menu is titled
+with the master fingerprint — `Wallet @73c5da0a` — rather than spending a row
+on showing it. It is an identity rather than an action, and being read without
+being asked for is what makes it a check: it is a function of the passphrase in
+force and moves the moment that does, so a reader who knows their wallet's
+fingerprint sees at a glance whether the device is deriving that wallet.
 
-- its watch-only account key at `m/84'/0'/0'` or `m/86'/0'/0'`, titled with its
-  key origin such as `[73c5da0a/84'/0'/0']`. Native SegWit can be shown as
-  either standard BIP32 `xpub` or, on request, its SLIP-132 `zpub` — the same
-  78 bytes with the four version bytes swapped, since libwally itself
-  serialises only the plain BIP32 versions and has no notion of SLIP-132.
-  Taproot is `xpub` only: SLIP-132 defines no taproot version prefix, so there
-  is no `zpub`-equivalent to offer it as;
+A **Derivation** screen holds the three things that decide what everything else
+derives, ordered by how deep each one cuts: the optional passphrase, which
+decides the seed itself and so every key the device can produce; the wallet
+type — Native SegWit (BIP84) or Taproot (BIP86) — which picks a path from that
+seed; and the account index (`m/type'/0'/account'`, 0 through 999), which picks
+a branch of that path. All three last for the whole viewing session rather than
+one visit to a screen, so checking account 2 under both types means setting it
+once. The passphrase
+can be changed or removed at any point without leaving the session, its own row
+says which of the two is in force, and the fingerprint in the title is
+re-derived whenever it changes. One type is in force at a time, so an
+account key and its addresses are always read for the type currently set
+rather than interleaved with the other one's — the derivation path shown with
+every value names it, so what is on screen says which type produced it rather
+than leaving it to be remembered. The wallet menu itself then offers, for
+whatever is set:
+
+- **Extended public key**, holding every way the account's watch-only key at
+  `m/84'/0'/0'` or `m/86'/0'/0'` leaves the device — they are the same 78 bytes
+  three ways, so they sit together rather than as separate rows that look
+  unrelated while carrying identical risk. As `xpub`, titled with its key
+  origin such as `[73c5da0a/84'/0'/0']`; as SLIP-132's `zpub`, the same 78
+  bytes with the four version bytes swapped, since libwally serialises only the
+  plain BIP32 versions and has no notion of SLIP-132 — Native SegWit only,
+  since SLIP-132 defines no taproot prefix, and under Taproot that row is
+  absent rather than present and refusing; or as the output descriptor
+  described below;
 - its mainnet addresses for indices 0 through 99, on whichever branch is asked
   for: `Addresses` opens a Receive/Change choice first, and the list that
   follows is `m/84'/0'/0'/0/i` or `m/86'/0'/0'/0/i` for receive,
@@ -378,7 +419,8 @@ type shows:
   account already costs and keeps the cache the size it was. The chain step
   sits below the account key, so only the cheap half of the derivation
   actually repeats;
-- its BIP380 output descriptor — script type, key origin, account key and an
+- its BIP380 output descriptor, the third entry under Extended public key —
+  script type, key origin, account key and an
   8-character checksum in the one string a watch-only wallet imports directly,
   as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`
   equivalent. The chain step is BIP389's multipath `<0;1>`, so the single

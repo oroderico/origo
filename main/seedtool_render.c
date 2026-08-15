@@ -485,8 +485,8 @@ void seedtool_render_list(const char* title, const char* const* items, const siz
         const char* const item = items[top + row];
         const bool highlighted = top + row == selected;
         const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
-        /* The last row of every list is the way out of it — Back, Reboot,
-         * Done / erase, [delete]. A rule above it lifts it out of the choices,
+        /* The last row of every list is the way out of it — Back, Erase and
+         * restart, [delete]. A rule above it lifts it out of the choices,
          * which is what it is not. It goes in the gap between cells so the
          * selection bar never paints over it. */
         if (top + row == count - 1 && count > 1) {
@@ -647,6 +647,19 @@ static void draw_progress_bar(const seedtool_progress_t* progress)
 #define DIGIT_ARROW_HEIGHT 7
 #define DIGIT_ARROW_UP_Y 26
 #define DIGIT_ARROW_DOWN_Y 71
+
+/* Held rather than eyeballed. The widest field is one box per digit a word
+ * number can have, and it is centred, so a box or gap grown by a few pixels
+ * pushes the outer boxes off the edge - where fill_rect clips them silently and
+ * the field simply looks wrong on the device rather than failing anywhere. The
+ * vertical pair does the same for the arrows, which sit outside the boxes and
+ * must clear both the title above and the footer below. */
+_Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXES_MAX - 1) * DIGIT_BOX_GAP
+        <= SEEDTOOL_DISPLAY_WIDTH,
+    "the digit boxes are wider than the display");
+_Static_assert(DIGIT_ARROW_UP_Y + DIGIT_ARROW_HEIGHT <= DIGIT_BOX_Y, "the up arrow runs into the digit boxes");
+_Static_assert(DIGIT_BOX_Y + DIGIT_BOX_HEIGHT <= DIGIT_ARROW_DOWN_Y, "the digit boxes run into the down arrow");
+_Static_assert(DIGIT_ARROW_DOWN_Y + DIGIT_ARROW_HEIGHT <= LIST_FOOTER_Y, "the down arrow runs into the footer");
 
 /* A solid triangle, `up` pointing to the top. Drawn row by row like the
  * backspace glyph above rather than from a font, so it scales with the box

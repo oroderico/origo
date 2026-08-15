@@ -112,7 +112,13 @@ void seedtool_render_list(const char* title, const char* const* items, size_t co
  * `digits[0..count)` is what each box shows: boxes before `active` are drawn as
  * set, the one at `active` as being scrolled - a SEEDTOOL_KEY_BACKSPACE there
  * draws the backspace glyph - and those after it as still to come. `progress`
- * draws the dice bar underneath when it is not NULL. */
+ * draws the dice bar underneath when it is not NULL.
+ *
+ * `count` must not exceed SEEDTOOL_DIGIT_BOXES_MAX: the row is centred, so more
+ * boxes than fit do not wrap or shrink, they run off both edges where fill_rect
+ * clips them without complaint. The renderer asserts that this many fit the
+ * display; the caller is what has to stay within it. */
+#define SEEDTOOL_DIGIT_BOXES_MAX 4
 void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,
     const seedtool_progress_t* progress);
 
