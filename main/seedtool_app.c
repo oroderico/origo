@@ -767,8 +767,14 @@ static size_t layout_key_index(const char* layout, const char target)
  * back out of this word, and -1 on timeout or overflow. Only letters that can
  * still lead to a word are reachable, and once ten or fewer words match the
  * remaining candidates are offered directly. The initial key and the candidate
- * order are deterministic; nothing here consults the RNG. */
-static int enter_word(const size_t position, const size_t total, char* output, const size_t output_len)
+ * order are deterministic; nothing here consults the RNG.
+ *
+ * `allowed` narrows which words count as words at all, NULL for the whole
+ * list. Every enabled letter leads to at least one allowed word, so a stem
+ * built here can never strand the reader with no candidates - the invariant
+ * the empty-match bail below relies on. */
+static int enter_word(
+    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
 {
     char stem[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
     size_t stem_len = 0;
@@ -780,7 +786,8 @@ static int enter_word(const size_t position, const size_t total, char* output, c
 
     for (;;) {
         uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
-        const size_t matches = seedtool_words_with_prefix(stem, stem_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
+        const size_t matches
+            = seedtool_words_with_prefix_in(allowed, stem, stem_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
         bool erase = false;
 
         if (!matches) {
@@ -821,7 +828,7 @@ static int enter_word(const size_t position, const size_t total, char* output, c
             /* Too many candidates to list: narrow the stem one letter at a time. */
             bool letters[SEEDTOOL_LETTERS] = { false };
             bool enabled[WORD_KEYS] = { false };
-            (void)seedtool_next_letters(stem, stem_len, letters);
+            (void)seedtool_next_letters_in(allowed, stem, stem_len, letters);
             for (size_t i = 0; i < WORD_KEYS; ++i) {
                 const char key = seedtool_layout_key(WORD_LAYOUT, i);
                 enabled[i] = key == SEEDTOOL_KEY_BACKSPACE || letters[key - 'a'];
@@ -874,7 +881,8 @@ static int enter_word(const size_t position, const size_t total, char* output, c
  * overflow. Only digits that still lead to a word number are reachable, and the
  * number is shown as its word before it is accepted: a digit misread off paper
  * is otherwise a different seed with no sign that anything went wrong. */
-static int enter_word_number(const size_t position, const size_t total, char* output, const size_t output_len)
+static int enter_word_number(
+    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
 {
     char digits[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
@@ -886,8 +894,8 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
     for (;;) {
         bool reachable[SEEDTOOL_DIGITS] = { false };
         bool enabled[WORD_NUMBER_KEYS] = { false };
-        (void)seedtool_next_digits(digits, digits_len, reachable);
-        const unsigned number = seedtool_word_number(digits, digits_len);
+        (void)seedtool_next_digits_in(allowed, digits, digits_len, reachable);
+        const unsigned number = seedtool_word_number_in(allowed, digits, digits_len);
         for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
             const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
             enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
@@ -1099,6 +1107,31 @@ static int enter_address_index(uint32_t* value)
     }
 }
 
+/* words[0..count) joined with single spaces, the same layout seedtool_generate's
+ * transcript-to-mnemonic conversion and every published BIP39 vector use.
+ * Shared by enter_mnemonic_words (to ask what the last word could be),
+ * enter_mnemonic (once, after entry) and review_and_confirm (again after every
+ * edit), so every one of them is working from the exact string
+ * seedtool_validate_mnemonic will see. */
+static bool join_words(
+    char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
+{
+    size_t used = 0;
+    mnemonic[0] = '\0';
+    for (size_t i = 0; i < count; ++i) {
+        const size_t n = strlen(words[i]);
+        if (used + n + (i ? 1 : 0) + 1 > mnemonic_len) {
+            return false;
+        }
+        if (i) {
+            mnemonic[used++] = ' ';
+        }
+        memcpy(mnemonic + used, words[i], n + 1);
+        used += n;
+    }
+    return true;
+}
+
 /* Returns 1 when a whole mnemonic was entered, 0 when the user backed out of the
  * first word or the method menu, -1 on timeout or overflow. Fills `words` (a
  * caller-owned array so restore_mnemonic below can keep reviewing them after
@@ -1120,9 +1153,35 @@ static int enter_mnemonic_words(
     }
     int outcome = 1;
     size_t index = 0;
+    seedtool_wordset_t allowed;
     while (index < count) {
-        const int result = method ? enter_word_number(index + 1, count, words[index], sizeof(words[index]))
-                                  : enter_word(index + 1, count, words[index], sizeof(words[index]));
+        /* The last word of a whole mnemonic carries the checksum, so most of
+         * the wordlist cannot end it: 128 of 2048 can for 12 words, 8 for 24.
+         * Narrowing to those here is the same verdict the review screen
+         * already gives afterwards, moved to where it prevents the mistake
+         * instead of reporting it - a reader restoring from paper finds the
+         * wrong last word unreachable rather than typeable and then refused.
+         *
+         * Only for a mnemonic that is meant to be whole. complete_checksum
+         * enters 11 or 23 words precisely because their last word has no
+         * checksum in it yet, and narrowing there would be narrowing to a
+         * checksum the mnemonic is not supposed to satisfy. */
+        const bool last_of_whole = index + 1 == count && (count == 12 || count == 24);
+        const seedtool_wordset_t* filter = NULL;
+        if (last_of_whole) {
+            char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+            if (!join_words(words, count - 1, prefix, sizeof(prefix))
+                || seedtool_final_word_candidates(prefix, &allowed) != SEEDTOOL_OK) {
+                seedtool_zero(prefix, sizeof(prefix));
+                outcome = -1;
+                break;
+            }
+            seedtool_zero(prefix, sizeof(prefix));
+            filter = &allowed;
+        }
+        const int result = method
+            ? enter_word_number(index + 1, count, filter, words[index], sizeof(words[index]))
+            : enter_word(index + 1, count, filter, words[index], sizeof(words[index]));
         if (result < 0) {
             outcome = -1;
             break;
@@ -1139,31 +1198,11 @@ static int enter_mnemonic_words(
         }
         ++index;
     }
+    /* The set is 128 of 2048 words picked out by the eleven before them, so it
+     * says something about those eleven; wiped like everything else derived
+     * from them. */
+    seedtool_zero(&allowed, sizeof(allowed));
     return outcome;
-}
-
-/* words[0..count) joined with single spaces, the same layout seedtool_generate's
- * transcript-to-mnemonic conversion and every published BIP39 vector use.
- * Shared by enter_mnemonic (once, after entry) and review_and_confirm (again
- * after every edit), so a mid-review fix is checked against the exact string
- * seedtool_validate_mnemonic will see. */
-static bool join_words(
-    char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len)
-{
-    size_t used = 0;
-    mnemonic[0] = '\0';
-    for (size_t i = 0; i < count; ++i) {
-        const size_t n = strlen(words[i]);
-        if (used + n + (i ? 1 : 0) + 1 > mnemonic_len) {
-            return false;
-        }
-        if (i) {
-            mnemonic[used++] = ' ';
-        }
-        memcpy(mnemonic + used, words[i], n + 1);
-        used += n;
-    }
-    return true;
 }
 
 static int enter_mnemonic(const size_t count, char* mnemonic, const size_t mnemonic_len)
@@ -1253,8 +1292,30 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
         }
         cursor = (size_t)selected;
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        const int result = by_number ? enter_word_number(selected + 1, count, word, sizeof(word))
-                                      : enter_word(selected + 1, count, word, sizeof(word));
+        /* Re-entering the last word narrows to what can actually end these
+         * words, exactly as first entry does. Only the last one: every earlier
+         * word is free, and it is usually an earlier word that is wrong - the
+         * checksum fails on whichever word was mistyped, not necessarily on
+         * the one carrying it.
+         *
+         * Built from the current words each time, so fixing word 3 and then
+         * word 12 offers the candidates for the corrected prefix rather than
+         * the one entry started with. If it cannot be built the word is simply
+         * entered unnarrowed: this screen exists to fix a mnemonic that is
+         * already wrong, so it must never be the thing that blocks the fix. */
+        seedtool_wordset_t allowed;
+        const seedtool_wordset_t* filter = NULL;
+        if ((size_t)selected + 1 == count) {
+            char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+            if (join_words(words, count - 1, prefix, sizeof(prefix))
+                && seedtool_final_word_candidates(prefix, &allowed) == SEEDTOOL_OK) {
+                filter = &allowed;
+            }
+            seedtool_zero(prefix, sizeof(prefix));
+        }
+        const int result = by_number ? enter_word_number(selected + 1, count, filter, word, sizeof(word))
+                                      : enter_word(selected + 1, count, filter, word, sizeof(word));
+        seedtool_zero(&allowed, sizeof(allowed));
         if (result == 1) {
             strcpy(words[selected], word);
         } else if (result < 0) {
@@ -1946,7 +2007,9 @@ static int confirm_backup(const char* mnemonic, const size_t count)
             const size_t index = n * 3 + 1;
             const char* const expected = seedtool_word(numbers[index] - 1);
             char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-            const int result = enter_word(index + 1, count, typed, sizeof(typed));
+            /* Unnarrowed on purpose: the quiz asks what the reader wrote down,
+             * and the words it asks for are never the last one anyway. */
+            const int result = enter_word(index + 1, count, NULL, typed, sizeof(typed));
             if (result < 0) {
                 seedtool_zero(typed, sizeof(typed));
                 seedtool_zero(numbers, sizeof(numbers));

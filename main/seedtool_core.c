@@ -449,6 +449,66 @@ done:
     return ret;
 }
 
+seedtool_result_t seedtool_final_word_candidates(const char* prefix_mnemonic, seedtool_wordset_t* allowed)
+{
+    uint16_t indices[23];
+    uint8_t entropy[32] = { 0 };
+    uint8_t hash[SEEDTOOL_HASH_LEN];
+    size_t count = 0;
+    seedtool_result_t ret = mnemonic_indices(prefix_mnemonic, indices, 23, &count);
+    /* The same 11/23 split seedtool_complete_checksum works to, and for the
+     * same reason: those are the prefixes a 12- or 24-word mnemonic has. */
+    const size_t free_bits = count == 11 ? 7 : count == 23 ? 3 : 0;
+    const size_t checksum_bits = count == 11 ? 4 : count == 23 ? 8 : 0;
+    const size_t entropy_len = count == 11 ? 16 : count == 23 ? 32 : 0;
+    if (ret != SEEDTOOL_OK || !free_bits || !allowed) {
+        ret = SEEDTOOL_EINVAL;
+        goto done;
+    }
+
+    size_t bitpos = 0;
+    for (size_t i = 0; i < count; ++i) {
+        for (int bit = 10; bit >= 0; --bit, ++bitpos) {
+            entropy[bitpos / 8] |= ((indices[i] >> bit) & 1u) << (7 - (bitpos % 8));
+        }
+    }
+    if (bitpos + free_bits != entropy_len * 8) {
+        ret = SEEDTOOL_ECRYPTO;
+        goto done;
+    }
+
+    seedtool_wordset_clear(allowed);
+    for (unsigned tail = 0; tail < (1u << free_bits); ++tail) {
+        /* The free bits are rewritten in place each round rather than the
+         * whole prefix being repacked: they are the only part that varies. */
+        for (size_t b = 0; b < free_bits; ++b) {
+            const size_t p = bitpos + b;
+            const uint8_t mask = (uint8_t)(1u << (7 - (p % 8)));
+            if ((tail >> (free_bits - 1 - b)) & 1u) {
+                entropy[p / 8] |= mask;
+            } else {
+                entropy[p / 8] &= (uint8_t)~mask;
+            }
+        }
+        if (wally_sha256(entropy, entropy_len, hash, sizeof(hash)) != WALLY_OK) {
+            ret = SEEDTOOL_ECRYPTO;
+            goto done;
+        }
+        /* The last word is the free entropy bits with the checksum bits that
+         * BIP39 appends to them, in that order - so the word is decided, not
+         * searched for. Distinct tails differ in their high bits, so the
+         * candidates are distinct and there are exactly 1 << free_bits. */
+        const unsigned checksum = hash[0] >> (8 - checksum_bits);
+        seedtool_wordset_add(allowed, (tail << checksum_bits) | checksum);
+    }
+    ret = SEEDTOOL_OK;
+done:
+    seedtool_zero(indices, sizeof(indices));
+    seedtool_zero(entropy, sizeof(entropy));
+    seedtool_zero(hash, sizeof(hash));
+    return ret;
+}
+
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out)
 {
     uint16_t indices[24];

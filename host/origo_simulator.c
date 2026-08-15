@@ -38,6 +38,153 @@ static const char mnemonic24[]
 static const char bad_checksum_mnemonic[]
     = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon";
 
+/* `count` copies of "abandon", the prefix of the published all-zero vectors. */
+static bool repeat_abandon(const size_t count, char* out, const size_t out_len)
+{
+    out[0] = '\0';
+    size_t used = 0;
+    for (size_t i = 0; i < count; ++i) {
+        const char* const word = "abandon";
+        const size_t len = strlen(word);
+        if (used + len + (i ? 1 : 0) + 1 > out_len) {
+            return false;
+        }
+        if (i) {
+            out[used++] = ' ';
+        }
+        memcpy(out + used, word, len + 1);
+        used += len;
+    }
+    return true;
+}
+
+/* The last word of a mnemonic carries the checksum, so most of the wordlist
+ * cannot end it. The entry keyboard narrows to the ones that can, which is only
+ * safe if the narrowing is *exact*: a word left out must genuinely fail
+ * seedtool_validate_mnemonic, and a word left in must genuinely pass. Both
+ * directions are checked against every one of the 2048 words, for a 12-word
+ * prefix and a 24-word one, because a filter that is merely nearly right would
+ * turn a restorable seed into an unrestorable one - a far worse failure than
+ * the mistyped checksum it exists to prevent.
+ *
+ * The counts are arithmetic, not observation: 12 words leave 7 free entropy
+ * bits before 4 checksum bits, so 2^7 = 128 words can end them; 24 words leave
+ * 3 before 8, so only 8 can. */
+static bool final_word_filter_is_exact(void)
+{
+    static const struct {
+        size_t words;
+        size_t expected;
+    } cases[] = { { 12, 128 }, { 24, 8 } };
+
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+        const size_t prefix_words = cases[c].words - 1;
+        char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
+        seedtool_wordset_t set;
+        if (!repeat_abandon(prefix_words, prefix, sizeof(prefix))
+            || seedtool_final_word_candidates(prefix, &set) != SEEDTOOL_OK
+            || seedtool_wordset_count(&set) != cases[c].expected) {
+            return false;
+        }
+        for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+            char full[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
+            (void)snprintf(full, sizeof(full), "%s %s", prefix, seedtool_word(index));
+            const bool valid = seedtool_validate_mnemonic(full, NULL) == SEEDTOOL_OK;
+            if (valid != seedtool_wordset_has(&set, index)) {
+                return false;
+            }
+        }
+        /* Every word the set holds must stay reachable letter by letter, and
+         * no word outside it may be selectable at the end. Those are two
+         * different claims: a word outside the set can share a prefix with one
+         * inside it - "above" is not a candidate but starts like "about",
+         * which is - so reachability of a prefix says nothing on its own. What
+         * must not happen is arriving at the whole word and being able to pick
+         * it. */
+        for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+            const char* const word = seedtool_word(index);
+            const size_t length = strlen(word);
+            uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
+            bool letters[SEEDTOOL_LETTERS];
+            const bool member = seedtool_wordset_has(&set, index);
+            if (member) {
+                for (size_t prefix_len = 0; prefix_len < length; ++prefix_len) {
+                    if (!seedtool_next_letters_in(&set, word, prefix_len, letters)
+                        || !letters[word[prefix_len] - 'a']) {
+                        return false;
+                    }
+                }
+            }
+            /* Whether the word itself can be picked, not whether anything
+             * matches its letters: "act" is not a candidate but is a prefix of
+             * "action", which may be, so a match count says nothing here. What
+             * entry offers is the candidate list, so the question is whether
+             * this index is in it. */
+            const size_t matches
+                = seedtool_words_with_prefix_in(&set, word, length, candidates, SEEDTOOL_MAX_WORD_CHOICES);
+            bool selectable = false;
+            for (size_t i = 0; i < matches && i < SEEDTOOL_MAX_WORD_CHOICES; ++i) {
+                selectable = selectable || candidates[i] == index;
+            }
+            if (selectable != member) {
+                return false;
+            }
+            /* The number keyboard narrows the same way, so Accept stays dark
+             * on a number the mnemonic cannot end with. */
+            char digits[SEEDTOOL_MAX_WORD_DIGITS + 1];
+            (void)snprintf(digits, sizeof(digits), "%04u", (unsigned)index + 1u);
+            if ((seedtool_word_number_in(&set, digits, strlen(digits)) != 0) != member) {
+                return false;
+            }
+        }
+        /* A 24-word prefix leaves 8 words, few enough that entry lists them
+         * outright instead of asking for a single letter. */
+        if (cases[c].words == 24) {
+            uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
+            if (seedtool_words_with_prefix_in(&set, "", 0, candidates, SEEDTOOL_MAX_WORD_CHOICES)
+                > SEEDTOOL_MAX_WORD_CHOICES) {
+                return false;
+            }
+        }
+    }
+
+    /* A prefix that is not 11 or 23 words has no such thing as a final word. */
+    seedtool_wordset_t set;
+    return seedtool_final_word_candidates(mnemonic, &set) != SEEDTOOL_OK
+        && seedtool_final_word_candidates("abandon", &set) != SEEDTOOL_OK;
+}
+
+/* A NULL set means the whole wordlist, so the narrowed functions must agree
+ * with the plain ones exactly when nothing is being narrowed by. */
+static bool unnarrowed_filter_matches_plain(void)
+{
+    for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        const char* const word = seedtool_word(index);
+        for (size_t prefix_len = 0; prefix_len <= strlen(word); ++prefix_len) {
+            bool a[SEEDTOOL_LETTERS], b[SEEDTOOL_LETTERS];
+            uint16_t ca[SEEDTOOL_MAX_WORD_CHOICES], cb[SEEDTOOL_MAX_WORD_CHOICES];
+            if (seedtool_next_letters(word, prefix_len, a) != seedtool_next_letters_in(NULL, word, prefix_len, b)
+                || memcmp(a, b, sizeof(a)) != 0
+                || seedtool_words_with_prefix(word, prefix_len, ca, SEEDTOOL_MAX_WORD_CHOICES)
+                    != seedtool_words_with_prefix_in(NULL, word, prefix_len, cb, SEEDTOOL_MAX_WORD_CHOICES)
+                || memcmp(ca, cb, sizeof(ca)) != 0) {
+                return false;
+            }
+        }
+        char digits[SEEDTOOL_MAX_WORD_DIGITS + 1];
+        (void)snprintf(digits, sizeof(digits), "%04u", (unsigned)index + 1u);
+        for (size_t len = 0; len <= strlen(digits); ++len) {
+            bool a[SEEDTOOL_DIGITS], b[SEEDTOOL_DIGITS];
+            if (seedtool_word_number(digits, len) != seedtool_word_number_in(NULL, digits, len)
+                || seedtool_next_digits(digits, len, a) != seedtool_next_digits_in(NULL, digits, len, b)
+                || memcmp(a, b, sizeof(a)) != 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 /* The word-entry keyboard is only usable if every reachable letter really does
  * lead to a word, and if narrowing always terminates in a listable candidate
  * set. Both are checked exhaustively rather than by example. */
@@ -1419,6 +1566,14 @@ static int self_test(void)
     }
     if (!word_numbers_round_trip_is_sound()) {
         fputs("Origo word number round-trip self-test failed\n", stderr);
+        return 1;
+    }
+    if (!final_word_filter_is_exact()) {
+        fputs("Origo final word filter self-test failed\n", stderr);
+        return 1;
+    }
+    if (!unnarrowed_filter_matches_plain()) {
+        fputs("Origo unnarrowed filter self-test failed\n", stderr);
         return 1;
     }
     if (!stackbit_grid_is_sound()) {
