@@ -2044,9 +2044,10 @@ static void show_wallet_data(const char* mnemonic)
      * for one before anything can be seen. The passphrase is a parameter of
      * the derivation like the account and the type, and it is set in the same
      * place they are; a gate here made it the one parameter that had to be
-     * decided before the wallet existed and could not be revisited after. What
-     * is in force is always on Customize's own row and beside the master
-     * fingerprint, so "none" is stated rather than merely defaulted to. */
+     * decided before the wallet existed and could not be revisited after.
+     * Which of the two is in force is stated rather than merely defaulted to:
+     * in full on Customize's own row, and by the fingerprint titling the menu
+     * below, which is a function of it and moves whenever it changes. */
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
         (void)acknowledge("Error", "Derivation failed", NULL);
         goto done;
@@ -2063,12 +2064,23 @@ static void show_wallet_data(const char* mnemonic)
      * itself, not a derivation) reads account or type. */
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
+    /* The fingerprint names this menu rather than sitting on a row of it: it
+     * is an identity, not an action, and a row that only displayed it was a
+     * screen entered to read one value and left again. In the title it is read
+     * without being asked for, which is what makes it the check it is for -
+     * it is a function of the passphrase in force and moves the moment that
+     * does, so a reader who knows their wallet's fingerprint can see at a
+     * glance whether the device is deriving that wallet. Whether a passphrase
+     * is set at all is said in full on Customize's own row. */
+    char wallet_title[sizeof("Wallet @") + 8];
+    _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
+        "the wallet title must hold its label and all eight fingerprint hex digits");
+    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
     size_t cursor = 0;
     for (;;) {
-        const char* menu[] = { "Backup", "Extended public key", "Customize", "Addresses", "Master fingerprint",
-            "Done / erase" };
-        const int selected = choose_kept("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
-        if (selected < 0 || selected == 5) {
+        const char* menu[] = { "Backup", "Extended public key", "Customize", "Addresses", "Done / erase" };
+        const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
+        if (selected < 0 || selected == 4) {
             break;
         }
         switch (selected) {
@@ -2080,13 +2092,12 @@ static void show_wallet_data(const char* mnemonic)
             break;
         case 2:
             show_customize_menu(mnemonic, &account, &type, passphrase, fp, fphex);
-            break;
-        case 3:
-            show_addresses(mnemonic, passphrase, type, account);
+            /* The passphrase may have changed under it, and with it the
+             * fingerprint this title states. */
+            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
             break;
         default:
-            (void)acknowledge(
-                "Master fingerprint", fphex, passphrase[0] ? "Passphrase: session only" : "Passphrase: none");
+            show_addresses(mnemonic, passphrase, type, account);
             break;
         }
     }

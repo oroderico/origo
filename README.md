@@ -355,15 +355,21 @@ passphrase in force is the intended one.
 ## Restore and inspect
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
-address viewer entirely. For a valid mnemonic the viewer shows the master
-fingerprint and a **Customize** screen holding the three things that decide
-what everything else derives: the account index (`m/type'/0'/account'`, 0
-through 999), the wallet type — Native SegWit (BIP84) or Taproot (BIP86) — and
-the optional passphrase. All three last for the whole viewing session rather
-than one visit to a screen, so checking account 2 under both types means
-setting it once. The passphrase can be changed or removed at any point without
-leaving the session; the master fingerprint is re-derived when it is, since
-that fingerprint is a function of it. One type is in force at a time, so an
+address viewer entirely. For a valid mnemonic the viewer's own menu is titled
+with the master fingerprint — `Wallet @73c5da0a` — rather than spending a row
+on showing it. It is an identity rather than an action, and being read without
+being asked for is what makes it a check: it is a function of the passphrase in
+force and moves the moment that does, so a reader who knows their wallet's
+fingerprint sees at a glance whether the device is deriving that wallet.
+
+A **Customize** screen holds the three things that decide what everything else
+derives: the account index (`m/type'/0'/account'`, 0 through 999), the wallet
+type — Native SegWit (BIP84) or Taproot (BIP86) — and the optional passphrase.
+All three last for the whole viewing session rather than one visit to a screen,
+so checking account 2 under both types means setting it once. The passphrase
+can be changed or removed at any point without leaving the session, its own row
+says which of the two is in force, and the fingerprint in the title is
+re-derived whenever it changes. One type is in force at a time, so an
 account key and its addresses are always read for the type currently set
 rather than interleaved with the other one's — the derivation path shown with
 every value names it, so what is on screen says which type produced it rather
