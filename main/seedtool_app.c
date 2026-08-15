@@ -49,8 +49,9 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
 #define NAV_FOOTER "Up/Down move   BOTH select"
 #define ACK_FOOTER "BOTH continue   Up/Down back"
 
-/* Word entry keyboard: the letters plus backspace. */
-#define WORD_LAYOUT SEEDTOOL_WORD_LAYOUT
+/* Word entry keyboard: the letters plus backspace. Which arrangement is in use
+ * is word_layout()'s business; the key count is the same either way, since
+ * both hold every letter exactly once. */
 #define WORD_KEYS (SEEDTOOL_LETTERS + 1)
 
 /* Word number keyboard, for a backup that records numbers rather than words. */
@@ -85,6 +86,17 @@ const char* const seedtool_passphrase_layouts[PASSPHRASE_PAGES] = {
     ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
 };
 
+/* Alphabetical: the two letter pages reordered, the digit and symbol pages
+ * shared with the array above rather than repeated - punctuation has no
+ * alphabetical order, and two copies of the same page would be two places to
+ * keep a character from going missing instead of one. */
+const char* const seedtool_passphrase_layouts_alpha[PASSPHRASE_PAGES] = {
+    "abcdefghij\nklmnopqrs \ntuvwxyz\b\t\r",
+    "ABCDEFGHIJ\nKLMNOPQRS \nTUVWXYZ\b\t\r",
+    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
+    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
+};
+
 typedef void (*format_fn)(unsigned value, char* output, size_t output_len);
 
 static uint64_t last_action;
@@ -100,6 +112,23 @@ static bool chord_learned;
  * every boot - Origo has no persistence to save them to. */
 static bool orientation_flipped;
 static unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT;
+/* Which arrangement the letter keyboards use. Settings is reachable only from
+ * the Origo menu, and the wallet has no row that returns there, so this cannot
+ * change while a seed is loaded: no session can have half a passphrase typed
+ * on one arrangement and half on the other. Keys are found by character rather
+ * than position in any case, so the same presses spell the same string either
+ * way - but the ordering is what makes that a fact about the menu tree rather
+ * than about the reader being careful. */
+static bool alphabetical_keys;
+
+/* The letter keyboards in whichever arrangement is set. The number keyboard
+ * has no alphabetical form and is not routed through here. */
+static const char* word_layout(void) { return alphabetical_keys ? SEEDTOOL_WORD_LAYOUT_ALPHA : SEEDTOOL_WORD_LAYOUT; }
+
+static const char* passphrase_layout(const size_t page)
+{
+    return alphabetical_keys ? seedtool_passphrase_layouts_alpha[page] : seedtool_passphrase_layouts[page];
+}
 
 static const char* nav_hint(void) { return chord_learned ? "" : "   " NAV_FOOTER; }
 
@@ -801,7 +830,7 @@ static int enter_word(
     size_t stem_len = 0;
     /* The cursor opens at the centre and then keeps its place between letters,
      * so a word is not retyped from the far corner every time. */
-    size_t selected = seedtool_layout_center(WORD_LAYOUT);
+    size_t selected = seedtool_layout_center(word_layout());
     char title[24];
     (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)position, (unsigned)total);
 
@@ -851,13 +880,13 @@ static int enter_word(
             bool enabled[WORD_KEYS] = { false };
             (void)seedtool_next_letters_in(allowed, stem, stem_len, letters);
             for (size_t i = 0; i < WORD_KEYS; ++i) {
-                const char key = seedtool_layout_key(WORD_LAYOUT, i);
+                const char key = seedtool_layout_key(word_layout(), i);
                 enabled[i] = key == SEEDTOOL_KEY_BACKSPACE || letters[key - 'a'];
             }
             selected = nearest_enabled(enabled, WORD_KEYS, selected);
             bool picked = false;
             while (!picked) {
-                seedtool_display_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected, position, total);
+                seedtool_display_keyboard(title, stem_len ? stem : "-", word_layout(), enabled, selected, position, total);
                 switch (wait_key()) {
                 case KEY_SELECT:
                     picked = true;
@@ -876,7 +905,7 @@ static int enter_word(
                     return -1;
                 }
             }
-            const char key = seedtool_layout_key(WORD_LAYOUT, selected);
+            const char key = seedtool_layout_key(word_layout(), selected);
             if (key == SEEDTOOL_KEY_BACKSPACE) {
                 erase = true;
             } else if (stem_len < SEEDTOOL_MAX_WORD_LEN) {
@@ -1393,10 +1422,10 @@ static int restore_mnemonic(const size_t count, char* mnemonic, const size_t mne
 static bool enter_passphrase_once(char* output, const size_t output_len)
 {
     size_t used = 0, page = 0;
-    size_t selected = seedtool_layout_center(seedtool_passphrase_layouts[0]);
+    size_t selected = seedtool_layout_center(passphrase_layout(0));
     output[0] = '\0';
     for (;;) {
-        const char* const layout = seedtool_passphrase_layouts[page];
+        const char* const layout = passphrase_layout(page);
         const size_t keys = seedtool_layout_keys(layout);
         if (selected >= keys) {
             selected = seedtool_layout_center(layout);
@@ -1425,7 +1454,7 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
             page = (page + 1) % PASSPHRASE_PAGES;
             /* A new page is a new keyboard, so the cursor starts from its centre
              * rather than from wherever the page key happened to sit. */
-            selected = seedtool_layout_center(seedtool_passphrase_layouts[page]);
+            selected = seedtool_layout_center(passphrase_layout(page));
         } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
             if (used) {
                 output[--used] = '\0';
@@ -2747,9 +2776,12 @@ static void show_settings_menu(void)
             orientation_flipped ? "On" : "Off");
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
-        const char* items[] = { orientation_item, brightness_item, "About", "Back" };
-        const int selected = choose_kept("Settings", items, 4, true, &cursor);
-        if (selected < 0 || selected == 3) {
+        char keyboard_item[24];
+        (void)snprintf(
+            keyboard_item, sizeof(keyboard_item), "Keyboard: %s", alphabetical_keys ? "ABC" : "QWERTY");
+        const char* items[] = { orientation_item, brightness_item, keyboard_item, "About", "Back" };
+        const int selected = choose_kept("Settings", items, 5, true, &cursor);
+        if (selected < 0 || selected == 4) {
             return;
         }
         if (selected == 0) {
@@ -2757,6 +2789,11 @@ static void show_settings_menu(void)
             seedtool_display_set_orientation(orientation_flipped);
         } else if (selected == 1) {
             show_brightness();
+        } else if (selected == 2) {
+            /* Toggled in place: two arrangements, and the row names the one in
+             * force, so a chooser would be a screen to say what the label
+             * says. Nothing to apply - the keyboards read it when they draw. */
+            alphabetical_keys = !alphabetical_keys;
         } else {
             (void)page_text("Safety",
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "

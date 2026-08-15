@@ -291,19 +291,19 @@ static bool layout_is_well_formed(const char* layout)
     return row && seedtool_layout_center(layout) < seedtool_layout_keys(layout);
 }
 
-static bool layouts_are_complete(void)
+/* Every letter exactly once, and exactly one backspace: a row with a letter
+ * dropped would make some BIP39 words impossible to type. Takes the layout
+ * rather than naming one, because there are now two arrangements of these keys
+ * and an alphabetical one typed out by hand is exactly where a missing letter
+ * would come from. */
+static bool word_layout_is_complete(const char* const layout)
 {
     bool seen[128] = { false };
-
-    if (!layout_is_well_formed(SEEDTOOL_WORD_LAYOUT) || !layout_is_well_formed(SEEDTOOL_WORD_NUMBER_LAYOUT)
-        || seedtool_layout_keys(SEEDTOOL_WORD_LAYOUT) != SEEDTOOL_LETTERS + 1
-        || seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT) != SEEDTOOL_DIGITS + 2) {
+    if (!layout_is_well_formed(layout) || seedtool_layout_keys(layout) != SEEDTOOL_LETTERS + 1) {
         return false;
     }
-    /* Every letter exactly once, and exactly one backspace: a QWERTY row with a
-     * letter dropped would make some BIP39 words impossible to type. */
-    for (size_t i = 0; i < seedtool_layout_keys(SEEDTOOL_WORD_LAYOUT); ++i) {
-        const unsigned char key = (unsigned char)seedtool_layout_key(SEEDTOOL_WORD_LAYOUT, i);
+    for (size_t i = 0; i < seedtool_layout_keys(layout); ++i) {
+        const unsigned char key = (unsigned char)seedtool_layout_key(layout, i);
         if (key != SEEDTOOL_KEY_BACKSPACE && (key < 'a' || key > 'z')) {
             return false;
         }
@@ -316,6 +316,45 @@ static bool layouts_are_complete(void)
         if (!seen[letter]) {
             return false;
         }
+    }
+    return true;
+}
+
+/* The pages of one arrangement must reach all 95 printable ASCII characters
+ * between them. Checked per arrangement, not over both together: a character
+ * present only in the QWERTY pages would leave a passphrase containing it
+ * untypeable for a reader who had switched to alphabetical, which is the same
+ * failure as dropping it outright for half the users. */
+static bool passphrase_pages_are_complete(const char* const* const pages)
+{
+    bool seen[128] = { false };
+    for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
+        if (!layout_is_well_formed(pages[page])) {
+            return false;
+        }
+        for (size_t i = 0; i < seedtool_layout_keys(pages[page]); ++i) {
+            seen[(unsigned char)seedtool_layout_key(pages[page], i)] = true;
+        }
+    }
+    for (unsigned char character = 0x20; character <= 0x7e; ++character) {
+        if (!seen[character]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool layouts_are_complete(void)
+{
+    bool seen[128] = { false };
+
+    if (!layout_is_well_formed(SEEDTOOL_WORD_NUMBER_LAYOUT)
+        || seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT) != SEEDTOOL_DIGITS + 2) {
+        return false;
+    }
+    /* Both arrangements, or the one that is not the default ships unchecked. */
+    if (!word_layout_is_complete(SEEDTOOL_WORD_LAYOUT) || !word_layout_is_complete(SEEDTOOL_WORD_LAYOUT_ALPHA)) {
+        return false;
     }
     /* The number keyboard's characters, not just its key count. enter_word_number
      * indexes reachable[key - '0'] for every key that is neither backspace nor
@@ -338,25 +377,11 @@ static bool layouts_are_complete(void)
             return false;
         }
     }
-    /* The passphrase pages together must still reach all 95 printable ASCII
-     * characters, or a passphrase typed on an older build could not be retyped
-     * on this one. Space repeats on every page on purpose. */
-    memset(seen, 0, sizeof(seen));
-    for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
-        const char* const layout = seedtool_passphrase_layouts[page];
-        if (!layout_is_well_formed(layout)) {
-            return false;
-        }
-        for (size_t i = 0; i < seedtool_layout_keys(layout); ++i) {
-            seen[(unsigned char)seedtool_layout_key(layout, i)] = true;
-        }
-    }
-    for (unsigned char character = 0x20; character <= 0x7e; ++character) {
-        if (!seen[character]) {
-            return false;
-        }
-    }
-    return true;
+    /* Each arrangement's pages must reach all 95 printable ASCII characters, or
+     * a passphrase typed on an older build - or under the other setting -
+     * could not be retyped. Space repeats on every page on purpose. */
+    return passphrase_pages_are_complete(seedtool_passphrase_layouts)
+        && passphrase_pages_are_complete(seedtool_passphrase_layouts_alpha);
 }
 
 /* Type `digits` one key at a time and require that the keyboard offered every
