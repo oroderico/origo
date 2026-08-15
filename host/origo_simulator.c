@@ -1305,7 +1305,11 @@ static bool nav_chrome_bands_do_not_collide(void)
              * where a word is the selection and the bar cannot be taken - so
              * that pass is the one that draws the bar dimmed. */
             const bool confirm_enabled = selections[s] != 0;
-            seedtool_render_nav_list(titles[i], words, 12, selections[s], 0, "Continue", confirm_enabled);
+            const seedtool_nav_t nav = { .selected = selections[s],
+                .confirm = "Continue",
+                .confirm_enabled = confirm_enabled,
+                .back = true };
+            seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
              * confirm bar starts at 118. Two gaps must stay dark, or a band
@@ -1340,7 +1344,8 @@ static bool nav_chrome_bands_do_not_collide(void)
      * actions, so the arrow is the only control and the bar's band must stay
      * dark rather than holding an empty outline. */
     for (size_t s = 0; s < 2; ++s) {
-        seedtool_render_nav_list("Word entry", words, 2, s ? SEEDTOOL_NAV_BACK : 0, 0, NULL, false);
+        const seedtool_nav_t nav = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
+        seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
         if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT)) {
             return false;
         }
@@ -1368,8 +1373,11 @@ static bool nav_chrome_bands_do_not_collide(void)
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
-            seedtool_render_nav_screen(
-                screens[i].title, screens[i].line1, screens[i].line2, on_back, screens[i].label);
+            const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+                .confirm = screens[i].label,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
              * margin. One wrap is tolerated because the export warnings
@@ -1409,8 +1417,11 @@ static bool nav_chrome_bands_do_not_collide(void)
     const seedtool_progress_t full = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
     for (size_t i = 0; i < sizeof(dice) / sizeof(dice[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
-            seedtool_render_nav_dice_screen(
-                dice[i].title, dice[i].line1, dice[i].line2, on_back, dice[i].label, &full);
+            const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+                .confirm = dice[i].label,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
             }
@@ -1439,7 +1450,11 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "Error", "Could not compute", "word numbers", "OK" },
     };
     for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
-        seedtool_render_nav_notice(notices[i].title, notices[i].line1, notices[i].line2, notices[i].label);
+        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_CONFIRM,
+            .confirm = notices[i].label,
+            .confirm_enabled = true,
+            .back = false };
+        seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)) {
             return false;
         }
@@ -1454,8 +1469,13 @@ static bool nav_chrome_bands_do_not_collide(void)
     for (size_t c = 0; c < sizeof(cursors) / sizeof(cursors[0]); ++c) {
         /* A full-width transcript line, and the widest counter either paged
          * screen can reach: MAX_PAGE_LINES=24 gives page_text eight pages. */
-        seedtool_render_nav_screen3("Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
-            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1", cursors[c], "Continue", "8/8");
+        const seedtool_nav_t paged = { .selected = cursors[c],
+            .confirm = "Continue",
+            .confirm_enabled = true,
+            .back = true,
+            .counter = "8/8" };
+        seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }
@@ -1465,8 +1485,13 @@ static bool nav_chrome_bands_do_not_collide(void)
         if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
             return false;
         }
-        seedtool_render_nav_screen4("BIP39 word numbers", "21. mosquito", "22. mosquito", "23. mosquito",
-            "24. mosquito", cursors[c], "Continue", "6/6");
+        static const char* const rows[] = { "21. mosquito", "22. mosquito", "23. mosquito", "24. mosquito" };
+        const seedtool_nav_t listed = { .selected = cursors[c],
+            .confirm = "Continue",
+            .confirm_enabled = true,
+            .back = true,
+            .counter = "6/6" };
+        seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }

@@ -102,54 +102,66 @@ void seedtool_render_list(const char* title, const char* const* items, size_t co
  * alongside an ordinary item index. Sentinels rather than positions past the
  * end of the list, so a caller never has to know how many rows the chrome
  * added to reach them - "the back arrow" and "the confirm bar" name
- * themselves. Adapted from Blockstream Jade, which puts a back button in every
+ * themselves. SEEDTOOL_NAV_BODY is neither: it says the cursor is on what the
+ * screen is showing, which is how a paged screen says "reading, not on a
+ * control". Adapted from Blockstream Jade, which puts a back button in every
  * title bar (main/ui/dialogs.c) rather than spending a list row on it. */
 #define SEEDTOOL_NAV_BACK SIZE_MAX
 #define SEEDTOOL_NAV_CONFIRM (SIZE_MAX - 1)
+#define SEEDTOOL_NAV_BODY (SIZE_MAX - 2)
 
-/* A list under the nav chrome: a back arrow at the top left, in the title bar
- * where it costs no row, and a confirm bar along the bottom. Both sit in the
- * same place on every screen that uses this, so neither button carries a
+/* The chrome a nav screen wears: a back arrow at the top left, in the title
+ * bar where it costs no row, and a confirm bar along the bottom. Both sit in
+ * the same place on every screen that uses this, so neither button carries a
  * meaning that changes with the screen - up and down only ever move the
  * cursor, and the chord only ever takes what is highlighted.
  *
- * `selected` is an item index or one of the sentinels above. `confirm` labels
- * the bottom bar; `confirm_enabled` false draws it dimmed, for a screen where
- * confirming is not yet possible and the reader should still see where the
- * control will be. Shows the same SEEDTOOL_LIST_ROWS rows as
+ * Passed as one struct rather than four parameters so that a screen names its
+ * controls once, and so a screen type added later inherits them without every
+ * renderer growing a signature. Every field is meant to be set explicitly:
+ * the zero value of `confirm_enabled` dims a bar and the zero value of `back`
+ * removes an arrow, neither of which is what a screen usually wants. The app
+ * builds these in its own few nav helpers, not at each call site. */
+typedef struct {
+    /* An item index, or one of the three sentinels above. */
+    size_t selected;
+    /* Label on the confirm bar. NULL draws no bar at all: a menu's rows are
+     * its actions, and there is nothing left to confirm once one is picked. */
+    const char* confirm;
+    /* False draws the bar dimmed and unselectable - for a screen where
+     * confirming is not yet possible and the reader should still see where
+     * the control will be. */
+    bool confirm_enabled;
+    /* False draws no arrow, for a notice with nowhere to go back to. Drawing
+     * one there would restate as a control the same false promise the old
+     * "Up/Down back" footer was making. */
+    bool back;
+    /* Page counter, drawn small in the gap above the bar. NULL draws none. */
+    const char* counter;
+} seedtool_nav_t;
+
+/* Two or three centred body lines - three when `line3` is given, the same
+ * choice seedtool_render_screen and seedtool_render_screen3 make by being two
+ * functions. Body heights match theirs, so a screen gaining the chrome does
+ * not also move its own text. */
+void seedtool_render_nav_text(
+    const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
+
+/* Four left-aligned rows, at seedtool_render_screen4's own heights: a numbered
+ * word list, which reads as a table rather than as centred blocks. */
+void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
+
+/* A scrolling list under the chrome. Shows the same SEEDTOOL_LIST_ROWS rows as
  * seedtool_render_list, one pixel shorter each to buy the bar its height, so
  * seedtool_list_top and seedtool_list_thumb apply here unchanged. */
-void seedtool_render_nav_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
-    const char* confirm, bool confirm_enabled);
+void seedtool_render_nav_list(
+    const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 
-/* The same chrome over the two-line text screen rather than a list: for a
- * screen the reader has to take or leave, with nothing to pick between. Only
- * two things can be selected, so the selection is `on_back` rather than an
- * index - the confirm bar is whatever the arrow is not. Body lines sit where
- * seedtool_render_screen puts them, so this is that screen with the footer's
- * two hints replaced by the controls they described. */
-void seedtool_render_nav_screen(
-    const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
-
-/* The same body, one control and no arrow: for a notice the reader can only
- * acknowledge. The bar is drawn selected, being the only thing to select. */
-void seedtool_render_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm);
-
-/* The same again with the dice/coin quality bar drawn in, for the two screens
- * that bracket an entropy run: the one before it showing the bar empty, and
- * the one after showing it full. */
-void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, bool on_back,
-    const char* confirm, const seedtool_progress_t* progress);
-/* Paged screens under the chrome: three centred body lines (a long value) or
- * four left-aligned ones (a numbered word list), with the page counter in the
- * gap above the bar. `selected` is SEEDTOOL_NAV_BACK, SEEDTOOL_NAV_CONFIRM, or
- * anything else for a cursor that is on the body itself - where neither
- * control is highlighted, because what the reader is on is the page. */
-void seedtool_render_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
-    size_t selected, const char* confirm, const char* counter);
-void seedtool_render_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, size_t selected, const char* confirm, const char* counter);
-
+/* Two body lines with the dice/coin quality bar drawn in, for the screens that
+ * bracket an entropy run: the one before it showing the bar empty, and the one
+ * after showing it full. */
+void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
+    const seedtool_progress_t* progress);
 
 /* `layout` is the key characters row by row, rows separated by '\n' and at most
  * ten keys per row. `enabled` is indexed by key position across the whole

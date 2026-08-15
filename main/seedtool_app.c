@@ -181,25 +181,6 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
-/* A notice the reader can only take in: the eighteen screens whose answer
- * every caller discarded. They used to carry "BOTH continue   Up/Down back"
- * over a screen where back and continue did the same thing, so the footer was
- * describing a way out that was not there. One bar, no arrow, and up/down do
- * nothing rather than pretending to. */
-static void notice(const char* title, const char* one, const char* two, const char* label)
-{
-    for (;;) {
-        seedtool_display_nav_notice(title, one, two, label);
-        const seedtool_key_t key = wait_key();
-        /* A timeout leaves too: wait_key has already shown the session
-         * warning by then, and holding this screen open past it would keep
-         * the notice on a display that is about to be wiped. */
-        if (key == KEY_SELECT || key == KEY_TIMEOUT) {
-            return;
-        }
-    }
-}
-
 /* Every choice in the firmware is made here, on a list that shows five options
  * at once. Which rows are on screen follows from the count and the selection
  * alone, so a choice screen is reproducible from what the user has done.
@@ -272,24 +253,41 @@ static size_t nav_selection(const size_t position, const size_t count)
     return position > count ? SEEDTOOL_NAV_CONFIRM : position - 1;
 }
 
-/* confirm(), under the nav chrome: a screen the reader takes or leaves, with
- * nothing on it to pick between. Only the arrow and the bar can be selected,
- * so up and down just move between the two - which is the whole point, since
- * this is the screen where up/down used to mean "back" while the chord meant
- * "continue", the pairing that reads differently on every screen that uses
- * it. `start_on_back` is the opt-out from opening on the bar. */
-static int nav_confirm(
-    const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
+/* The one loop behind every screen whose only controls are the arrow and the
+ * bar. `progress` draws the entropy quality bar in and is NULL otherwise;
+ * `back` false removes the arrow, leaving a notice the reader can only take
+ * in. Returns NAV_BACK, NAV_CONFIRM or NAV_TIMEOUT.
+ *
+ * These were three near-identical loops - one for text, one for the dice
+ * screens, one for the notices - differing only in which renderer they called
+ * and which of the two controls existed. The differences are arguments now,
+ * so a fourth kind of screen is an argument too rather than a fourth copy of
+ * the same switch. */
+static int nav_screen(const char* title, const char* one, const char* two, const char* label, const bool back,
+    const bool start_on_back, const seedtool_progress_t* progress)
 {
-    bool on_back = start_on_back;
+    seedtool_nav_t nav = {
+        .selected = back && start_on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+        .confirm = label,
+        .confirm_enabled = true,
+        .back = back,
+    };
     for (;;) {
-        seedtool_display_nav_screen(title, one, two, on_back, label);
+        if (progress) {
+            seedtool_display_nav_dice(&nav, title, one, two, progress);
+        } else {
+            seedtool_display_nav_text(&nav, title, one, two, NULL);
+        }
         switch (wait_key()) {
         case KEY_SELECT:
-            return on_back ? NAV_BACK : NAV_CONFIRM;
+            return nav.selected == SEEDTOOL_NAV_BACK ? NAV_BACK : NAV_CONFIRM;
         case KEY_PREV:
         case KEY_NEXT:
-            on_back = !on_back;
+            /* Two controls at most, so either direction is the other one -
+             * and with no arrow there is nothing to move to. */
+            if (back) {
+                nav.selected = nav.selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_CONFIRM : SEEDTOOL_NAV_BACK;
+            }
             break;
         case KEY_REDRAW:
             break;
@@ -299,62 +297,30 @@ static int nav_confirm(
     }
 }
 
-/* Where the cursor sits on a paged screen: 0 is the back arrow, 1..pages are
- * the pages themselves, and pages + 1 is the confirm bar. Moving down is
- * therefore reading forward - the cursor *is* the reading position - and the
- * first page's neighbour above is the arrow rather than the way out. That is
- * the fix these screens needed: pressing up on a one-page transcript used to
- * leave it altogether, which from show_generated meant falling all the way
- * back to the menu with no warning that a press had done it. */
-static size_t page_step(const size_t position, const size_t pages, const bool forward)
-{
-    const size_t ring = pages + 2;
-    return (position + (forward ? 1 : ring - 1)) % ring;
-}
-
-/* The page the body shows for a cursor position: the arrow reads with the
- * first page behind it, the bar with the last. */
-static size_t page_shown(const size_t position, const size_t pages)
-{
-    return !position ? 0 : position > pages ? pages - 1 : position - 1;
-}
-
-static size_t page_selection(const size_t position, const size_t pages)
-{
-    return !position ? SEEDTOOL_NAV_BACK : position > pages ? SEEDTOOL_NAV_CONFIRM : position - 1;
-}
-
-/* nav_confirm() with the entropy quality bar drawn in: the two screens that
- * bracket a dice/coin run, showing the bar empty before it and full after. */
-static bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label,
-    const bool start_on_back, const seedtool_progress_t* progress)
-{
-    bool on_back = start_on_back;
-    for (;;) {
-        seedtool_display_nav_dice_screen(title, one, two, on_back, label, progress);
-        switch (wait_key()) {
-        case KEY_SELECT:
-            return !on_back;
-        case KEY_PREV:
-        case KEY_NEXT:
-            on_back = !on_back;
-            break;
-        case KEY_REDRAW:
-            break;
-        default:
-            return false;
-        }
-    }
-}
-
-/* acknowledge(), under the nav chrome: for the sites that act on the answer.
- * The ones that discard it keep the old widget for now - an arrow that leads
- * nowhere would restate in a control the same false promise the footer's
- * "Up/Down back" makes on those screens. */
+/* A screen the reader takes or leaves. `start_on_back` is the opt-out from
+ * opening on the bar, for a screen whose whole purpose is to say "this may be
+ * a bad idea". */
 static bool nav_acknowledge(
     const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
 {
-    return nav_confirm(title, one, two, label, start_on_back) == NAV_CONFIRM;
+    return nav_screen(title, one, two, label, true, start_on_back, NULL) == NAV_CONFIRM;
+}
+
+/* The same with the entropy quality bar drawn in. */
+static bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label,
+    const bool start_on_back, const seedtool_progress_t* progress)
+{
+    return nav_screen(title, one, two, label, true, start_on_back, progress) == NAV_CONFIRM;
+}
+
+/* A notice the reader can only take in: the screens whose answer every caller
+ * discards. They used to carry "BOTH continue   Up/Down back" over a screen
+ * where back and continue did the same thing, so the footer was describing a
+ * way out that was not there. One bar, no arrow, and up/down do nothing
+ * rather than pretending to. */
+static void notice(const char* title, const char* one, const char* two, const char* label)
+{
+    (void)nav_screen(title, one, two, label, false, false, NULL);
 }
 
 /* A choice made under the back-arrow-and-confirm-bar chrome. `cursor` carries
@@ -381,7 +347,13 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
         if (*cursor != SEEDTOOL_NAV_BACK && *cursor != SEEDTOOL_NAV_CONFIRM) {
             top = seedtool_list_top(count, *cursor, top);
         }
-        seedtool_display_nav_list(title, items, count, *cursor, top, confirm, confirm_enabled);
+        const seedtool_nav_t nav = {
+            .selected = *cursor,
+            .confirm = confirm,
+            .confirm_enabled = confirm_enabled,
+            .back = true,
+        };
+        seedtool_display_nav_list(&nav, title, items, count, top);
         const size_t ring = nav_ring_size(count, confirm_enabled);
         size_t position = nav_position(*cursor, count);
         switch (wait_key()) {
@@ -402,6 +374,45 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             return NAV_TIMEOUT;
         }
     }
+}
+
+/* Where the cursor sits on a paged screen: 0 is the back arrow, 1..pages are
+ * the pages themselves, and pages + 1 is the confirm bar. Moving down is
+ * therefore reading forward - the cursor *is* the reading position - and the
+ * first page's neighbour above is the arrow rather than the way out. */
+static size_t page_step(const size_t position, const size_t pages, const bool forward)
+{
+    const size_t ring = pages + 2;
+    return (position + (forward ? 1 : ring - 1)) % ring;
+}
+
+/* The page the body shows for a cursor position: the arrow reads with the
+ * first page behind it, the bar with the last. */
+static size_t page_shown(const size_t position, const size_t pages)
+{
+    return !position ? 0 : position > pages ? pages - 1 : position - 1;
+}
+
+static size_t page_selection(const size_t position, const size_t pages)
+{
+    if (!position) {
+        return SEEDTOOL_NAV_BACK;
+    }
+    return position > pages ? SEEDTOOL_NAV_CONFIRM : SEEDTOOL_NAV_BODY;
+}
+
+/* The chrome a paged screen wears, so page_text and show_numbered_list say it
+ * once each rather than both spelling out the same four fields. */
+static seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* counter)
+{
+    const seedtool_nav_t nav = {
+        .selected = page_selection(position, pages),
+        .confirm = "Continue",
+        .confirm_enabled = true,
+        .back = true,
+        .counter = counter,
+    };
+    return nav;
 }
 
 /* A menu under the nav chrome: what used to be a Back row at the bottom of
@@ -718,8 +729,8 @@ static bool page_text(const char* title, const char* text)
             line3[length[first + 2]] = '\0';
         }
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        seedtool_display_nav_screen3(
-            title, line1, line2, line3, page_selection(position, pages), "Continue", footer);
+        const seedtool_nav_t nav = page_nav(position, pages, footer);
+        seedtool_display_nav_text(&nav, title, line1, line2, line3);
         switch (wait_key()) {
         case KEY_SELECT:
             if (!position) {
@@ -1104,7 +1115,7 @@ static int enter_word_number(const size_t position, const size_t total, char* ou
             /* The number that was typed is the thing being checked here, so
              * the bar names it rather than saying "Continue": what the reader
              * is agreeing to is that this word is the one they meant. */
-            const int taken = nav_confirm(title, word, counted, "Use this word", false);
+            const int taken = nav_screen(title, word, counted, "Use this word", true, false, NULL);
             seedtool_zero(counted, sizeof(counted));
             if (taken == NAV_CONFIRM) {
                 const int result = !word || strlen(word) + 1 > output_len ? -1 : 1;
@@ -2006,8 +2017,9 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
         }
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        seedtool_display_nav_screen4(show_words ? "BIP39 words" : "BIP39 word numbers", lines[0], lines[1], lines[2],
-            lines[3], page_selection(cursor, pages), "Continue", footer);
+        const seedtool_nav_t nav = page_nav(cursor, pages, footer);
+        const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
+        seedtool_display_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
         switch (wait_key()) {
         case KEY_SELECT:
             if (!cursor) {
@@ -2296,7 +2308,8 @@ static bool show_generated(seedtool_generated_t* generated)
             char intro[48];
             (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
                 (unsigned)generated->words);
-            const int taken = nav_confirm("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
+            const int taken
+                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", true, false, NULL);
             /* A timeout ends it here rather than stepping back: repainting
              * the whole mnemonic on the way out of an expired session is the
              * one thing this must not do. */

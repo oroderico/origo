@@ -222,44 +222,30 @@ void seedtool_display_list(const char* title, const char* const* items, const si
     flush();
 }
 
-void seedtool_display_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
-    const size_t top, const char* confirm, const bool confirm_enabled)
+void seedtool_display_nav_text(
+    const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3)
 {
-    seedtool_render_nav_list(title, items, count, selected, top, confirm, confirm_enabled);
+    seedtool_render_nav_text(nav, title, line1, line2, line3);
     flush();
 }
 
-void seedtool_display_nav_screen(
-    const char* title, const char* line1, const char* line2, const bool on_back, const char* confirm)
+void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, const size_t count)
 {
-    seedtool_render_nav_screen(title, line1, line2, on_back, confirm);
+    seedtool_render_nav_rows(nav, title, rows, count);
     flush();
 }
 
-void seedtool_display_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm)
+void seedtool_display_nav_list(
+    const seedtool_nav_t* nav, const char* title, const char* const* items, const size_t count, const size_t top)
 {
-    seedtool_render_nav_notice(title, line1, line2, confirm);
+    seedtool_render_nav_list(nav, title, items, count, top);
     flush();
 }
 
-void seedtool_display_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
-    const char* confirm, const seedtool_progress_t* progress)
+void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
+    const seedtool_progress_t* progress)
 {
-    seedtool_render_nav_dice_screen(title, line1, line2, on_back, confirm, progress);
-    flush();
-}
-
-void seedtool_display_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
-    const size_t selected, const char* confirm, const char* counter)
-{
-    seedtool_render_nav_screen3(title, line1, line2, line3, selected, confirm, counter);
-    flush();
-}
-
-void seedtool_display_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const size_t selected, const char* confirm, const char* counter)
-{
-    seedtool_render_nav_screen4(title, line1, line2, line3, line4, selected, confirm, counter);
+    seedtool_render_nav_dice(nav, title, line1, line2, progress);
     flush();
 }
 

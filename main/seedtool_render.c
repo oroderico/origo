@@ -80,6 +80,11 @@
  * at 103) and the bar. The small face fits the 14px left over; the 16px one
  * would not. */
 #define NAV_COUNTER_Y 105
+/* seedtool_render_screen4's four left-aligned rows, kept at its own heights so
+ * a numbered list reads the same with the chrome as without it. */
+#define NAV_ROWS_SHOWN 4
+#define NAV_ROWS_TOP 28
+#define NAV_ROWS_HEIGHT 20
 
 /* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
  * xpub in one image. Raising it again is a compile error rather than a code
@@ -546,61 +551,106 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
  * point of the thing being that the arrow and the bar are found in one place
  * regardless of what sits between them. Split from the screens so a new one
  * inherits the geometry rather than restating it. */
-static void draw_nav_header(const char* title, const bool on_back)
+static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
 {
-    if (on_back) {
-        fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+    /* A screen with no way back gets no arrow, and its title takes the whole
+     * width rather than a column with a gap held open beside it. */
+    const int inset = nav->back ? NAV_BACK_X + NAV_BACK_WIDTH : 0;
+    if (nav->back) {
+        const bool on_back = nav->selected == SEEDTOOL_NAV_BACK;
+        if (on_back) {
+            fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+        }
+        draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+            on_back ? COLOR_BLACK : COLOR_WHITE);
     }
-    draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
-        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
-        on_back ? COLOR_BLACK : COLOR_WHITE);
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right
      * against the arrow, and a long one would paint into it. */
-    (void)draw_centered_box(tft_Ubuntu16, title, NAV_BACK_X + NAV_BACK_WIDTH,
-        SEEDTOOL_DISPLAY_WIDTH - 2 * (NAV_BACK_X + NAV_BACK_WIDTH), LIST_TITLE_Y);
+    (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
 }
 
-static void draw_nav_bar(const char* confirm, const bool on_confirm, const bool confirm_enabled)
+static void draw_nav_bar(const seedtool_nav_t* nav)
 {
-    if (!confirm) {
+    if (!nav->confirm) {
         return;
     }
+    const bool on_confirm = nav->selected == SEEDTOOL_NAV_CONFIRM;
     /* Filled when it is both selectable and selected, outlined when it is
      * selectable but not selected, dimmed when it cannot be taken at all - so
      * the bar is in the same place either way and only its state says whether
      * confirming is available yet. */
-    const uint16_t ink = !confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
-    if (on_confirm && confirm_enabled) {
+    const uint16_t ink = !nav->confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
+    if (on_confirm && nav->confirm_enabled) {
         fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_HEIGHT, COLOR_HIGHLIGHT);
     } else {
-        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, confirm_enabled ? COLOR_WHITE : COLOR_DIM);
+        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, nav->confirm_enabled ? COLOR_WHITE : COLOR_DIM);
     }
-    draw_centered_in(
-        tft_Ubuntu16, confirm, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
+    draw_centered_in(tft_Ubuntu16, nav->confirm, 0, SEEDTOOL_DISPLAY_WIDTH,
+        NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
 }
 
-void seedtool_render_nav_screen(
-    const char* title, const char* line1, const char* line2, const bool on_back, const char* confirm)
+/* The page counter, in the gap the body leaves above the confirm bar. Small
+ * face: it is a position indicator, not a value to transcribe. */
+static void draw_nav_counter(const seedtool_nav_t* nav)
 {
-    seedtool_render_clear();
-    draw_nav_header(title, on_back);
-    /* The same two body lines at the same two heights seedtool_render_screen
-     * uses, so a screen gaining the chrome does not also move its own text. */
-    draw_centered(tft_Ubuntu16, line1, 39);
-    draw_centered(tft_Ubuntu16, line2, 65);
-    draw_nav_bar(confirm, !on_back, true);
+    if (nav->counter) {
+        draw_centered_in(tft_DefaultFont, nav->counter, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_COUNTER_Y, COLOR_WHITE);
+    }
 }
 
-void seedtool_render_nav_list(const char* title, const char* const* items, const size_t count, const size_t selected,
-    const size_t top, const char* confirm, const bool confirm_enabled)
+/* Opens and closes every nav screen, so the order - clear, chrome, body,
+ * counter, bar - is written once and a new screen type only has to say what
+ * goes between them. */
+static void nav_begin(const seedtool_nav_t* nav, const char* title)
 {
     seedtool_render_clear();
-    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
+    draw_nav_header(nav, title);
+}
 
+static void nav_end(const seedtool_nav_t* nav)
+{
+    draw_nav_counter(nav);
+    draw_nav_bar(nav);
+}
+
+void seedtool_render_nav_text(
+    const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3)
+{
+    nav_begin(nav, title);
+    /* The same heights the plain screens use, so a screen gaining the chrome
+     * does not also move its own text - and the same choice between them that
+     * seedtool_render_screen and seedtool_render_screen3 make by being two
+     * functions: a third line means the three-line layout. */
+    if (line3) {
+        draw_centered(tft_Ubuntu16, line1, 33);
+        draw_centered(tft_Ubuntu16, line2, 58);
+        draw_centered(tft_Ubuntu16, line3, 83);
+    } else {
+        draw_centered(tft_Ubuntu16, line1, 39);
+        draw_centered(tft_Ubuntu16, line2, 65);
+    }
+    nav_end(nav);
+}
+
+void seedtool_render_nav_rows(
+    const seedtool_nav_t* nav, const char* title, const char* const* rows, const size_t count)
+{
+    nav_begin(nav, title);
+    for (size_t row = 0; row < NAV_ROWS_SHOWN && row < count; ++row) {
+        draw_left(tft_Ubuntu16, rows[row], SCREEN4_TEXT_X, NAV_ROWS_TOP + (int)row * NAV_ROWS_HEIGHT);
+    }
+    nav_end(nav);
+}
+
+void seedtool_render_nav_list(
+    const seedtool_nav_t* nav, const char* title, const char* const* items, const size_t count, const size_t top)
+{
+    nav_begin(nav, title);
     for (size_t row = 0; row < SEEDTOOL_LIST_ROWS && top + row < count; ++row) {
         const char* const item = items[top + row];
-        const bool highlighted = top + row == selected;
+        const bool highlighted = top + row == nav->selected;
         const int y = LIST_TOP + (int)row * NAV_ROW_HEIGHT;
         /* No rule above the last row here: what a plain list sets apart that
          * way is its way out, and on this screen the way out is the arrow. */
@@ -615,8 +665,7 @@ void seedtool_render_nav_list(const char* title, const char* const* items, const
         fill_rect(LIST_SCROLL_X, LIST_TOP, LIST_SCROLL_WIDTH, NAV_SCROLL_HEIGHT, COLOR_DIM);
         fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
     }
-
-    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, confirm_enabled);
+    nav_end(nav);
 }
 
 /* One past the last key of the row starting at `row`. */
@@ -750,63 +799,16 @@ void seedtool_render_dice_screen(const char* title, const char* line1, const cha
     seedtool_render_screen(title, line1, line2, footer);
     draw_quality_bar(progress);
 }
-/* The page counter, in the gap the body lines leave above the confirm bar.
- * Small face: it is a position indicator, not a value to transcribe. */
-static void draw_nav_counter(const char* counter)
-{
-    if (counter) {
-        draw_centered_in(tft_DefaultFont, counter, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_COUNTER_Y, COLOR_WHITE);
-    }
-}
 
-void seedtool_render_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
-    const size_t selected, const char* confirm, const char* counter)
-{
-    seedtool_render_clear();
-    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
-    draw_centered(tft_Ubuntu16, line1, 33);
-    draw_centered(tft_Ubuntu16, line2, 58);
-    draw_centered(tft_Ubuntu16, line3, 83);
-    draw_nav_counter(counter);
-    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, true);
-}
 
-void seedtool_render_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const size_t selected, const char* confirm, const char* counter)
-{
-    seedtool_render_clear();
-    draw_nav_header(title, selected == SEEDTOOL_NAV_BACK);
-    draw_left(tft_Ubuntu16, line1, SCREEN4_TEXT_X, 28);
-    draw_left(tft_Ubuntu16, line2, SCREEN4_TEXT_X, 48);
-    draw_left(tft_Ubuntu16, line3, SCREEN4_TEXT_X, 68);
-    draw_left(tft_Ubuntu16, line4, SCREEN4_TEXT_X, 88);
-    draw_nav_counter(counter);
-    draw_nav_bar(confirm, selected == SEEDTOOL_NAV_CONFIRM, true);
-}
 
-/* A screen with one control and no way back, for the notices and errors whose
- * answer the caller discards. The title is centred across the whole glass
- * rather than around an arrow, because there is no arrow: on these screens
- * back and continue always did the same thing, and drawing a control that
- * leads nowhere would restate in the chrome the very promise the old footer's
- * "Up/Down back" was making falsely. */
-void seedtool_render_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm)
-{
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
-    draw_centered(tft_Ubuntu16, line1, 39);
-    draw_centered(tft_Ubuntu16, line2, 65);
-    draw_nav_bar(confirm, true, true);
-}
-
-void seedtool_render_nav_dice_screen(const char* title, const char* line1, const char* line2, const bool on_back,
-    const char* confirm, const seedtool_progress_t* progress)
+void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
+    const seedtool_progress_t* progress)
 {
     /* The quality bar sits at DICE_BAR_Y=90..103 and the confirm bar starts at
-     * 118, so the two clear each other without either moving: what the nav
-     * chrome takes here is the footer's row, which is exactly what it
-     * replaces. */
-    seedtool_render_nav_screen(title, line1, line2, on_back, confirm);
+     * 118, so the two clear each other without either moving: what the chrome
+     * takes here is the footer's row, which is exactly what it replaces. */
+    seedtool_render_nav_text(nav, title, line1, line2, NULL);
     draw_quality_bar(progress);
 }
 

@@ -34,17 +34,16 @@ void seedtool_display_dice_screen(const char* title, const char* line1, const ch
 void seedtool_display_splash(void);
 void seedtool_display_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
     const char* footer);
-void seedtool_display_nav_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
-    const char* confirm, bool confirm_enabled);
-void seedtool_display_nav_screen(
-    const char* title, const char* line1, const char* line2, bool on_back, const char* confirm);
-void seedtool_display_nav_notice(const char* title, const char* line1, const char* line2, const char* confirm);
-void seedtool_display_nav_dice_screen(const char* title, const char* line1, const char* line2, bool on_back,
-    const char* confirm, const seedtool_progress_t* progress);
-void seedtool_display_nav_screen3(const char* title, const char* line1, const char* line2, const char* line3,
-    size_t selected, const char* confirm, const char* counter);
-void seedtool_display_nav_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, size_t selected, const char* confirm, const char* counter);
+/* One wrapper per nav screen shape, each just its renderer plus a flush. A
+ * new shape needs one here and one in each backend; everything about the
+ * chrome itself is already carried by seedtool_nav_t. */
+void seedtool_display_nav_text(
+    const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
+void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
+void seedtool_display_nav_list(
+    const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
+void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
+    const seedtool_progress_t* progress);
 void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 bool seedtool_display_qr(const char* title, const char* text);
