@@ -363,10 +363,13 @@ force and moves the moment that does, so a reader who knows their wallet's
 fingerprint sees at a glance whether the device is deriving that wallet.
 
 A **Derivation** screen holds the three things that decide what everything else
-derives: the account index (`m/type'/0'/account'`, 0 through 999), the wallet
-type — Native SegWit (BIP84) or Taproot (BIP86) — and the optional passphrase.
-All three last for the whole viewing session rather than one visit to a screen,
-so checking account 2 under both types means setting it once. The passphrase
+derives, ordered by how deep each one cuts: the optional passphrase, which
+decides the seed itself and so every key the device can produce; the wallet
+type — Native SegWit (BIP84) or Taproot (BIP86) — which picks a path from that
+seed; and the account index (`m/type'/0'/account'`, 0 through 999), which picks
+a branch of that path. All three last for the whole viewing session rather than
+one visit to a screen, so checking account 2 under both types means setting it
+once. The passphrase
 can be changed or removed at any point without leaving the session, its own row
 says which of the two is in force, and the fingerprint in the title is
 re-derived whenever it changes. One type is in force at a time, so an

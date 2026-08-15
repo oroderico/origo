@@ -2015,23 +2015,30 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
         (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(*type));
         /* Says whether one is set, never anything about what it is. */
         const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
-        const char* items[] = { account_item, type_item, passphrase_item, "Back" };
+        /* Ordered by how deep each one cuts. The passphrase decides the seed
+         * itself, so changing it changes every key the device can produce and
+         * the fingerprint with them; the type picks a path from that seed; the
+         * account picks a branch of that path. Widest consequence first, and
+         * the fingerprint in the title above only ever moves for the first. */
+        const char* items[] = { passphrase_item, type_item, account_item, "Back" };
         const int selected = choose_kept("Derivation", items, 4, true, &cursor);
         if (selected < 0 || selected == 3) {
             return;
         }
         if (selected == 0) {
-            uint32_t chosen = *account;
-            if (enter_account(&chosen) == 1) {
-                *account = chosen;
+            if (edit_session_passphrase(passphrase)) {
+                if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
+                    (void)acknowledge("Error", "Derivation failed", NULL);
+                } else {
+                    hexstr(fp, 4, fphex);
+                }
             }
         } else if (selected == 1) {
             (void)choose_address_type(type);
-        } else if (edit_session_passphrase(passphrase)) {
-            if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
-                (void)acknowledge("Error", "Derivation failed", NULL);
-            } else {
-                hexstr(fp, 4, fphex);
+        } else {
+            uint32_t chosen = *account;
+            if (enter_account(&chosen) == 1) {
+                *account = chosen;
             }
         }
     }
