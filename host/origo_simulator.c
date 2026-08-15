@@ -431,7 +431,7 @@ static bool word_numbers_round_trip_is_sound(void)
  * last glyph that fits; nothing here is transcribed, but a silently shortened
  * label still misnames what the buttons are about to do. */
 static const char* const menu_labels[] = { "Master fingerprint", "Native SegWit (BIP84)", "Taproot (BIP86)",
-    "Account key", "Addresses", "Account key format", "xpub", "zpub", "Erase and exit", "New Seed", "From entropy",
+    "Account key", "Addresses", "Account key format", "xpub", "zpub", "Erase and restart", "New Seed", "From entropy",
     "Restore Seed", "Complete checksum", "About", "Settings", "11 words + 7 coins", "23 words + 3 coins",
     "No passphrase", "Enter passphrase", "D6 dice", "D20 dice", "Coin flips", "Cards", "Back", "12 words",
     "24 words", "[delete]", "[back]", "Type the letters", "Enter word numbers", "Plain text", "Backup",
