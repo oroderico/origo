@@ -90,10 +90,14 @@ one and move their funds.
 
 Origo exists to make that class of bug structurally impossible rather than
 merely unlikely. There is no RNG-to-seed code path for a misconfigured build
-flag to misroute in the first place: a mnemonic is a pure function of a
-canonical transcript the human recorded by hand — dice, coins or cards —
-reduced with SHA256, and, as stated just above, the device RNG plays no part
-in it. A firmware regression that silently swapped the entropy source behind
+flag to misroute in the first place: a mnemonic is a pure function of what the
+human recorded by hand — dice, coins or cards — and, as stated just above, the
+device RNG plays no part in it. Two derivations turn that record into words,
+both deterministic and neither touching the RNG: the transcript reduced with
+SHA256, which every source uses, and — for coins only — the flips packed
+straight into the entropy without a hash, which is the one path a reader can
+check against a printed wordlist with no device at all. Both are described
+below. A firmware regression that silently swapped the entropy source behind
 a device owner's back, the same shape of bug that cost Coldcard users tens of
 millions of dollars, has nothing to act on here: stub the RNG out entirely
 and Origo generates the identical mnemonic.
@@ -133,6 +137,10 @@ count 12-word cards uses.
 
 ### From transcript to mnemonic
 
+This is what every source does, and what `Coin flips` does under **Flip and
+hash**. The alternative for coins, which skips the hash so the arithmetic can
+be checked by hand, is [described below](#flipping-words-directly).
+
 Turning that transcript into words is three mechanical steps, always in this
 order, and nothing else touches them: no RNG, no timestamp, no per-device
 salt.
@@ -169,6 +177,43 @@ checksum-valid final word: the firmware never randomly selects from the 128 or
 Neither path ever reads the device RNG. The entropy quality bar described
 next grades what has already been typed; it cannot add or remove a single bit
 from what gets hashed.
+
+### Flipping words directly
+
+`Coin flips` offers that same unhashed arithmetic as a second method, **Flip
+each word**, reached by flipping the words rather than typing them. It exists
+because coins are the one source a person can convert to BIP39 words by hand,
+and hashing throws that away: re-entering a transcript elsewhere reproduces the
+mnemonic, but nobody checks on paper that word 7 is the word their coin
+produced, because checking it means computing SHA256 of a 128-character string.
+
+The wordlist is exactly 2048 long, so eleven flips name one word — every word
+reachable, none favoured, no rejection sampling and no modulo skew. Heads is 1,
+tails is 0, most significant bit first:
+
+```
+00000000000  ->  0001  ->  abandon
+01100110011  ->  0820  ->  grid
+11111111111  ->  2048  ->  zoo
+```
+
+Eleven such words are 121 bits, so seven loose flips finish the 128 a 12-word
+mnemonic needs and BIP39's checksum supplies the twelfth word; 24 words is
+twenty-three words and three loose flips for 256. The flip count is identical
+to the hashed method's — 128 or 256 — so neither method asks for more coin
+tosses than the other, and neither has more entropy behind it.
+
+The final word is the one step a wordlist alone cannot do, since part of it is
+the checksum. That is the same arithmetic `Complete checksum` above performs,
+reached from a different direction.
+
+There is no quality bar on this path, deliberately: eleven flips are eleven
+bits by construction, nothing is being estimated, and a gate could only
+second-guess the reader's coin. The hashed method keeps its bar unchanged.
+
+`tools/origo_verify.py complete` checks the result — convert each group of
+eleven flips against a printed wordlist, then hand it those words and the loose
+flips.
 
 ### The quality bar
 
@@ -654,9 +699,16 @@ BIP39, BIP32, BIP84, BIP86 and Bech32/Bech32m. Examples:
 ```sh
 python3 tools/origo_verify.py generate d20 --words 12 1 2 3 ...
 python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
+python3 tools/origo_verify.py coin-words 0110011001101100110011...   # 128 flips
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0 --change
 ```
+
+`coin-words` reproduces the Flip-each-word method from the flips alone,
+printing each group of eleven with the word it names before the finished
+mnemonic — so the device's screens can be checked one at a time, or the whole
+run at once. It is the same arithmetic `complete` performs, entered from the
+coins rather than from words already converted by hand.
 
 `inspect` prints the checksum verdict, one-based word numbers, the Compact
 SeedQR payload, master fingerprint, both account xpubs, the exact payload of

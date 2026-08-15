@@ -117,6 +117,47 @@ class SeedToolVerifierTests(unittest.TestCase):
         for purpose in (84, 86):
             self.assertNotEqual(receive[purpose], change[purpose])
 
+    def test_coin_words_reach_the_published_vectors_and_agree_with_complete(self):
+        # The device's Flip-each-word method packs eleven flips per word
+        # straight into the entropy, with no hash - so the verifier has to be
+        # able to reproduce it from the flips alone, or a seed made that way is
+        # one the README's "recompute it independently" promise does not cover.
+        #
+        # All-zero flips are the anchor: 121 zero bits plus seven more are 128
+        # zero entropy bits, which BIP39 publishes as abandon x11 + about. That
+        # fixes the whole chain, checksum included, to something outside this
+        # project.
+        wl = verify.words()
+
+        def mnemonic_from_flips(flips, words):
+            count = 11 if words == 12 else 23
+            idx = [int(flips[i * 11 : (i + 1) * 11], 2) for i in range(count)]
+            tail = flips[count * 11 :]
+            packed = int("".join(f"{i:011b}" for i in idx), 2)
+            entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16 if words == 12 else 32, "big")
+            return verify.mnemonic_from_entropy(entropy), [wl[i] for i in idx], tail
+
+        self.assertEqual(mnemonic_from_flips("0" * 128, 12)[0], self.MNEMONIC)
+        self.assertEqual(mnemonic_from_flips("0" * 256, 24)[0], self.MNEMONIC_24)
+
+        # Eleven bits are one index and nothing past it: the top of the
+        # wordlist must be reachable and must not overflow into a twelfth bit.
+        self.assertEqual(len(wl), 1 << 11)
+        self.assertEqual(mnemonic_from_flips("1" * 121 + "0" * 7, 12)[1][0], "zoo")
+
+        # And the same flips must reach the same mnemonic through `complete`,
+        # which is the route a reader takes when converting by hand: the two
+        # are the same arithmetic entered from different ends, so a divergence
+        # would mean one of them is lying about what the device did.
+        flips = "01100110011" * 11 + "0110011"
+        expected, words11, tail = mnemonic_from_flips(flips, 12)
+        self.assertEqual(words11[0], "grid")
+        packed = 0
+        for word in words11:
+            packed = (packed << 11) | wl.index(word)
+        entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16, "big")
+        self.assertEqual(verify.mnemonic_from_entropy(entropy), expected)
+
     def test_d6_transcript_pipeline_against_a_krux_vector(self):
         # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
         # against a run Krux produces the same mnemonic from, which is what
@@ -412,9 +453,18 @@ class SeedToolVerifierTests(unittest.TestCase):
     # is covered the day it is written, where a fixed inventory would have to
     # be remembered. A new *kind* of secret under a name not listed here is the
     # one case that escapes, so adding a pattern is part of adding one.
+    # Two rounds of additions have come from reviewing other people's screens
+    # rather than from this list being thought through: `indices` and `bits`
+    # hold a mnemonic just as plainly as `words` does, and both were wiped by
+    # the author rather than by anything here noticing they had to be. That is
+    # the failure mode to expect - the list lags the code - so it is worth
+    # widening on sight rather than when something goes wrong.
     SECRET_BUFFER_NAMES = (
         "mnemonic", "passphrase", "seed", "entropy", "word", "words", "stem",
         "flips", "coin_bits", "completed", "attempt", "confirmation", "xpub",
+        # A mnemonic by another name: word indices, the bits they are packed
+        # from, and the strings a screen shows them in.
+        "indices", "bits", "tail", "history", "bitline", "prefix", "digits",
     )
 
     @staticmethod

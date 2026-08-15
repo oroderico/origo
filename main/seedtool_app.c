@@ -1926,6 +1926,11 @@ static void show_addresses(
     }
     seedtool_zero(addresses, sizeof(addresses));
     seedtool_zero(address_labels, sizeof(address_labels));
+    /* A derivation path, not a secret - it is on screen the whole time and in
+     * the README. Wiped anyway so the wipe check stays mechanical: `prefix`
+     * holds a mnemonic elsewhere in this file, and a rule with one documented
+     * exception is a rule that grows a second one. */
+    seedtool_zero(prefix, sizeof(prefix));
 }
 
 /* One word per screen, stepped the same way show_qr steps between values:
@@ -2360,16 +2365,20 @@ static int confirm_backup(const char* mnemonic, const size_t count)
     }
 }
 
-static void show_generated(seedtool_generated_t* generated)
+/* Show the finished words, get them written down, quiz a third of them back,
+ * and open the wallet viewer once they match. Split out of show_generated
+ * because the coin-word flow ends here too and has nothing to page first: its
+ * words were flipped and confirmed one at a time on the way in, so there is no
+ * transcript and no hash to show before this. Everything from the word list
+ * onwards is identical for both, and having it in one place is what stops the
+ * two from drifting into different confirmation rules. */
+static void review_backup_and_show_wallet(const char* mnemonic, const size_t words)
 {
-    char hash[65];
-    hexstr(generated->hash, sizeof(generated->hash), hash);
-    if (page_text("Canonical transcript", generated->transcript) && page_text("SHA256", hash)) {
-        /* Backing out of the quiz's first word (confirm_backup's 0) shows
-         * the words again rather than falling through, so back always steps
-         * back one stage instead of skipping past confirmation into the
-         * wallet's passphrase prompt. */
-        while (show_numbered_list(generated->mnemonic, true)) {
+    /* Backing out of the quiz's first word (confirm_backup's 0) shows
+     * the words again rather than falling through, so back always steps
+     * back one stage instead of skipping past confirmation into the
+     * wallet's passphrase prompt. */
+    while (show_numbered_list(mnemonic, true)) {
             /* The word list is left by paging forward off its last page - the
              * same press that meant "next page" for the whole list - so
              * without this screen the quiz's keyboard simply appeared, with
@@ -2383,27 +2392,34 @@ static void show_generated(seedtool_generated_t* generated)
              * real one: the counts are 4/12 or 8/24, but %u lets the compiler
              * assume ten digits apiece, and -Wformat-truncation is an error in
              * the firmware build even though the host build lets it pass. */
-            char intro[48];
-            (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(generated->words / 3),
-                (unsigned)generated->words);
-            const seedtool_key_t intro_key = confirm("Confirm backup", intro, "Have your backup ready");
-            if (intro_key == KEY_TIMEOUT) {
-                /* Not `continue`: that would repaint the whole mnemonic on
-                 * the way out of a session that has already expired. */
-                break;
-            }
-            if (intro_key != KEY_SELECT) {
-                continue; /* Back: the words again, one stage, as everywhere else. */
-            }
-            const int outcome = confirm_backup(generated->mnemonic, generated->words);
-            if (outcome < 0) {
-                break;
-            }
-            if (outcome == 1) {
-                show_wallet_data(generated->mnemonic);
-                break;
-            }
+        char intro[48];
+        (void)snprintf(intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
+        const seedtool_key_t intro_key = confirm("Confirm backup", intro, "Have your backup ready");
+        if (intro_key == KEY_TIMEOUT) {
+            /* Not `continue`: that would repaint the whole mnemonic on
+             * the way out of a session that has already expired. */
+            break;
         }
+        if (intro_key != KEY_SELECT) {
+            continue; /* Back: the words again, one stage, as everywhere else. */
+        }
+        const int outcome = confirm_backup(mnemonic, words);
+        if (outcome < 0) {
+            break;
+        }
+        if (outcome == 1) {
+            show_wallet_data(mnemonic);
+            break;
+        }
+    }
+}
+
+static void show_generated(seedtool_generated_t* generated)
+{
+    char hash[65];
+    hexstr(generated->hash, sizeof(generated->hash), hash);
+    if (page_text("Canonical transcript", generated->transcript) && page_text("SHA256", hash)) {
+        review_backup_and_show_wallet(generated->mnemonic, generated->words);
     }
     seedtool_zero(hash, sizeof(hash));
 }
@@ -2635,6 +2651,308 @@ static int collect_entropy(const int source, const size_t words)
     return outcome;
 }
 
+/* The BIP39 English wordlist is exactly 2048 long, so eleven coin flips name
+ * one word and every word is equally reachable - no rejection sampling, no
+ * modulo that would favour the front of the list. Most significant bit first,
+ * the same order seedtool_complete_checksum packs those indices back into
+ * entropy in (seedtool_core.c), so what the reader sees on screen is the
+ * arithmetic the seed is actually built from rather than a re-encoding of it. */
+#define COIN_WORD_BITS 11
+
+/* Eleven flipped words are 121 bits and twenty-three are 253; the entropy needs
+ * 128 and 256. The remainder is flipped loose at the end, and BIP39's checksum
+ * supplies the last 4 or 8 bits of the final word. */
+static size_t coin_flipped_words(const size_t words) { return words == 12 ? 11 : 23; }
+static size_t coin_tail_bits(const size_t words) { return words == 12 ? 7 : 3; }
+
+/* One word's worth of flips. Returns 1 with `*index_out` set to the zero-based
+ * wordlist index, 0 when the reader backed out of the word's first flip, and -1
+ * on timeout - the same contract as enter_value() and enter_word(). Backing out
+ * of any later flip undoes that flip rather than the whole word, so a slip on
+ * bit 9 of 11 costs one press, not eleven. */
+static int enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
+{
+    uint8_t bits[COIN_WORD_BITS] = { 0 };
+    /* Sized for the format's worst case, not its real one: the counts here are
+     * 11 or 23, but %u lets the compiler assume ten digits apiece, and
+     * -Wformat-truncation is an error in the firmware build. */
+    char title[48];
+    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    int outcome = 1;
+    size_t i = 0;
+    while (i < COIN_WORD_BITS) {
+        /* Rebuilt per flip rather than kept alongside `bits`: the flips are
+         * secret, and a single buffer that only ever holds what is currently
+         * on screen is one fewer copy to wipe. */
+        char history[COIN_WORD_BITS + 1] = { 0 };
+        for (size_t f = 0; f < i; ++f) {
+            history[f] = (char)('0' + bits[f]);
+        }
+        unsigned bit = 0;
+        const int result = enter_coin_flip(title, (unsigned)(i + 1), COIN_WORD_BITS, &bit, history, NULL);
+        seedtool_zero(history, sizeof(history));
+        if (result < 0) {
+            outcome = -1;
+            break;
+        }
+        if (result == 0) {
+            if (!i) {
+                outcome = 0;
+                break;
+            }
+            --i;
+            continue;
+        }
+        bits[i++] = (uint8_t)bit;
+    }
+    if (outcome == 1) {
+        uint16_t index = 0;
+        for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
+            index = (uint16_t)((index << 1) | bits[b]);
+        }
+        *index_out = index;
+    }
+    seedtool_zero(bits, sizeof(bits));
+    return outcome;
+}
+
+/* The flips, the wordlist number they spell, and the word itself, on one screen
+ * before moving on. This is the whole point of entering a word at a time: the
+ * reader can check this line against a printed wordlist with no device
+ * involved, which is exactly what the hashed coin path cannot offer.
+ *
+ * The number is one-based and zero-padded to four digits, matching
+ * show_numbered_list and enter_word_number - a printed list pads to four, and
+ * `abandon` is 1 there, not 0, even though the encoding above is zero-based.
+ *
+ * Going back from here costs eleven flips, so unlike every other back in the
+ * run it is asked about rather than acted on: Up/Down raises the question and
+ * BOTH answers it, which also means a stray press on a screen the reader is
+ * only reading cannot silently undo the word they just checked. The cheap
+ * backs - one flip inside a word - stay unguarded, since a guard there would
+ * cost more presses than the mistake does.
+ *
+ * Returns 1 to accept, 0 to flip the word again, -1 on timeout. */
+static int confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
+{
+    char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
+    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
+        bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
+    }
+    (void)snprintf(number, sizeof(number), "%04u", (unsigned)index + 1u);
+    int outcome;
+    for (;;) {
+        screen_text3(title, bitline, number, seedtool_word(index), ACK_FOOTER);
+        const seedtool_key_t key = wait_key();
+        if (key == KEY_REDRAW) {
+            continue;
+        }
+        if (key == KEY_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (key == KEY_SELECT) {
+            outcome = 1;
+            break;
+        }
+        /* The word is named again on the question rather than left to the
+         * screen behind it: this is the last place it is shown before those
+         * flips go, and a reader who pressed by accident should be able to see
+         * what they are about to discard without dismissing the question to
+         * find out. */
+        char question[48], subject[32];
+        (void)snprintf(question, sizeof(question), "Flip word %u again?", position);
+        (void)snprintf(subject, sizeof(subject), "%s  %s", number, seedtool_word(index));
+        const seedtool_key_t answer = confirm(question, subject, "These flips are lost");
+        seedtool_zero(subject, sizeof(subject));
+        if (answer == KEY_TIMEOUT) {
+            outcome = -1;
+            break;
+        }
+        if (answer == KEY_SELECT) {
+            outcome = 0;
+            break;
+        }
+        /* Declined: back to the word, unchanged. */
+    }
+    seedtool_zero(bitline, sizeof(bitline));
+    seedtool_zero(number, sizeof(number));
+    return outcome;
+}
+
+/* Coins, but packed straight into the entropy instead of hashed: eleven flips
+ * per word for the first 11 (or 23) words, then the 7 (or 3) bits that finish
+ * the entropy, and BIP39's checksum completes the last word. Same arithmetic as
+ * complete_checksum()'s, and the same seedtool_complete_checksum() call - the
+ * difference is only that the words are flipped here rather than typed in from
+ * a wordlist the reader converted by hand.
+ *
+ * There is no quality bar and no Shannon gate on this path, unlike the hashed
+ * one. Nothing here is being estimated: eleven flips are eleven bits by
+ * construction, and a gate could only second-guess the reader's coin.
+ *
+ * Same contract as create_seed(): true once a mnemonic reached the wallet
+ * viewer or the session timed out, false for backing out before anything was
+ * flipped. */
+static bool flip_words(const size_t words)
+{
+    const size_t word_count = coin_flipped_words(words);
+    const size_t tail_count = coin_tail_bits(words);
+    uint16_t indices[23] = { 0 };
+    uint8_t tail[7] = { 0 };
+    char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    bool reached_wallet = false;
+    int outcome = 1;
+    size_t w = 0;
+
+    /* Set when the run steps backwards onto a word that was already flipped:
+     * that word reopens at its confirmation, showing what it still is, rather
+     * than throwing the flips away and demanding eleven more. Accepting there
+     * walks forward again with the word unchanged; declining reflips it. */
+    bool reopen = false;
+
+    for (;;) {
+        while (w < word_count) {
+            uint16_t index = indices[w];
+            if (reopen) {
+                reopen = false;
+            } else {
+                outcome = enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index);
+                if (outcome < 0) {
+                    break;
+                }
+                if (outcome == 0) {
+                    /* Backed out of this word's first flip, where the word has
+                     * no flip of its own left to undo. That press means "the
+                     * word before this one was wrong", so it reopens that word.
+                     * The run ends here only from the very first flip of the
+                     * very first word - the one point where nothing has been
+                     * entered yet.
+                     *
+                     * Ending it anywhere else was a bug: eight words in, one
+                     * press dropped the lot and landed back on the length
+                     * picker, which is exactly the mistake a word-at-a-time
+                     * screen exists to make cheap. */
+                    if (!w) {
+                        break;
+                    }
+                    --w;
+                    reopen = true;
+                    outcome = 1;
+                    continue;
+                }
+            }
+            outcome = confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index);
+            if (outcome < 0) {
+                break;
+            }
+            if (outcome == 0) {
+                /* Declined at the confirmation: flip this same word again. */
+                outcome = 1;
+                continue;
+            }
+            indices[w++] = index;
+        }
+        if (outcome != 1) {
+            break;
+        }
+
+        /* The loose bits that finish the entropy. Backing out of the first of
+         * them returns to the last word, so back walks the whole run in one
+         * direction instead of dead-ending here. */
+        bool back_to_words = false;
+        size_t t = 0;
+        while (t < tail_count) {
+            char history[8] = { 0 };
+            for (size_t f = 0; f < t; ++f) {
+                history[f] = (char)('0' + tail[f]);
+            }
+            unsigned bit = 0;
+            const int result
+                = enter_coin_flip("Final bits", (unsigned)(t + 1), (unsigned)tail_count, &bit, history, NULL);
+            seedtool_zero(history, sizeof(history));
+            if (result < 0) {
+                outcome = -1;
+                break;
+            }
+            if (result == 0) {
+                if (!t) {
+                    back_to_words = true;
+                    break;
+                }
+                --t;
+                continue;
+            }
+            tail[t++] = (uint8_t)bit;
+        }
+        if (outcome != 1) {
+            break;
+        }
+        if (back_to_words) {
+            /* Reopened at its confirmation, like every other backwards step:
+             * the last word is still perfectly good, and the reader who
+             * pressed back here may well have been after the word before it. */
+            w = word_count - 1;
+            reopen = true;
+            continue;
+        }
+
+        prefix[0] = '\0';
+        size_t used = 0;
+        for (size_t i = 0; i < word_count; ++i) {
+            const char* const word = seedtool_word(indices[i]);
+            const size_t len = strlen(word);
+            /* Bounded by SEEDTOOL_MAX_MNEMONIC_LEN, which holds 24 words -
+             * this builds at most 23 - but checked rather than assumed, since
+             * a silent truncation here would be a wrong seed, not a wrong
+             * screen. */
+            if (used + len + (i ? 1 : 0) >= sizeof(prefix)) {
+                outcome = -1;
+                break;
+            }
+            if (i) {
+                prefix[used++] = ' ';
+            }
+            memcpy(prefix + used, word, len);
+            used += len;
+            prefix[used] = '\0';
+        }
+        if (outcome != 1) {
+            break;
+        }
+
+        if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
+            (void)acknowledge("Error", "Could not complete", "the mnemonic");
+            break;
+        }
+        review_backup_and_show_wallet(completed, words);
+        reached_wallet = true;
+        break;
+    }
+
+    seedtool_zero(indices, sizeof(indices));
+    seedtool_zero(tail, sizeof(tail));
+    seedtool_zero(prefix, sizeof(prefix));
+    seedtool_zero(completed, sizeof(completed));
+    /* Backing out of the very first flip is the one exit that has produced
+     * nothing, and the only one that should leave the caller's menu open. */
+    return reached_wallet || outcome != 0;
+}
+
+/* Which of the two coin derivations to run. Only coins get this screen: they
+ * are the one source whose transcript a reader can convert to words by hand,
+ * so they are the only one where packing the bits directly buys anything over
+ * hashing them. Returns 0 for the flipped-word path, 1 for the hashed one, and
+ * -1 for back. */
+static int choose_coin_method(void)
+{
+    const char* methods[] = { "Flip each word", "Flip and hash", "Back" };
+    const int selected = choose("Coin method", methods, 3, true);
+    return selected < 0 || selected == 2 ? -1 : selected;
+}
+
 /* Returns whether a seed was actually generated, as opposed to the reader
  * backing out of the source or length picker before ever starting.
  * show_new_seed_menu uses this to tell "done, go all the way home" apart from
@@ -2662,12 +2980,35 @@ static bool create_seed(void)
             if (length == 2) {
                 break;
             }
+            const size_t words = length ? 24 : 12;
+            if (source == SEEDTOOL_COIN) {
+                bool run_hashed = false;
+                for (;;) {
+                    const int method = choose_coin_method();
+                    if (method < 0) {
+                        break; /* Back: the length picker, one stage. */
+                    }
+                    if (method == 1) {
+                        run_hashed = true;
+                        break;
+                    }
+                    if (flip_words(words)) {
+                        return true;
+                    }
+                    /* Backed out of the very first flip, before anything was
+                     * entered: this menu again, one stage back, rather than
+                     * skipping past it to the length picker. */
+                }
+                if (!run_hashed) {
+                    continue;
+                }
+            }
             /* 24-word Cards can't reach 256 bits without replacement (one
              * deck tops out around 225 bits) - SEEDTOOL_CARDS_REPLACE draws
              * the same deck, but with the card returned and the deck
              * reshuffled after every draw, a genuine 52-sided die instead. */
             const int collect_source = length && source == SEEDTOOL_CARDS ? SEEDTOOL_CARDS_REPLACE : source;
-            if (collect_entropy(collect_source, length ? 24 : 12) != 0) {
+            if (collect_entropy(collect_source, words) != 0) {
                 return true;
             }
         }
