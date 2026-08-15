@@ -486,7 +486,7 @@ void seedtool_render_list(const char* title, const char* const* items, const siz
         const bool highlighted = top + row == selected;
         const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
         /* The last row of every list is the way out of it — Back, Reboot,
-         * Done / erase, [delete]. A rule above it lifts it out of the choices,
+         * Shutdown, [delete]. A rule above it lifts it out of the choices,
          * which is what it is not. It goes in the gap between cells so the
          * selection bar never paints over it. */
         if (top + row == count - 1 && count > 1) {

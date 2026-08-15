@@ -302,7 +302,7 @@ never padded with blank rows. Only labels are listed. Values meant to be transcr
 instead, split by what fits the display.
 
 The last row of every list with somewhere to return to is the way out of it —
-`Back`, `Done / erase`, `[delete]` — and a rule is drawn above it so it is not
+`Back`, `Shutdown`, `[delete]` — and a rule is drawn above it so it is not
 read as one more choice. That row is always last, in every such list, so
 leaving a screen is always in the same place. The one list with nowhere to
 return to is the main menu itself: there is no `Back` row there, and the

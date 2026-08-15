@@ -1206,7 +1206,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
      * address_labels: these rows are the mnemonic in plain text, one word
      * each, and they live in .bss rather than on a stack frame that the next
      * screen would overwrite anyway. Leaving them behind kept a restored seed
-     * readable in RAM for the rest of the session - past "Done / erase" and
+     * readable in RAM for the rest of the session - past "Shutdown" and
      * past the session-timeout screen, which erases nothing here. Clearing on
      * entry as well as exit keeps a 12-word restore from leaving rows 12..23
      * of a previous 24-word one on show. */
@@ -1873,7 +1873,7 @@ static void show_wallet_data(const char* mnemonic)
         char account_item[16];
         (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)account);
         const char* menu[] = { "Master fingerprint", account_item, "Native SegWit (BIP84)", "Taproot (BIP86)",
-            "Backup", "Done / erase" };
+            "Backup", "Shutdown" };
         const int selected = choose("Wallet", menu, sizeof(menu) / sizeof(menu[0]), true);
         if (selected < 0 || selected == 5) {
             break;
@@ -2257,7 +2257,7 @@ static int collect_entropy(const int source, const size_t words)
 }
 
 /* Returns whether a seed was actually generated and carried all the way
- * through the wallet viewer to Done/erase (or a timeout) - as opposed to the
+ * through the wallet viewer to Shutdown (or a timeout) - as opposed to the
  * reader backing out of the source or length picker before ever starting.
  * show_new_seed_menu uses this to tell "done, go all the way home" apart from
  * plain "back one level". */
@@ -2358,10 +2358,10 @@ static void show_new_seed_menu(void)
         if (selected < 0 || selected == 2) {
             return;
         }
-        /* A seed that made it all the way to Done/erase (or a timeout) closes
+        /* A seed that made it all the way to Shutdown (or a timeout) closes
          * this menu too, straight back to the Origo/Home menu, rather than
          * reopening "New Seed" - that reopening was the actual bug: pressing
-         * Done/erase landed back inside New Seed instead of at Home. Backing
+         * Shutdown landed back inside New Seed instead of at Home. Backing
          * out of the source/length picker before anything was generated
          * keeps the old "one level up" behaviour. */
         if (selected == 0 ? create_seed() : complete_checksum()) {
