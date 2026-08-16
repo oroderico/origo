@@ -640,6 +640,15 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * glass: a title centred over the whole width would read as leaning right
      * against the arrow, and a long one would paint into it. */
     (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
+    /* The rule that closes the header, and with it the bottom of the arrow's
+     * box and the tick's - both are drawn with sides and top only, on the
+     * understanding that a line underneath would be the fourth edge. On a list
+     * that line was the rule above the first cell, so the frame closed and the
+     * chrome read as one piece; every other screen wearing this header had no
+     * cells to supply it, so the two boxes hung open with nothing across the
+     * bar. Drawn here instead of by each body, so a screen gets it for wearing
+     * the header rather than for happening to be a list. */
+    fill_rect(NAV_BACK_X, NAV_BACK_Y + NAV_BACK_HEIGHT, SEEDTOOL_DISPLAY_WIDTH - 2 * NAV_BACK_X, 1, COLOR_DIM);
 }
 
 static void draw_nav_bar(const seedtool_nav_t* nav)
@@ -730,10 +739,12 @@ void seedtool_render_nav_list(
          * rather than as lines of text that happen to be stacked - Jade draws
          * a border under each menu item and above the top one (ui/dialogs.c).
          * It sits in the gap between cells, so the selection bar never paints
-         * over it, and the topmost one is what closes the bottom of the back
-         * button's box: that box is drawn without a bottom edge precisely so
-         * this line can be it. The last cell is closed by the confirm bar's
-         * own rule, so three rules here and that one frame three rows. */
+         * over it. The topmost one lands on the header's own closing rule and
+         * repaints it in the same colour: that rule used to be this line's job,
+         * until every screen wearing the header needed one and it moved there.
+         * Kept because the cell wants a top edge whether or not the header drew
+         * one. The last cell is closed by the confirm bar's own rule, so three
+         * rules here and that one frame three rows. */
         fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
