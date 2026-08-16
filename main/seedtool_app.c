@@ -2237,22 +2237,40 @@ static void show_stackbit(const char* mnemonic)
         seedtool_zero(numbers, sizeof(numbers));
         return;
     }
-    size_t selected = 0;
+    /* The same ring the paged screens walk, with the words where their pages
+     * go: position 0 is the arrow and 1..count are the words, so stepping off
+     * either end of the carousel lands on the way out rather than wrapping
+     * straight past it. This screen used to wrap forever and leave only by the
+     * chord, which meant the one control it had was the one control it never
+     * drew. `confirmable` is false throughout - there is nothing to accept
+     * here, only a backup to read off and punch. */
+    size_t position = 1;
     for (;;) {
+        const size_t selected = page_shown(position, count);
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
         const char* const word = seedtool_word(numbers[selected] - 1);
+        const seedtool_nav_t nav = page_nav(position, count, NULL, false);
         if (layout == 0) {
-            seedtool_display_stackbit_screen("Stackbit 1248", numbers[selected], word, footer);
+            seedtool_display_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         } else {
-            seedtool_display_stackbit_physical_screen("Stackbit 1248", numbers[selected], word, footer);
+            seedtool_display_stackbit_physical_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         }
         switch (wait_key()) {
-        case KEY_PREV:
-            selected = (selected + count - 1) % count;
+        case KEY_SELECT:
+            /* On the arrow the chord leaves; on a word it reads on, the same
+             * answer page_text gives the chord on a page. */
+            if (!position) {
+                seedtool_zero(numbers, sizeof(numbers));
+                return;
+            }
+            position = page_step(position, count, true, false);
             break;
         case KEY_NEXT:
-            selected = (selected + 1) % count;
+            position = page_step(position, count, true, false);
+            break;
+        case KEY_PREV:
+            position = page_step(position, count, false, false);
             break;
         case KEY_REDRAW:
             break;

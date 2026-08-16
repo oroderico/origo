@@ -1125,15 +1125,33 @@ static size_t count_pixel_color(const uint16_t color)
     return count;
 }
 
+/* The chrome these screens now wear, with the cursor on a word rather than on
+ * the arrow. That is not incidental: both proofs below count COLOR_HIGHLIGHT
+ * pixels to measure the lit punch cells, and a selected arrow fills its box
+ * with exactly that colour - the count would then include the chrome and the
+ * unit area discovered from "0001" would be wrong for every number after it.
+ * The cursor sits on a word for all but one position of the real screen's
+ * ring, so this is the ordinary state as well as the measurable one. */
+static seedtool_nav_t stackbit_test_nav(void)
+{
+    const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
+        .confirm = NULL,
+        .confirm_enabled = false,
+        .back = true,
+        .confirm_as_tick = true };
+    return nav;
+}
+
 /* Every one of the 2048 word numbers, drawn as a Stackbit 1248 grid, lights
  * exactly the punch cells its digits' bits call for — checked by counting
  * highlighted pixels rather than by duplicating the renderer's private
  * geometry, the same tactic dice_progress_bar_is_bounded uses. */
 static bool stackbit_grid_is_sound(void)
 {
+    const seedtool_nav_t nav = stackbit_test_nav();
     /* "0001" lights exactly one cell; its pixel count is the discovered
      * per-dot area rather than a hard-coded one. */
-    seedtool_render_stackbit_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    seedtool_render_stackbit_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
     const size_t unit = count_pixel_color(0xfd20);
     if (!unit) {
         return false;
@@ -1146,7 +1164,7 @@ static bool stackbit_grid_is_sound(void)
             const unsigned v = (unsigned)(digits[i] - '0');
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
-        seedtool_render_stackbit_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        seedtool_render_stackbit_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
         if (count_pixel_color(0xfd20) != bits * unit) {
             return false;
         }
@@ -1161,7 +1179,8 @@ static bool stackbit_grid_is_sound(void)
  * regardless of where on screen they are placed. */
 static bool stackbit_physical_grid_is_sound(void)
 {
-    seedtool_render_stackbit_physical_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    const seedtool_nav_t nav = stackbit_test_nav();
+    seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
     const size_t unit = count_pixel_color(0xfd20);
     if (!unit) {
         return false;
@@ -1174,7 +1193,7 @@ static bool stackbit_physical_grid_is_sound(void)
             const unsigned v = (unsigned)(digits[i] - '0');
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
-        seedtool_render_stackbit_physical_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
         if (count_pixel_color(0xfd20) != bits * unit) {
             return false;
         }

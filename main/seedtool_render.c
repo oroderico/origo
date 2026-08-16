@@ -1069,13 +1069,12 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
 }
 
 void seedtool_render_stackbit_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
 {
     static const uint8_t WEIGHTS[STACKBIT_ROWS] = { 1, 2, 4, 8 };
     static const char WEIGHT_LABELS[] = "1248";
 
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    nav_begin(nav, title);
 
     char digits[STACKBIT_DIGITS + 1];
     (void)snprintf(digits, sizeof(digits), "%04u", word_number);
@@ -1101,10 +1100,9 @@ void seedtool_render_stackbit_screen(
 }
 
 void seedtool_render_stackbit_physical_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
 {
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    nav_begin(nav, title);
 
     char digits[STACKBIT_DIGITS + 1];
     (void)snprintf(digits, sizeof(digits), "%04u", word_number);

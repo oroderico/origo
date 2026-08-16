@@ -274,7 +274,8 @@ bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, siz
  * the word it means before it is punched. One simple layout, adapted from
  * Krux's Stackbit 1248 export (github.com/selfcustody/krux,
  * src/krux/pages/stack_1248.py) rather than its three alternates. */
-void seedtool_render_stackbit_screen(const char* title, unsigned word_number, const char* word, const char* footer);
+void seedtool_render_stackbit_screen(
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 /* The same backup, laid out the way a physical Stackbit 1248 plate actually
  * is: two rows, not four, with the thousands digit a single column of two
@@ -282,7 +283,7 @@ void seedtool_render_stackbit_screen(const char* title, unsigned word_number, co
  * plate side by side with the screen and matching its layout by eye rather
  * than by the weight label alone. */
 void seedtool_render_stackbit_physical_screen(
-    const char* title, unsigned word_number, const char* word, const char* footer);
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 const uint16_t* seedtool_render_pixels(void);
 
