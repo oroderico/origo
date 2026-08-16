@@ -120,6 +120,14 @@ seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
  * the zero value of `confirm_enabled` dims a bar and the zero value of `back`
  * removes an arrow, neither of which is what a screen usually wants. The app
  * builds these in its own few nav helpers, not at each call site. */
+/* BAR is the zero value, so a struct that names no style keeps the behaviour
+ * it had before there was one to name. */
+typedef enum {
+    SEEDTOOL_CONFIRM_BAR,
+    SEEDTOOL_CONFIRM_TICK,
+    SEEDTOOL_CONFIRM_FORWARD,
+} seedtool_confirm_t;
+
 typedef struct {
     /* An item index, or one of the three sentinels above. */
     size_t selected;
@@ -136,18 +144,22 @@ typedef struct {
     bool back;
     /* Page counter, drawn small in the gap above the bar. NULL draws none. */
     const char* counter;
-    /* Draw the confirm as a tick in the title bar's right slot instead of as a
-     * bar along the bottom. That slot is already held open - the title is
-     * centred between two margins the width of the arrow's box, so the right
-     * one has been empty since the chrome arrived - which is how Jade lays out
-     * a screen the reader takes or leaves: reject on the left, accept on the
-     * right, nothing along the bottom (ui/confirm_address.c).
+    /* What the confirm looks like. The title bar's right slot is already held
+     * open - the title is centred between two margins the width of the arrow's
+     * box - which is how Jade lays out a screen the reader takes or leaves:
+     * reject on the left, accept on the right, nothing along the bottom
+     * (ui/confirm_address.c).
      *
-     * A tick says "yes" and nothing else, so this is for screens whose title
-     * already names what confirming does. `confirm` is still the label the
-     * screen would have used, kept for the self-test's width checks and for a
-     * caller that wants to fall back to the bar. */
-    bool confirm_as_tick;
+     * TICK and FORWARD both live in that slot and differ in what they claim. A
+     * tick says "yes, this one" and suits a screen whose title already names
+     * what confirming does. A forward arrow says "there is more this way" and
+     * suits a screen that hands off to another rather than accepting anything -
+     * an address before its QR code, say, where a tick would be agreeing to
+     * something nobody asked.
+     *
+     * `confirm` stays the label the screen would have used either way, kept for
+     * the self-test's width checks. */
+    seedtool_confirm_t confirm_style;
 } seedtool_nav_t;
 
 /* Two or three centred body lines - three when `line3` is given, which picks
@@ -230,6 +242,11 @@ char seedtool_layout_key(const char* layout, size_t index);
 size_t seedtool_layout_center(const char* layout);
 
 bool seedtool_render_qr(const char* title, const char* text);
+
+/* The same code, with its derivation path and the value itself drawn in the
+ * margin beside it - for an address, where the code and the text are two halves
+ * of one fact and were on two screens. */
+bool seedtool_render_qr_address(const char* title, const char* text);
 
 /* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
  * fit in one frame at `max_version` and ECC_LOW -- the same error-correction

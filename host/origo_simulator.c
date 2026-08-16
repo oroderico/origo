@@ -322,7 +322,7 @@ static bool wire_order_is_big_endian(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = false,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
 
     seedtool_render_nav_list(&nav, "Origo", items, 3, 0);
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -1149,7 +1149,7 @@ static seedtool_nav_t stackbit_test_nav(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     return nav;
 }
 
@@ -1714,6 +1714,92 @@ static bool grouped_paging_preserves_the_value(void)
     return true;
 }
 
+/* The QR screen draws the address beside the code, and the margin it has is
+ * not always enough: a taproot address is 62 characters against the 48 two
+ * columns of four hold there. seedtool_render_qr_address must refuse those
+ * outright rather than draw as far as it reaches, because an address cut off
+ * mid-value looks exactly like one that ended there and nothing on screen
+ * says otherwise. This is the check grouped_paging_preserves_the_value does
+ * not make: that one walks seedtool_render_fit_grouped, the paged path at the
+ * body face, and says nothing about groups drawn by any other route. The first
+ * version of this screen truncated a taproot address to 48 of its characters
+ * with every other check still passing.
+ *
+ * Proving the tail is drawn without restating the renderer's own geometry:
+ * change only the value's last group and the margin must change with it. The
+ * margin is everything left of the code, found by looking for the first column
+ * carrying a run of white tall enough to be the code itself rather than a line
+ * of text. */
+static int qr_code_left_edge(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+        int run = 0;
+        for (int y = 0; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+            run = pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0xffff ? run + 1 : 0;
+            if (run > 40) {
+                return x;
+            }
+        }
+    }
+    return -1;
+}
+
+static bool qr_address_draws_every_group(void)
+{
+    static const char* const fits[] = {
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+    };
+    static uint16_t before[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
+
+    for (size_t v = 0; v < sizeof(fits) / sizeof(fits[0]); ++v) {
+        const char* const value = fits[v];
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", value)) {
+            return false; /* these do fit; refusing them is its own failure */
+        }
+        const int edge = qr_code_left_edge();
+        if (edge <= 0) {
+            return false;
+        }
+        memcpy(before, seedtool_render_pixels(), sizeof(before));
+
+        /* The same value with its last group altered, same length so the code
+         * keeps its version and the margin keeps its width. */
+        char altered[80] = { 0 };
+        const size_t total = strlen(value);
+        if (total + 1 > sizeof(altered) || total < SEEDTOOL_GROUP_LEN) {
+            return false;
+        }
+        memcpy(altered, value, total);
+        for (size_t i = total - SEEDTOOL_GROUP_LEN; i < total; ++i) {
+            altered[i] = altered[i] == 'q' ? 'p' : 'q';
+        }
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", altered)) {
+            return false;
+        }
+        const uint16_t* const after = seedtool_render_pixels();
+
+        bool margin_changed = false;
+        for (int y = 0; y < SEEDTOOL_DISPLAY_HEIGHT && !margin_changed; ++y) {
+            for (int x = 0; x < edge; ++x) {
+                if (before[y * SEEDTOOL_DISPLAY_WIDTH + x] != after[y * SEEDTOOL_DISPLAY_WIDTH + x]) {
+                    margin_changed = true;
+                    break;
+                }
+            }
+        }
+        if (!margin_changed) {
+            return false; /* the tail was never drawn */
+        }
+    }
+
+    /* And the one the margin cannot hold, which must say so rather than clip. */
+    return !seedtool_render_qr_address(
+        "m/86'/0'/0'/0/0", "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr");
+}
+
 /* The grouped line is centred with its gaps counted in, so it can run off an
  * edge in a way the plain centred line cannot. Measured, not assumed. */
 static bool grouped_lines_clear_the_edges(void)
@@ -1766,7 +1852,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = "Continue",
                 .confirm_enabled = confirm_enabled,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
@@ -1803,13 +1889,13 @@ static bool nav_chrome_bands_do_not_collide(void)
     /* A menu wears the chrome with no confirm at all: its rows are its
      * actions, so the arrow is the only control. Both places the confirm could
      * appear must stay empty - the band along the bottom, and the title bar's
-     * right slot. The slot is the one that caught a real bug: confirm_as_tick
+     * right slot. The slot is the one that caught a real bug: the tick
      * is set for every list, so the tick drew on the Origo and Wallet menus,
      * offering an answer to a question those screens never ask. Nothing here
      * noticed, because every check only ever asserted the tick was present. */
     for (size_t s = 0; s < 2; ++s) {
         const seedtool_nav_t nav
-            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_as_tick = true };
+            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
         if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT) || nav_right_slot_is_drawn()) {
             return false;
@@ -1847,7 +1933,7 @@ static bool nav_chrome_bands_do_not_collide(void)
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
-            /* confirm_as_tick, because that is what nav_screen sets and these
+            /* confirm_style, because that is what nav_screen sets and these
              * are its screens: the confirm is a box in the title bar's right
              * slot and no bar is drawn. Rendering them with a bar would have
              * this table checking a layout the firmware stopped shipping. */
@@ -1855,7 +1941,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = screens[i].label,
                 .confirm_enabled = true,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
@@ -1914,7 +2000,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = dice[i].label,
                 .confirm_enabled = true,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
@@ -1954,7 +2040,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = NULL,
             .confirm_enabled = true,
             .back = true,
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
         /* A notice's only control is now the arrow - if that failed to draw the
          * screen would be one the reader cannot leave at all, which is worth
@@ -1981,7 +2067,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_enabled = true,
             .back = true,
             .counter = "8/8",
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
@@ -2005,7 +2091,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_enabled = true,
             .back = true,
             .counter = "6/6",
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
@@ -2347,6 +2433,10 @@ static int self_test(void)
         fputs("Origo grouped address geometry self-test failed\n", stderr);
         return 1;
     }
+    if (!qr_address_draws_every_group()) {
+        fputs("Origo address-beside-QR self-test failed\n", stderr);
+        return 1;
+    }
     if (!nav_chrome_bands_do_not_collide()) {
         fputs("Origo nav chrome geometry self-test failed\n", stderr);
         return 1;
@@ -2388,12 +2478,12 @@ static int self_test(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     const seedtool_nav_t at_start = { .selected = 0,
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     seedtool_render_nav_list(&scrolled, "Wallet", menu_labels, 7, 4);
     seedtool_render_nav_list(&at_start, "Word 3/12  aba", menu_labels, MENU_LABEL_COUNT, 0);
     /* Draw the real layouts, each opened at its centre, so one that overflows a

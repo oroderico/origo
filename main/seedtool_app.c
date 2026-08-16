@@ -260,7 +260,7 @@ static int nav_screen(const char* title, const char* one, const char* two, const
          * tells the reader what taking it does, on every screen here but the
          * two entropy verdicts, which pass no title and say it in the body
          * instead for the reason given at their call. */
-        .confirm_as_tick = true,
+        .confirm_style = SEEDTOOL_CONFIRM_TICK,
     };
     for (;;) {
         if (progress) {
@@ -371,7 +371,7 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
              * ring has one discontinuity wherever it is put, and putting it
              * here sets the two ways out of a screen side by side rather than
              * at opposite ends of the glass. */
-            .confirm_as_tick = true,
+            .confirm_style = SEEDTOOL_CONFIRM_TICK,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
         const size_t ring = nav_ring_size(count, confirm_enabled, back);
@@ -426,25 +426,28 @@ static size_t page_selection(const size_t position, const size_t pages)
 }
 
 /* The chrome a paged screen wears, so page_text and show_numbered_list say it
- * once each rather than both spelling out the same four fields. */
-static seedtool_nav_t page_nav(
-    const size_t position, const size_t pages, const char* counter, const bool confirmable)
+ * once each rather than both spelling out the same four fields.
+ *
+ * `style` is theirs to choose because their confirms mean different things:
+ * paged text hands off to another screen, a numbered list is agreed to. */
+static seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* counter,
+    const bool confirmable, const seedtool_confirm_t style)
 {
     const seedtool_nav_t nav = {
         .selected = page_selection(position, pages),
-        /* No label is what removes the tick, the same way a menu removes it:
-         * the reading screens have nothing for the reader to agree to, so the
-         * corner that would mean "I accept" is left empty rather than given a
-         * meaning the caller then discards. */
+        /* No label is what removes the control, the same way a menu removes
+         * it: the reading screens have nothing for the reader to agree to or
+         * to go on to, so the corner is left empty rather than given a meaning
+         * the caller then discards. */
         .confirm = confirmable ? "Continue" : NULL,
         .confirm_enabled = true,
         .back = true,
         .counter = counter,
-        /* Same tick as everywhere else. On a paged screen the ring is the
-         * reading order - arrow, page 1..N, then done - so the confirm being
-         * a corner rather than a bar changes where the cursor lands after the
-         * last page and nothing about how the pages are read. */
-        .confirm_as_tick = true,
+        /* On a paged screen the ring is the reading order - arrow, page 1..N,
+         * then the corner - so the confirm being a corner rather than a bar
+         * changes where the cursor lands after the last page and nothing about
+         * how the pages are read. */
+        .confirm_style = style,
     };
     return nav;
 }
@@ -773,7 +776,7 @@ static bool page_text_impl(const char* title, const char* text, const bool confi
             line3[length[first + 2]] = '\0';
         }
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable);
+        const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable, SEEDTOOL_CONFIRM_FORWARD);
         if (grouped) {
             /* Where each line sits in the whole value, in groups, so the
              * alternating ink carries across the line break rather than
@@ -830,13 +833,6 @@ static bool page_text(const char* title, const char* text)
     return page_text_impl(title, text, true, false);
 }
 
-/* page_text for a value with no word shapes to read by - an address. Drawn in
- * groups of four so the reader transcribing it has somewhere to keep their
- * place; the string itself is untouched. */
-static bool page_grouped(const char* title, const char* text)
-{
-    return page_text_impl(title, text, true, true);
-}
 
 /* Paged text there is nothing to take. Returns nothing because there is
  * nothing to return: the reader pages down and leaves by the arrow, and a
@@ -1942,19 +1938,35 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
     seedtool_zero(value, sizeof(value));
 }
 
-/* A single address's own QR, opened from the address list: no account key in
- * this view to warn about or to carousel over to, since a photo of one
- * address on its own reveals nothing the address itself did not already. */
+/* A single address's own QR, and the first thing opening an address shows: no
+ * account key in this view to warn about or to carousel over to, since a photo
+ * of one address on its own reveals nothing the address itself did not
+ * already. Scanning is what a reader almost always came for, so the code, its
+ * path and the address itself share one screen rather than two.
+ *
+ * Not every address fits beside its code: a taproot address is 62 characters
+ * against the 48 the margin holds. seedtool_display_qr_address refuses those
+ * rather than drawing as far as it reaches - an address cut off mid-value
+ * looks exactly like one that ended there - and they fall back to the code
+ * alone, then the paged text, which has the width for them. */
 static void show_address_qr(const char* title, const char* address)
 {
     for (;;) {
+        if (seedtool_display_qr_address(title, address)) {
+            if (wait_key() == KEY_REDRAW) {
+                continue;
+            }
+            return;
+        }
         if (!seedtool_display_qr(title, address)) {
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
-        if (wait_key() != KEY_REDRAW) {
-            return;
+        if (wait_key() == KEY_REDRAW) {
+            continue;
         }
+        (void)page_text_impl(title, address, false, true);
+        return;
     }
 }
 
@@ -2235,9 +2247,11 @@ static void show_addresses(
          * make. */
         char path[sizeof(prefix) + 12];
         (void)snprintf(path, sizeof(path), "%s/%u", prefix, (unsigned)index);
-        if (page_grouped(path, address)) {
-            show_address_qr(path, address);
-        }
+        /* One screen: the code, its path, and the address itself beside it.
+         * Opening an address used to land on the text and reach the QR through
+         * it, which cost a step to the reader who came to scan - and left the
+         * two halves of the same fact on separate screens. */
+        show_address_qr(path, address);
         seedtool_zero(address, sizeof(address));
     }
     seedtool_zero(addresses, sizeof(addresses));
@@ -2279,7 +2293,7 @@ static void show_stackbit(const char* mnemonic)
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
         const char* const word = seedtool_word(numbers[selected] - 1);
-        const seedtool_nav_t nav = page_nav(position, count, NULL, false);
+        const seedtool_nav_t nav = page_nav(position, count, NULL, false, SEEDTOOL_CONFIRM_TICK);
         if (layout == 0) {
             seedtool_display_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         } else {
@@ -2374,7 +2388,7 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
          * the firmware build even though the host build lets it pass. */
         char footer[24];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable);
+        const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable, SEEDTOOL_CONFIRM_TICK);
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
         seedtool_display_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
         switch (wait_key()) {
