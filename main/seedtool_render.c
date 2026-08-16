@@ -408,10 +408,11 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
  * the alternation carries across a line break rather than restarting. */
 static uint16_t group_ink(const size_t index) { return index % 2 ? COLOR_HIGHLIGHT : COLOR_WHITE; }
 
-/* `length` characters of `text` drawn in groups, centred on the line as a
- * whole. `first_group` is how many groups came before this line. */
-static void draw_grouped(
-    const uint8_t* font, const char* text, const size_t length, const int y, const size_t first_group)
+/* `length` characters of `text` drawn in groups, centred in the column at
+ * `column_x` of `column_width`. `first_group` is how many groups came before
+ * this line. */
+static void draw_grouped_in(const uint8_t* font, const char* text, const size_t length, const int column_x,
+    const int column_width, const int y, const size_t first_group)
 {
     int width = 0;
     for (size_t i = 0; i < length; ++i) {
@@ -423,9 +424,9 @@ static void draw_grouped(
     if (groups > 1) {
         width += (int)(groups - 1) * GROUP_GAP;
     }
-    int x = (SEEDTOOL_DISPLAY_WIDTH - width) / 2;
-    if (x < 0) {
-        x = 0;
+    int x = column_x + (column_width - width) / 2;
+    if (x < column_x) {
+        x = column_x;
     }
     for (size_t i = 0; i < length; ++i) {
         if (i && i % GROUP_LEN == 0) {
@@ -441,13 +442,14 @@ static void draw_grouped(
  * Rounded down to a whole number of groups, so a group is never split across
  * a line and the alternation stays readable at the break - unless the value
  * ends mid-group, which is the one short group allowed. */
-size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
+/* The width-and-face-agnostic half of seedtool_render_fit_grouped, so the
+ * address beside a QR can be fitted to its own margin with the same rounding. */
+static size_t fit_grouped_in(const uint8_t* font, const char* text, const size_t limit, const int max_width)
 {
-    const int max_width = SEEDTOOL_DISPLAY_WIDTH - 4;
     int width = 0;
     size_t count = 0;
     for (; count < limit && text[count]; ++count) {
-        int advance = glyph_advance(tft_Ubuntu16, (unsigned char)text[count]);
+        int advance = glyph_advance(font, (unsigned char)text[count]);
         if (count && count % GROUP_LEN == 0) {
             advance += GROUP_GAP;
         }
@@ -460,6 +462,11 @@ size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
         count -= count % GROUP_LEN;
     }
     return count;
+}
+
+size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
+{
+    return fit_grouped_in(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
 
@@ -807,7 +814,8 @@ void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, c
     static const int y[] = { 33, 58, 83 };
     for (size_t i = 0; i < count && i < 3; ++i) {
         if (lines[i] && lines[i][0]) {
-            draw_grouped(tft_Ubuntu16, lines[i], strlen(lines[i]), y[i], first_group[i]);
+            draw_grouped_in(
+                tft_Ubuntu16, lines[i], strlen(lines[i]), 0, SEEDTOOL_DISPLAY_WIDTH, y[i], first_group[i]);
         }
     }
     nav_end(nav);
