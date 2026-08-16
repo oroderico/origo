@@ -480,14 +480,34 @@ size_t seedtool_list_top(const size_t count, const size_t selected, size_t previ
     return previous_top;
 }
 
-/* A solid left-pointing triangle with its apex at (x, y + height / 2): the
- * back arrow, drawn rather than set, since the 16px face carries no glyph for
- * one and Jade's own symbols font is not linked here. */
-static void draw_back_arrow(const int x, const int y, const int width, const int height, const uint16_t color)
+/* A solid isoceles triangle filling a width x height box, apex pointing the
+ * way asked - drawn rather than set, since the 16px face carries no glyph for
+ * one and Jade's own symbols font is not linked here.
+ *
+ * Up and down walk the rows drawing horizontal bars; left walks the columns
+ * drawing vertical ones. That is the same arithmetic transposed, which is why
+ * the header's back arrow and the digit field's scroll hints are one function
+ * rather than two that drift apart.
+ *
+ * The `+ 1` on the step is what keeps the apex a single pixel: without it the
+ * first two steps round to the same half-width and the point comes out as a
+ * two-pixel spike. */
+typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT } triangle_dir_t;
+
+static void draw_triangle(
+    const int x, const int y, const int width, const int height, const triangle_dir_t dir, const uint16_t color)
 {
-    for (int column = 0; column < width; ++column) {
-        const int half = (column + 1) * height / (2 * width);
-        fill_rect(x + column, y + height / 2 - half, 1, 2 * half + 1, color);
+    const bool vertical = dir != TRIANGLE_LEFT;
+    const int steps = vertical ? height : width;
+    const int across = vertical ? width : height;
+    for (int i = 0; i < steps; ++i) {
+        const int from_point = dir == TRIANGLE_DOWN ? steps - 1 - i : i;
+        const int half = (from_point + 1) * across / (2 * steps);
+        if (vertical) {
+            fill_rect(x + width / 2 - half, y + i, 2 * half + 1, 1, color);
+        } else {
+            fill_rect(x + i, y + height / 2 - half, 1, 2 * half + 1, color);
+        }
     }
 }
 
@@ -545,8 +565,8 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
         fill_rect(NAV_BACK_X, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         fill_rect(NAV_BACK_X + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
-        draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
-            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+        draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
             on_back ? COLOR_BLACK : COLOR_WHITE);
     }
     /* The confirm as a tick in the right slot, mirroring the arrow: same box,
@@ -834,7 +854,11 @@ static void draw_progress_bar(const seedtool_progress_t* progress)
 #define DIGIT_BOX_GAP 6
 #define DIGIT_BOX_Y 36
 #define DIGIT_ARROW_WIDTH 11
-#define DIGIT_ARROW_HEIGHT 7
+/* Six rows, not seven: the half-width steps in whole pixels, so an 11-wide
+ * triangle has exactly six distinct rows (1, 3, 5, 7, 9, 11). A seventh row
+ * has no width left of its own and repeats one, which reads as a flat spot in
+ * the edge rather than a straight diagonal. */
+#define DIGIT_ARROW_HEIGHT 6
 #define DIGIT_ARROW_UP_Y 26
 #define DIGIT_ARROW_DOWN_Y 71
 
@@ -850,19 +874,6 @@ _Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXE
 _Static_assert(DIGIT_ARROW_UP_Y + DIGIT_ARROW_HEIGHT <= DIGIT_BOX_Y, "the up arrow runs into the digit boxes");
 _Static_assert(DIGIT_BOX_Y + DIGIT_BOX_HEIGHT <= DIGIT_ARROW_DOWN_Y, "the digit boxes run into the down arrow");
 _Static_assert(DIGIT_ARROW_DOWN_Y + DIGIT_ARROW_HEIGHT <= LIST_FOOTER_Y, "the down arrow runs into the footer");
-
-/* A solid triangle, `up` pointing to the top. Drawn row by row like the
- * backspace glyph above rather than from a font, so it scales with the box
- * rather than with whatever glyph a face happens to carry. */
-static void draw_triangle(const int x, const int y, const bool up, const uint16_t color)
-{
-    for (int row = 0; row < DIGIT_ARROW_HEIGHT; ++row) {
-        /* Widest at the base, one pixel at the point. */
-        const int from_point = up ? row : DIGIT_ARROW_HEIGHT - 1 - row;
-        const int half = from_point * (DIGIT_ARROW_WIDTH / 2) / (DIGIT_ARROW_HEIGHT - 1);
-        fill_rect(x + DIGIT_ARROW_WIDTH / 2 - half, y + row, 2 * half + 1, 1, color);
-    }
-}
 
 /* One wider box for a value scrolled whole rather than digit by digit: a die
  * face is 1-6 and a D20 is 1-20, so splitting it into per-digit boxes would
@@ -886,8 +897,8 @@ void seedtool_render_value_box(
             DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2, COLOR_BLACK);
     }
     const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-    draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, true, COLOR_WHITE);
-    draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, false, COLOR_WHITE);
+    draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
+    draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
     draw_centered(tft_DefaultFont, footer, 111);
     if (progress) {
         draw_progress_bar(progress);
@@ -929,8 +940,8 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
 
         if (selected) {
             const int arrow_x = x + (DIGIT_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-            draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, true, COLOR_WHITE);
-            draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, false, COLOR_WHITE);
+            draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
+            draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
         }
     }
 
