@@ -2108,7 +2108,14 @@ static void show_extended_keys(const char* mnemonic, const char* passphrase, con
         }
         items[count++] = "Descriptor";
         const int selected = choose_menu_at("Extended public key", items, count, &cursor);
-        if (selected < 0 || (size_t)selected == count - 1) {
+        /* `count`, not `count - 1`: choose_menu_at returns the arrow as the
+         * index one past the last row - the slot the Back row used to occupy -
+         * so `count - 1` is the last real item instead. Here that item is
+         * "Descriptor", which made the two swap: picking Descriptor left the
+         * menu, and taking the arrow fell through to the else below and opened
+         * the descriptor. The other menus compare against a literal that
+         * already equals count, which is why this was the only one left. */
+        if (selected < 0 || (size_t)selected == count) {
             return;
         }
         if (selected == 0) {
