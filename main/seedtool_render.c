@@ -69,6 +69,15 @@
 #define NAV_BACK_HEIGHT 19
 #define NAV_ARROW_WIDTH 7
 #define NAV_ARROW_HEIGHT 11
+/* The tick gets its own box rather than the arrow's: the arrow is tall and
+ * narrow to read as a triangle, a check this small has to be wider than tall.
+ * The legs and stroke are the shape; the box is what they add up to, derived
+ * so it cannot drift from them. */
+#define NAV_TICK_STROKE 2
+#define NAV_TICK_SHORT 3
+#define NAV_TICK_LONG 6
+#define NAV_TICK_WIDTH (NAV_TICK_SHORT + NAV_TICK_LONG + NAV_TICK_STROKE)
+#define NAV_TICK_HEIGHT (NAV_TICK_LONG + NAV_TICK_STROKE)
 #define NAV_ROW_HEIGHT 32
 /* The rows' own height, less the 2px the last one leaves under itself: a
  * plain list can let its track overhang that gap, having nothing below it,
@@ -484,18 +493,21 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
 
 /* A tick, drawn rather than set, for the same reason the arrow above is: the
  * 16px face has no glyph for one and Jade's symbols font is a component the
- * audit rejects by name. Two strokes from a common low point - a short one up
- * to the left, a long one up to the right - each a stack of 2px squares so the
- * diagonals read as solid rather than as a dotted line of single pixels. */
-static void draw_tick(const int x, const int y, const int width, const int height, const uint16_t color)
+ * audit rejects by name. Two strokes up from a common low point, each a stack
+ * of squares so the diagonals read as solid rather than as dotted pixels.
+ *
+ * The legs are fixed lengths rather than fractions of one width - at this size
+ * that rounds the short leg away entirely - and roughly 1:2 is what reads as a
+ * check. `x, y` is the top-left of the NAV_TICK_WIDTH x NAV_TICK_HEIGHT box. */
+static void draw_tick(const int x, const int y, const uint16_t color)
 {
-    const int foot_x = x + width / 3;
-    const int foot_y = y + height - 2;
-    for (int i = 0; i < width / 3; ++i) {
-        fill_rect(foot_x - i, foot_y - i, 2, 2, color);
+    const int foot_x = x + NAV_TICK_SHORT;
+    const int foot_y = y + NAV_TICK_LONG;
+    for (int i = 0; i <= NAV_TICK_SHORT; ++i) {
+        fill_rect(foot_x - i, foot_y - i, NAV_TICK_STROKE, NAV_TICK_STROKE, color);
     }
-    for (int i = 0; i < width - width / 3; ++i) {
-        fill_rect(foot_x + i, foot_y - i, 2, 2, color);
+    for (int i = 0; i <= NAV_TICK_LONG; ++i) {
+        fill_rect(foot_x + i, foot_y - i, NAV_TICK_STROKE, NAV_TICK_STROKE, color);
     }
 }
 
@@ -561,8 +573,7 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
         fill_rect(x, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
-        draw_tick(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
-            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+        draw_tick(x + (NAV_BACK_WIDTH - NAV_TICK_WIDTH) / 2, NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_TICK_HEIGHT) / 2,
             !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE);
     }
     /* Centred between two margins the width of the arrow's box, not across the
