@@ -1551,6 +1551,25 @@ static bool nav_right_slot_is_drawn(void)
     return false;
 }
 
+/* The arrow's own box, the mirror of the tick's check above. A screen whose
+ * only way out is the arrow has to actually draw one: the notices lost their
+ * tick on the argument that a screen with nothing to accept should not offer
+ * assent, and that argument only holds if what replaced it is really there. */
+static bool nav_left_slot_is_drawn(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    /* NAV_BACK_X = 2, NAV_BACK_WIDTH = 20, NAV_BACK_Y = 1, NAV_BACK_HEIGHT = 19
+     * in seedtool_render.c, kept in sync with the numbers here. */
+    for (int y = 1; y < 1 + 19; ++y) {
+        for (int x = 2; x < 2 + 20; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool nav_chrome_bands_do_not_collide(void)
 {
     /* Twelve rows of the widest label review_and_confirm can build: two
@@ -1742,34 +1761,36 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
-    /* The notices: no arrow, so the title centres across the whole glass and
-     * has the full width to fit in - but the bar is still there, and the body
+    /* The notices: an arrow and no tick, since there is nothing on them to
+     * agree to. The title therefore shares the bar with the arrow and is held
+     * to the same column the acknowledge screens' titles are, and the body
      * still wraps rather than clips. Strings from seedtool_app.c. */
     static const struct {
         const char* title;
         const char* line1;
         const char* line2;
-        const char* label;
     } notices[] = {
-        { "Invalid checksum", "Check your words", "Fix one to continue", "Fix a word" },
-        { "Passphrase mismatch", "Nothing was derived", "Try again", "Try again" },
-        { "Backup confirmed", "Words matched", NULL, "Continue" },
-        { "Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK" },
-        { "Error", "Could not derive addresses", NULL, "OK" },
-        { "Error", "Could not compute", "word numbers", "OK" },
+        { "Invalid checksum", "Check your words", "Fix one to continue" },
+        { "Passphrase mismatch", "Nothing was derived", "Try again" },
+        { "Backup confirmed", "Words matched", NULL },
+        { "Too long for a QR", "Compact SeedQR", "Read it as text instead" },
+        { "Error", "Could not derive addresses", NULL },
+        { "Error", "Could not compute", "word numbers" },
     };
     for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
-        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_CONFIRM,
-            .confirm = notices[i].label,
+        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BACK,
+            .confirm = NULL,
             .confirm_enabled = true,
-            .back = false,
+            .back = true,
             .confirm_as_tick = true };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
-        /* A notice has no arrow, so its only control is the tick - if that
-         * failed to draw the screen would be one the reader cannot leave at
-         * all, which is worth more than checking a label's width. */
-        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)
-            || !nav_right_slot_is_drawn()) {
+        /* A notice's only control is now the arrow - if that failed to draw the
+         * screen would be one the reader cannot leave at all, which is worth
+         * more than checking a label's width. The mirror of the old check: the
+         * tick must be absent, or the screen would be offering an answer its
+         * caller has no way to receive. */
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y) || !nav_left_slot_is_drawn()
+            || nav_right_slot_is_drawn()) {
             return false;
         }
     }
