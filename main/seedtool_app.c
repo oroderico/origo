@@ -344,6 +344,15 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             .confirm = confirm,
             .confirm_enabled = confirm_enabled,
             .back = back,
+            /* The tick here too, so there is one confirm control in the
+             * firmware and it is always in the same corner. Reading the ring
+             * as a walk down the screen breaks at exactly one point either
+             * way: with a bar, moving down off it wrapped to the arrow at the
+             * top; with the tick, the last row wraps to the corner instead. A
+             * ring has one discontinuity wherever it is put, and putting it
+             * here sets the two ways out of a screen side by side rather than
+             * at opposite ends of the glass. */
+            .confirm_as_tick = true,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
         const size_t ring = nav_ring_size(count, confirm_enabled, back);
@@ -403,6 +412,11 @@ static seedtool_nav_t page_nav(const size_t position, const size_t pages, const 
         .confirm_enabled = true,
         .back = true,
         .counter = counter,
+        /* Same tick as everywhere else. On a paged screen the ring is the
+         * reading order - arrow, page 1..N, then done - so the confirm being
+         * a corner rather than a bar changes where the cursor lands after the
+         * last page and nothing about how the pages are read. */
+        .confirm_as_tick = true,
     };
     return nav;
 }

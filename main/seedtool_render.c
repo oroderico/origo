@@ -612,8 +612,18 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * same borders, same rule closing it underneath. The slot has been held
      * open by the title's own margins since the chrome arrived, so nothing
      * moves to make room for it. */
-    if (nav->confirm_as_tick) {
-        const bool on_tick = nav->selected == SEEDTOOL_NAV_CONFIRM;
+    /* Only when there is something to confirm. A menu passes no label because
+     * its rows are its actions, and a tick there offers an answer to a
+     * question the screen never asked - the same guard the bar had, which this
+     * did not inherit when it replaced it. */
+    if (nav->confirm_as_tick && nav->confirm) {
+        /* Three states, the same three the bar had: filled when it is both
+         * available and selected, outlined when available and not, and drawn
+         * dim throughout when confirming is not possible yet - the checksum
+         * screen with a word still wrong is the case that needs the third.
+         * The control keeps its place in every state, so what changes is
+         * whether it can be taken and never whether it is there. */
+        const bool on_tick = nav->confirm_enabled && nav->selected == SEEDTOOL_NAV_CONFIRM;
         const int x = SEEDTOOL_DISPLAY_WIDTH - NAV_BACK_X - NAV_BACK_WIDTH;
         if (on_tick) {
             fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
@@ -624,7 +634,7 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         draw_tick(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
-            on_tick ? COLOR_BLACK : COLOR_WHITE);
+            !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE);
     }
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right

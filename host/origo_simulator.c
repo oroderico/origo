@@ -1525,9 +1525,9 @@ static bool nav_title_stays_in_its_column(const int x)
     return true;
 }
 
-/* The confirm bar's band (NAV_BAR_Y..the bottom of the glass), with its label
- * required to stay a few pixels clear of both edges. */
-/* NAV_BAR_Y in seedtool_render.c, kept in sync with this. */
+
+/* NAV_BAR_Y in seedtool_render.c, kept in sync with this: the band the confirm
+ * bar used to occupy, still the floor the body must stay above. */
 #define NAV_BAR_BAND_Y 118
 
 /* The confirm's box in the title bar's right slot: lit, and inside the glass.
@@ -1549,35 +1549,6 @@ static bool nav_right_slot_is_drawn(void)
         }
     }
     return false;
-}
-
-static bool nav_bar_label_fits(void)
-{
-    const uint16_t* const pixels = seedtool_render_pixels();
-    int leftmost = SEEDTOOL_DISPLAY_WIDTH, rightmost = -1;
-    for (int y = NAV_BAR_BAND_Y; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
-        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
-            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0x0000) {
-                continue;
-            }
-            /* The rule drawn along the top of an unfilled bar spans the whole
-             * width and is not the label; skipped by row, not by colour, so a
-             * label sharing the rule's colour still counts. */
-            if (y == NAV_BAR_BAND_Y) {
-                continue;
-            }
-            if (x < leftmost) {
-                leftmost = x;
-            }
-            if (x > rightmost) {
-                rightmost = x;
-            }
-        }
-    }
-    if (rightmost < 0) {
-        return false; /* the label never reached the screen */
-    }
-    return leftmost >= 4 && rightmost <= SEEDTOOL_DISPLAY_WIDTH - 5;
 }
 
 static bool nav_chrome_bands_do_not_collide(void)
@@ -1602,7 +1573,8 @@ static bool nav_chrome_bands_do_not_collide(void)
             const seedtool_nav_t nav = { .selected = selections[s],
                 .confirm = "Continue",
                 .confirm_enabled = confirm_enabled,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
@@ -1611,19 +1583,21 @@ static bool nav_chrome_bands_do_not_collide(void)
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(115, 118)) {
                 return false;
             }
-            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
-             * both ends, so its right edge is that far in from the glass. */
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* The label on the bar, measured only in the states where the
-             * bar is not filled - a filled bar lights every pixel of the band
-             * by design, including the bottom row, and would swamp this. The
-             * label is drawn on one line by draw_centered_in, which does not
-             * wrap, so an overlong one runs off the right edge instead of
-             * down; measured on both sides so it is held clear of the glass
-             * rather than merely on it. */
-            if (selections[s] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
+             * both ends, so its right edge is that far in from the glass - and
+             * that is exactly where the tick's box begins, so an overlong
+             * title landing past its column would read as the control. The
+             * title's placement depends only on whether there is an arrow, so
+             * it is measured on a tick-free rendering of the same screen. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = nav.confirm_enabled,
+                .back = true };
+            seedtool_render_nav_list(&bare, titles[i], words, 12, 0);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
@@ -1634,13 +1608,18 @@ static bool nav_chrome_bands_do_not_collide(void)
      * towards the bar - and the bar's own label is the widest this chrome
      * carries anywhere. Strings copied from seedtool_app.c, the same way the
      * dice hints above are. */
-    /* A menu wears the chrome with no confirm bar at all: its rows are its
-     * actions, so the arrow is the only control and the bar's band must stay
-     * dark rather than holding an empty outline. */
+    /* A menu wears the chrome with no confirm at all: its rows are its
+     * actions, so the arrow is the only control. Both places the confirm could
+     * appear must stay empty - the band along the bottom, and the title bar's
+     * right slot. The slot is the one that caught a real bug: confirm_as_tick
+     * is set for every list, so the tick drew on the Origo and Wallet menus,
+     * offering an answer to a question those screens never ask. Nothing here
+     * noticed, because every check only ever asserted the tick was present. */
     for (size_t s = 0; s < 2; ++s) {
-        const seedtool_nav_t nav = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
+        const seedtool_nav_t nav
+            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_as_tick = true };
         seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
-        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT)) {
+        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT) || nav_right_slot_is_drawn()) {
             return false;
         }
     }
@@ -1804,16 +1783,23 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = "Continue",
             .confirm_enabled = true,
             .back = true,
-            .counter = "8/8" };
+            .counter = "8/8",
+            .confirm_as_tick = true };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }
-        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+        if (!nav_right_slot_is_drawn()) {
             return false;
         }
-        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+        /* Title measured tick-free, for the reason the list pass above gives. */
+        const seedtool_nav_t bare_paged
+            = { .selected = paged.selected, .confirm = paged.confirm, .confirm_enabled = true, .back = true,
+                  .counter = paged.counter };
+        seedtool_render_nav_text(&bare_paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
             return false;
         }
         static const char* const rows[] = { "21. mosquito", "22. mosquito", "23. mosquito", "24. mosquito" };
@@ -1821,15 +1807,20 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = "Continue",
             .confirm_enabled = true,
             .back = true,
-            .counter = "6/6" };
+            .counter = "6/6",
+            .confirm_as_tick = true };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }
-        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+        if (!nav_right_slot_is_drawn()) {
             return false;
         }
-        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+        /* Title measured tick-free, as above. */
+        const seedtool_nav_t bare_rows = { .selected = listed.selected, .confirm = listed.confirm,
+            .confirm_enabled = true, .back = true, .counter = listed.counter };
+        seedtool_render_nav_rows(&bare_rows, "BIP39 word numbers", rows, 4);
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
             return false;
         }
     }
