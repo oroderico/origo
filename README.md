@@ -370,11 +370,11 @@ the checksum, so most of the wordlist cannot end a given eleven or twenty-three:
 its eleven bits are the leftover entropy bits followed by the checksum bits,
 which leaves 128 of the 2048 words possible for a 12-word mnemonic and only 8
 for a 24-word one. The keyboard offers those and nothing else — so a word misread
-off a metal plate is not typeable in the first place, rather than being reported
-as `Invalid checksum` after the whole mnemonic has been entered. Few enough
-remain for a 24-word restore that entry lists them outright instead of asking
-for a letter. The narrowing is exact in both directions: everything it excludes
-genuinely fails validation, and no correct seed becomes harder to enter. It
+off a metal plate is not typeable in the first place, rather than being refused
+after the whole mnemonic has been entered. Few enough remain for a 24-word
+restore that entry lists them outright instead of asking for a letter. The
+narrowing is exact in both directions: everything it excludes genuinely fails
+validation, and no correct seed becomes harder to enter. It
 applies to both entry methods and to the last word on the review screen, where
 it is rebuilt from the words currently entered — but not to "Complete checksum",
 whose 11 or 23 words have no checksum in them yet, and not to the backup quiz,

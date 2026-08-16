@@ -1789,7 +1789,6 @@ static bool nav_chrome_bands_do_not_collide(void)
         const char* line1;
         const char* line2;
     } notices[] = {
-        { "Invalid checksum", "Check your words", "Fix one to continue" },
         { "Passphrase mismatch", "Nothing was derived", "Try again" },
         { "Backup confirmed", "Words matched", NULL },
         { "Too long for a QR", "Compact SeedQR", "Read it as text instead" },
