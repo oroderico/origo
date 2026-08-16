@@ -260,7 +260,7 @@ static int nav_screen(const char* title, const char* one, const char* two, const
          * tells the reader what taking it does, on every screen here but the
          * two entropy verdicts, which pass no title and say it in the body
          * instead for the reason given at their call. */
-        .confirm_as_tick = true,
+        .confirm_style = SEEDTOOL_CONFIRM_TICK,
     };
     for (;;) {
         if (progress) {
@@ -371,7 +371,7 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
              * ring has one discontinuity wherever it is put, and putting it
              * here sets the two ways out of a screen side by side rather than
              * at opposite ends of the glass. */
-            .confirm_as_tick = true,
+            .confirm_style = SEEDTOOL_CONFIRM_TICK,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
         const size_t ring = nav_ring_size(count, confirm_enabled, back);
@@ -426,25 +426,28 @@ static size_t page_selection(const size_t position, const size_t pages)
 }
 
 /* The chrome a paged screen wears, so page_text and show_numbered_list say it
- * once each rather than both spelling out the same four fields. */
-static seedtool_nav_t page_nav(
-    const size_t position, const size_t pages, const char* counter, const bool confirmable)
+ * once each rather than both spelling out the same four fields.
+ *
+ * `style` is theirs to choose because their confirms mean different things:
+ * paged text hands off to another screen, a numbered list is agreed to. */
+static seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* counter,
+    const bool confirmable, const seedtool_confirm_t style)
 {
     const seedtool_nav_t nav = {
         .selected = page_selection(position, pages),
-        /* No label is what removes the tick, the same way a menu removes it:
-         * the reading screens have nothing for the reader to agree to, so the
-         * corner that would mean "I accept" is left empty rather than given a
-         * meaning the caller then discards. */
+        /* No label is what removes the control, the same way a menu removes
+         * it: the reading screens have nothing for the reader to agree to or
+         * to go on to, so the corner is left empty rather than given a meaning
+         * the caller then discards. */
         .confirm = confirmable ? "Continue" : NULL,
         .confirm_enabled = true,
         .back = true,
         .counter = counter,
-        /* Same tick as everywhere else. On a paged screen the ring is the
-         * reading order - arrow, page 1..N, then done - so the confirm being
-         * a corner rather than a bar changes where the cursor lands after the
-         * last page and nothing about how the pages are read. */
-        .confirm_as_tick = true,
+        /* On a paged screen the ring is the reading order - arrow, page 1..N,
+         * then the corner - so the confirm being a corner rather than a bar
+         * changes where the cursor lands after the last page and nothing about
+         * how the pages are read. */
+        .confirm_style = style,
     };
     return nav;
 }
@@ -773,7 +776,7 @@ static bool page_text_impl(const char* title, const char* text, const bool confi
             line3[length[first + 2]] = '\0';
         }
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable);
+        const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable, SEEDTOOL_CONFIRM_FORWARD);
         if (grouped) {
             /* Where each line sits in the whole value, in groups, so the
              * alternating ink carries across the line break rather than
@@ -2279,7 +2282,7 @@ static void show_stackbit(const char* mnemonic)
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
         const char* const word = seedtool_word(numbers[selected] - 1);
-        const seedtool_nav_t nav = page_nav(position, count, NULL, false);
+        const seedtool_nav_t nav = page_nav(position, count, NULL, false, SEEDTOOL_CONFIRM_TICK);
         if (layout == 0) {
             seedtool_display_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         } else {
@@ -2374,7 +2377,7 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
          * the firmware build even though the host build lets it pass. */
         char footer[24];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable);
+        const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable, SEEDTOOL_CONFIRM_TICK);
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
         seedtool_display_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
         switch (wait_key()) {

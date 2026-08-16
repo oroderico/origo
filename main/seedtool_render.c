@@ -599,16 +599,17 @@ size_t seedtool_list_top(const size_t count, const size_t selected, size_t previ
  * The `+ 1` on the step is what keeps the apex a single pixel: without it the
  * first two steps round to the same half-width and the point comes out as a
  * two-pixel spike. */
-typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT } triangle_dir_t;
+typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT, TRIANGLE_RIGHT } triangle_dir_t;
 
 static void draw_triangle(
     const int x, const int y, const int width, const int height, const triangle_dir_t dir, const uint16_t color)
 {
-    const bool vertical = dir != TRIANGLE_LEFT;
+    const bool vertical = dir == TRIANGLE_UP || dir == TRIANGLE_DOWN;
     const int steps = vertical ? height : width;
     const int across = vertical ? width : height;
     for (int i = 0; i < steps; ++i) {
-        const int from_point = dir == TRIANGLE_DOWN ? steps - 1 - i : i;
+        /* DOWN and RIGHT are UP and LEFT walked from the other end. */
+        const int from_point = dir == TRIANGLE_DOWN || dir == TRIANGLE_RIGHT ? steps - 1 - i : i;
         const int half = (from_point + 1) * across / (2 * steps);
         if (vertical) {
             fill_rect(x + width / 2 - half, y + i, 2 * half + 1, 1, color);
@@ -684,7 +685,7 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * its rows are its actions, and a tick there offers an answer to a
      * question the screen never asked - the same guard the bar had, which this
      * did not inherit when it replaced it. */
-    if (nav->confirm_as_tick && nav->confirm) {
+    if (nav->confirm_style != SEEDTOOL_CONFIRM_BAR && nav->confirm) {
         /* Three states, the same three the bar had: filled when it is both
          * available and selected, outlined when available and not, and drawn
          * dim throughout when confirming is not possible yet - the checksum
@@ -700,8 +701,19 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
         fill_rect(x, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
-        draw_tick(x + (NAV_BACK_WIDTH - NAV_TICK_WIDTH) / 2, NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_TICK_HEIGHT) / 2,
-            !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE);
+        const uint16_t ink = !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE;
+        if (nav->confirm_style == SEEDTOOL_CONFIRM_FORWARD) {
+            /* The back arrow's own shape, mirrored, in the slot opposite it -
+             * so "there is more this way" and "back the way you came" are
+             * plainly the same control pointing two ways, rather than two
+             * glyphs the reader has to learn separately. */
+            draw_triangle(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+                NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+                TRIANGLE_RIGHT, ink);
+        } else {
+            draw_tick(x + (NAV_BACK_WIDTH - NAV_TICK_WIDTH) / 2,
+                NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_TICK_HEIGHT) / 2, ink);
+        }
     }
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right
@@ -723,7 +735,7 @@ static void draw_nav_bar(const seedtool_nav_t* nav)
     /* Nothing along the bottom when the confirm is a tick in the header: the
      * control exists once, and drawing it twice would make the reader look for
      * the difference between them. */
-    if (!nav->confirm || nav->confirm_as_tick) {
+    if (!nav->confirm || nav->confirm_style != SEEDTOOL_CONFIRM_BAR) {
         return;
     }
     const bool on_confirm = nav->selected == SEEDTOOL_NAV_CONFIRM;

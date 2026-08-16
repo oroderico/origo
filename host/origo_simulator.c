@@ -322,7 +322,7 @@ static bool wire_order_is_big_endian(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = false,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
 
     seedtool_render_nav_list(&nav, "Origo", items, 3, 0);
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -1149,7 +1149,7 @@ static seedtool_nav_t stackbit_test_nav(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     return nav;
 }
 
@@ -1766,7 +1766,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = "Continue",
                 .confirm_enabled = confirm_enabled,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
@@ -1803,13 +1803,13 @@ static bool nav_chrome_bands_do_not_collide(void)
     /* A menu wears the chrome with no confirm at all: its rows are its
      * actions, so the arrow is the only control. Both places the confirm could
      * appear must stay empty - the band along the bottom, and the title bar's
-     * right slot. The slot is the one that caught a real bug: confirm_as_tick
+     * right slot. The slot is the one that caught a real bug: the tick
      * is set for every list, so the tick drew on the Origo and Wallet menus,
      * offering an answer to a question those screens never ask. Nothing here
      * noticed, because every check only ever asserted the tick was present. */
     for (size_t s = 0; s < 2; ++s) {
         const seedtool_nav_t nav
-            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_as_tick = true };
+            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
         if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT) || nav_right_slot_is_drawn()) {
             return false;
@@ -1847,7 +1847,7 @@ static bool nav_chrome_bands_do_not_collide(void)
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
-            /* confirm_as_tick, because that is what nav_screen sets and these
+            /* confirm_style, because that is what nav_screen sets and these
              * are its screens: the confirm is a box in the title bar's right
              * slot and no bar is drawn. Rendering them with a bar would have
              * this table checking a layout the firmware stopped shipping. */
@@ -1855,7 +1855,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = screens[i].label,
                 .confirm_enabled = true,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
@@ -1914,7 +1914,7 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm = dice[i].label,
                 .confirm_enabled = true,
                 .back = true,
-                .confirm_as_tick = true };
+                .confirm_style = SEEDTOOL_CONFIRM_TICK };
             seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
@@ -1954,7 +1954,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = NULL,
             .confirm_enabled = true,
             .back = true,
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
         /* A notice's only control is now the arrow - if that failed to draw the
          * screen would be one the reader cannot leave at all, which is worth
@@ -1981,7 +1981,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_enabled = true,
             .back = true,
             .counter = "8/8",
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
@@ -2005,7 +2005,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_enabled = true,
             .back = true,
             .counter = "6/6",
-            .confirm_as_tick = true };
+            .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
@@ -2388,12 +2388,12 @@ static int self_test(void)
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     const seedtool_nav_t at_start = { .selected = 0,
         .confirm = NULL,
         .confirm_enabled = false,
         .back = true,
-        .confirm_as_tick = true };
+        .confirm_style = SEEDTOOL_CONFIRM_TICK };
     seedtool_render_nav_list(&scrolled, "Wallet", menu_labels, 7, 4);
     seedtool_render_nav_list(&at_start, "Word 3/12  aba", menu_labels, MENU_LABEL_COUNT, 0);
     /* Draw the real layouts, each opened at its centre, so one that overflows a
