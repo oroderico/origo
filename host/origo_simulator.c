@@ -1430,14 +1430,24 @@ static bool dice_screen_titles_clear_the_edges(void)
  * seedtool_render.c's DICE_BAR_Y, kept in sync with the 90..104 checked
  * below), with no margin to spare for a second wrapped line. "Return card,
  * reshuffle each draw" shipped long enough to wrap there, landing its second
- * line inside the bar instead of above it - checked here against every hint
- * the app actually shows, copied from collect_entropy() in seedtool_app.c,
- * so a future hint that grows past one line fails this instead of shipping. */
+ * line inside the bar instead of above it.
+ *
+ * These three verdicts are drawn by nav_dice_confirm today, not by this
+ * plain renderer directly - but seedtool_render_screen's two-line layout and
+ * seedtool_render_nav_text's share the same y=39/65, the heights the chrome
+ * inherited rather than moved (see draw_nav_header's own comment), so a wrap
+ * caught here is a wrap the chrome would show too. Checking it through the
+ * plain renderer rather than the chrome is what lets
+ * nav_chrome_bands_do_not_collide's own dice table below skip re-proving the
+ * same 90..103 band and check only what is left, the 104..118 gap its own
+ * comment names. */
 static bool dice_screen_hints_clear_the_bar(void)
 {
-    static const char* const hints[]
-        = { "Red bar = non-random", "Return & reshuffle each card", "Looks good - generate?" };
-    const char* const footer = "BOTH continue   Up/Down back";
+    static const char* const hints[] = { "Red bar = non-random", "Return & reshuffle each card", "Looks good" };
+    /* NAV_FOOTER's own text (seedtool_app.c) - not reachable from here, since
+     * it is a #define private to that file rather than a declaration in a
+     * header, so it is spelled out rather than named. */
+    const char* const footer = "Up/Down move   BOTH select";
     const seedtool_progress_t empty = { 0 };
     for (size_t i = 0; i < sizeof(hints) / sizeof(hints[0]); ++i) {
         seedtool_render_dice_screen("Title", "99 cards needed", hints[i], footer, &empty);

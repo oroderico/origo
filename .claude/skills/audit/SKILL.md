@@ -53,19 +53,21 @@ cmake -S host -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
 should fail the way CI fails.
 
 Then the firmware build and ELF audit. **Use the pinned IDF**, not whatever
-`idf.py` is on PATH:
+`idf.py` is on PATH — `dependencies.lock` names the version
+(`idf: version:`, 5.5.4 as of writing); find or install an export script for
+that exact version rather than assuming one is at any particular path, since
+where IDF installs lives is a per-machine fact this skill cannot pin. Whatever
+`idf.py` resolves to by default may be a different version entirely - building
+with it fails a toolchain check before reaching any project code, which is an
+environment finding to report, not a code finding, and not something to "fix"
+by letting the lock file be rewritten:
 
 ```sh
-bash -c 'source ~/esp-idf-v5.5.4/export.sh >/dev/null 2>&1 && cd /home/cmpc/origo \
+bash -c 'source <path to the pinned IDF>/export.sh >/dev/null 2>&1 && cd <repo root> \
   && idf.py build \
   && python3 tools/audit_origo_elf.py build/origo.elf --map build/origo.map \
        --bin build/origo.bin --nm xtensa-esp32-elf-nm'
 ```
-
-The default `~/esp/esp-idf` has drifted to 6.0.2 while `dependencies.lock` pins
-5.5.4; building with it fails a toolchain check before reaching any project
-code. If the build fails that way, say so as an environment finding rather than
-a code finding — and do not "fix" it by letting the lock file be rewritten.
 
 Report each gate as pass or fail with the line that says so. A failure here
 ends the audit: everything below assumes a tree that builds.
@@ -75,7 +77,7 @@ ends the audit: everything below assumes a tree that builds.
 ### Firmware and memory
 
 The ELF audit prints the binary size on success and fails only at the ceiling
-(`--max-bin-size`, default 295 KiB = 302,080 bytes, `tools/audit_origo_elf.py`).
+(`--max-bin-size`, default 512 KiB = 524,288 bytes, `tools/audit_origo_elf.py`).
 Between those two states it says nothing, so report the headroom explicitly:
 
 - bytes, and percentage of the ceiling
@@ -90,7 +92,7 @@ forbids), so remaining space is a design constraint and not just a number.
 Then measure what nothing measures:
 
 ```sh
-bash -c 'source ~/esp-idf-v5.5.4/export.sh >/dev/null 2>&1 && cd /home/cmpc/origo \
+bash -c 'source <path to the pinned IDF>/export.sh >/dev/null 2>&1 && cd <repo root> \
   && idf.py size && idf.py size-components'
 ```
 

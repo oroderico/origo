@@ -285,13 +285,14 @@ raises the value, right lowers it, since there the physical button read as
 "previous".
 
 Pressing a button teaches left, right and hold. It cannot teach the chord, since
-nothing moves until both buttons are released, so `L/R move   BOTH select` sits
-under the first screens reachable from the main menu and disappears for good
-once the chord has been used once — not under the main menu itself, which is
-not the place to also be teaching it. What stays under a screen after that is
-its position counter alone. The two footers that name a consequence rather
-than a gesture — `BOTH continue   L/R back`, and the timeout's `BOTH extend
-L/R erase` — are always shown, because guessing wrong there costs a session.
+nothing moves until both buttons are released, so `Up/Down move   BOTH select`
+sits under the first screens reachable from the main menu and disappears for
+good once the chord has been used once — not under the main menu itself, which
+is not the place to also be teaching it. What stays under a screen after that is
+its position counter alone, or nothing at all on a screen that answers with the
+tick in the header rather than a bar along the bottom. The one footer that still
+names a consequence rather than a gesture — the timeout's `BOTH extend
+Up/Down erase` — is always shown, because guessing wrong there costs a session.
 
 ### Carousels: dice, coins and cards
 
@@ -351,7 +352,7 @@ The last row of every list with somewhere to return to is the way out of it —
 read as one more choice. That row is always last, in every such list, so
 leaving a screen is always in the same place. The one list with nowhere to
 return to is the main menu itself: there is no `Back` row there, and the
-session-timeout wipe (`BOTH extend   L/R erase`) is the only way out of it
+session-timeout wipe (`BOTH extend   Up/Down erase`) is the only way out of it
 short of the board's own physical reset.
 
 ## Entering words and passphrases
