@@ -23,16 +23,6 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
-/* Same as seedtool_render_screen, but with a third body line: for a long
- * value paged three lines at a time instead of two. */
-void seedtool_render_screen3(
-    const char* title, const char* line1, const char* line2, const char* line3, const char* footer);
-
-/* Same again, with a fourth body line: for a numbered word or word-number
- * list, one entry per line, four entries per page. */
-void seedtool_render_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer);
-
 /* The dice-roll quality bar drawn under a D6/D20 entry screen: a top segment
  * for rolls collected against the minimum, a bottom segment for Shannon's
  * entropy of those rolls against the minimum bits needed. `warn` colors the
@@ -95,9 +85,6 @@ typedef struct {
 
 seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
 
-void seedtool_render_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
-    const char* footer);
-
 /* The two fixed controls a nav screen always carries, addressed as selections
  * alongside an ordinary item index. Sentinels rather than positions past the
  * end of the list, so a caller never has to know how many rows the chrome
@@ -152,20 +139,20 @@ typedef struct {
     bool confirm_as_tick;
 } seedtool_nav_t;
 
-/* Two or three centred body lines - three when `line3` is given, the same
- * choice seedtool_render_screen and seedtool_render_screen3 make by being two
- * functions. Body heights match theirs, so a screen gaining the chrome does
- * not also move its own text. */
+/* Two or three centred body lines - three when `line3` is given, which picks
+ * the tighter pitch. Both layouts keep the heights the plain screens used
+ * before the chrome replaced them, so a screen gaining the chrome does not
+ * also move its own text. */
 void seedtool_render_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
 
-/* Four left-aligned rows, at seedtool_render_screen4's own heights: a numbered
- * word list, which reads as a table rather than as centred blocks. */
+/* Four left-aligned rows: a numbered word list, which reads as a table rather
+ * than as centred blocks. */
 void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
 
-/* A scrolling list under the chrome. Shows the same SEEDTOOL_LIST_ROWS rows as
- * seedtool_render_list, one pixel shorter each to buy the bar its height, so
- * seedtool_list_top and seedtool_list_thumb apply here unchanged. */
+/* A scrolling list under the chrome, SEEDTOOL_LIST_ROWS rows at a time, each a
+ * pixel shorter than the plain list's were to buy the bar its height - which is
+ * why seedtool_list_top and seedtool_list_thumb apply here unchanged. */
 void seedtool_render_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 

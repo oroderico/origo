@@ -24,9 +24,9 @@
 #define DICE_BAR_Y 90
 #define DICE_BAR_HEIGHT 14
 
-/* Left margin for seedtool_render_screen4's four body lines: a numbered list
- * reads as a table, so every row starts at the same x rather than each being
- * centred as its own block and drifting with how wide its own text is. */
+/* Left margin for the four-row body: a numbered list reads as a table, so every
+ * row starts at the same x rather than each being centred as its own block and
+ * drifting with how wide its own text is. */
 #define SCREEN4_TEXT_X 20
 
 #define KEYBOARD_COLUMNS 10
@@ -80,8 +80,11 @@
  * at 103) and the bar. The small face fits the 14px left over; the 16px one
  * would not. */
 #define NAV_COUNTER_Y 105
-/* seedtool_render_screen4's four left-aligned rows, kept at its own heights so
- * a numbered list reads the same with the chrome as without it. */
+/* Four left-aligned rows. The heights are inherited from the plain four-line
+ * screen this replaced, and kept rather than re-derived: 28 to 88 in steps of
+ * 20 fits four 16px lines between the header and the counter with a real gap
+ * under each, which is the arithmetic the pixel scan in the self-test holds
+ * them to. */
 #define NAV_ROWS_SHOWN 4
 #define NAV_ROWS_TOP 28
 #define NAV_ROWS_HEIGHT 20
@@ -425,42 +428,6 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
     draw_centered(tft_DefaultFont, footer, 111);
 }
 
-/* Same face and footer as seedtool_render_screen, but a third body line
- * pitched tighter (25px apart rather than 26, and starting closer to the
- * title) so it still clears the footer: a long value paged three lines at a
- * time needs a third of fewer pages to review, at the same 16px face. */
-void seedtool_render_screen3(
-    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
-{
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 5);
-    draw_centered(tft_Ubuntu16, line1, 33);
-    draw_centered(tft_Ubuntu16, line2, 58);
-    draw_centered(tft_Ubuntu16, line3, 83);
-    draw_centered(tft_DefaultFont, footer, 111);
-}
-
-/* Same face and footer again, pitched tighter still (20px, against three
- * lines' 25px) to fit a fourth: a numbered word (or word-number) list reads
- * one entry per line, so 12 or 24 entries comes out to a clean 3 or 6 pages
- * this way instead of the 4 or 8 three lines would need. Still clears the
- * footer with room to spare at the same 16px face - the four lines run
- * title+23 to title+23+3*20+16, i.e. y=28 to 108, three pixels shy of the
- * footer at 111. Pixel-scanned directly (seedtool_render_pixels) to confirm
- * every line clears the next with a real gap - the zoomed Compact SeedQR
- * region label overlap bug was proof enough not to eyeball this arithmetic. */
-void seedtool_render_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer)
-{
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 5);
-    draw_left(tft_Ubuntu16, line1, SCREEN4_TEXT_X, 28);
-    draw_left(tft_Ubuntu16, line2, SCREEN4_TEXT_X, 48);
-    draw_left(tft_Ubuntu16, line3, SCREEN4_TEXT_X, 68);
-    draw_left(tft_Ubuntu16, line4, SCREEN4_TEXT_X, 88);
-    draw_centered(tft_DefaultFont, footer, 111);
-}
-
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
 {
     seedtool_thumb_t thumb = { 0, track };
@@ -502,44 +469,6 @@ size_t seedtool_list_top(const size_t count, const size_t selected, size_t previ
         return selected - SEEDTOOL_LIST_ROWS + 1;
     }
     return previous_top;
-}
-
-void seedtool_render_list(const char* title, const char* const* items, const size_t count, const size_t selected,
-    const size_t top, const char* footer)
-{
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
-    for (size_t row = 0; row < SEEDTOOL_LIST_ROWS && top + row < count; ++row) {
-        const char* const item = items[top + row];
-        const bool highlighted = top + row == selected;
-        const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
-        /* A rule between rows, matching the nav lists and Jade's own menus:
-         * the rows read as cells rather than as stacked lines of text, and it
-         * sits in the gap between them so the selection bar never paints over
-         * it. Between them and not above the first, so this list and a nav one
-         * carry the same line in the same places - a screen that gained the
-         * chrome should not also change how its rows are drawn.
-         *
-         * It used to be drawn above the last row alone, to set the way out
-         * apart from the choices. That distinction now rests on position,
-         * which the last row has always had and which every list here keeps. */
-        if (row) {
-            fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
-        }
-        if (highlighted) {
-            fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, LIST_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
-        }
-        draw_line_at(tft_Ubuntu16, item, seedtool_render_fit_row(item), LIST_TEXT_X,
-            y + (LIST_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, highlighted ? COLOR_BLACK : COLOR_WHITE);
-    }
-    if (count > SEEDTOOL_LIST_ROWS) {
-        /* With three rows visible, "there is more" is not enough on its own: the
-         * thumb's size says how much more and its place says where in it. */
-        const seedtool_thumb_t thumb = seedtool_list_thumb(count, top, LIST_SCROLL_HEIGHT);
-        fill_rect(LIST_SCROLL_X, LIST_TOP, LIST_SCROLL_WIDTH, LIST_SCROLL_HEIGHT, COLOR_DIM);
-        fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
-    }
-    draw_centered(tft_DefaultFont, footer, LIST_FOOTER_Y);
 }
 
 /* A solid left-pointing triangle with its apex at (x, y + height / 2): the
@@ -702,10 +631,11 @@ void seedtool_render_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3)
 {
     nav_begin(nav, title);
-    /* The same heights the plain screens use, so a screen gaining the chrome
-     * does not also move its own text - and the same choice between them that
-     * seedtool_render_screen and seedtool_render_screen3 make by being two
-     * functions: a third line means the three-line layout. */
+    /* Two layouts in one function, chosen by whether there is a third line:
+     * two lines sit at 39 and 65, three at 33, 58 and 83, pitched tighter to
+     * clear the counter. These were two separate screens before the chrome,
+     * and the heights are theirs unchanged - a screen gaining the chrome
+     * should not also move its own text. */
     if (line3) {
         draw_centered(tft_Ubuntu16, line1, 33);
         draw_centered(tft_Ubuntu16, line2, 58);

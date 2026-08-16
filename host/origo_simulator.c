@@ -312,8 +312,19 @@ static bool wire_order_is_big_endian(void)
 {
     static uint16_t wire[SEEDTOOL_DISPLAY_WIDTH * 5];
     const char* const items[] = { "Create Seed", "Restore Seed", "Complete Checksum" };
+    /* The Origo menu as the firmware draws it: the nav chrome, no arrow (it has
+     * no level above it), the selection on the first row. What this test needs
+     * from the image is the selection orange on row 21 and black and white
+     * elsewhere, and the chrome's list puts the bar in the same place and at
+     * the same width the plain list did - 226 orange pixels on that row either
+     * way, measured before this was switched over. */
+    const seedtool_nav_t nav = { .selected = 0,
+        .confirm = NULL,
+        .confirm_enabled = false,
+        .back = false,
+        .confirm_as_tick = true };
 
-    seedtool_render_list("Origo", items, 3, 0, 0, "1/3");
+    seedtool_render_nav_list(&nav, "Origo", items, 3, 0);
     const uint16_t* const pixels = seedtool_render_pixels();
     for (size_t row = 0; row + 5 <= SEEDTOOL_DISPLAY_HEIGHT; row += 5) {
         seedtool_render_wire_rows(wire, row, 5);
@@ -331,7 +342,7 @@ static bool wire_order_is_big_endian(void)
     }
     /* The selection orange is the colour that actually came out blue. */
     seedtool_render_clear();
-    seedtool_render_list("Origo", items, 3, 0, 0, "1/3");
+    seedtool_render_nav_list(&nav, "Origo", items, 3, 0);
     seedtool_render_wire_rows(wire, 21, 1);
     bool orange_found = false;
     for (size_t i = 0; i < SEEDTOOL_DISPLAY_WIDTH; ++i) {
@@ -2213,10 +2224,23 @@ static int self_test(void)
         fputs("Origo QR self-test failed\n", stderr);
         return 1;
     }
-    /* Draw a list scrolled to its end and one scrolled to its start, so both
-     * arrows and the selection bar are exercised. */
-    seedtool_render_list("Wallet", menu_labels, 7, 6, 4, "7/7   L/R move   BOTH select");
-    seedtool_render_list("Word 3/12  aba", menu_labels, MENU_LABEL_COUNT, 0, 0, "1/24   L/R move   BOTH select");
+    /* Draw a list scrolled to its end and one scrolled to its start, so the
+     * scroll indicator and the selection bar are both exercised. On the chrome
+     * that indicator is the thumb, not the pair of arrows the plain list drew -
+     * these two used to paint the old list, which meant they were exercising a
+     * widget the firmware had stopped shipping. */
+    const seedtool_nav_t scrolled = { .selected = 6,
+        .confirm = NULL,
+        .confirm_enabled = false,
+        .back = true,
+        .confirm_as_tick = true };
+    const seedtool_nav_t at_start = { .selected = 0,
+        .confirm = NULL,
+        .confirm_enabled = false,
+        .back = true,
+        .confirm_as_tick = true };
+    seedtool_render_nav_list(&scrolled, "Wallet", menu_labels, 7, 4);
+    seedtool_render_nav_list(&at_start, "Word 3/12  aba", menu_labels, MENU_LABEL_COUNT, 0);
     /* Draw the real layouts, each opened at its centre, so one that overflows a
      * row is caught here rather than on the device. */
     const bool letters[SEEDTOOL_LETTERS + 1] = { true };

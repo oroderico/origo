@@ -728,9 +728,9 @@ static void hexstr(const uint8_t* bytes, const size_t len, char* output)
 
 /* Three body lines per page, split by what actually fits on the display
  * rather than by a character count. Three rather than two costs nothing but
- * the tighter line pitch seedtool_render_screen3 uses: a third fewer pages to
- * review the same value. Returns true when the reader advanced past the last
- * page or accepted, false when they backed out. */
+ * the tighter line pitch the renderer uses for a third line: a third fewer
+ * pages to review the same value. Returns true when the reader advanced past
+ * the last page or accepted, false when they backed out. */
 static bool page_text_impl(const char* title, const char* text, const bool confirmable)
 {
     size_t start[MAX_PAGE_LINES], length[MAX_PAGE_LINES];

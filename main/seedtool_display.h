@@ -25,15 +25,9 @@ void seedtool_display_init(void);
 void seedtool_display_set_orientation(bool flipped);
 void seedtool_display_set_brightness(unsigned level);
 void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer);
-void seedtool_display_screen3(
-    const char* title, const char* line1, const char* line2, const char* line3, const char* footer);
-void seedtool_display_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer);
 void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
     const seedtool_progress_t* progress);
 void seedtool_display_splash(void);
-void seedtool_display_list(const char* title, const char* const* items, size_t count, size_t selected, size_t top,
-    const char* footer);
 /* One wrapper per nav screen shape, each just its renderer plus a flush. A
  * new shape needs one here and one in each backend; everything about the
  * chrome itself is already carried by seedtool_nav_t. */
