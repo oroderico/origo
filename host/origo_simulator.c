@@ -1610,6 +1610,88 @@ static bool nav_left_slot_is_drawn(void)
     return false;
 }
 
+/* Grouping an address is a drawing decision, so the one thing it must never
+ * do is change the address. Walking a value with seedtool_render_fit_grouped
+ * the way page_text_impl does has to reproduce it character for character -
+ * a group dropped, doubled or reordered at a line break would hand the reader
+ * an address that is not theirs, and they would have no way to tell.
+ *
+ * Also checks the cut lands on a group boundary. That is what keeps the
+ * alternating ink meaningful across a break: a line ending mid-group would
+ * put two same-coloured groups against each other with only the gap between
+ * them, and the gap is the signal the colour is there to back up. */
+static bool grouped_paging_preserves_the_value(void)
+{
+    static const char* const values[] = {
+        /* Both address shapes this firmware derives, plus lengths that land
+         * exactly on a group boundary and one past it. */
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+        "abcd",
+        "abcde",
+        "abcdefgh",
+    };
+    for (size_t v = 0; v < sizeof(values) / sizeof(values[0]); ++v) {
+        const char* const value = values[v];
+        const size_t total = strlen(value);
+        char rebuilt[128] = { 0 };
+        size_t used = 0, offset = 0, lines = 0;
+        while (offset < total && lines < 32) {
+            const size_t fit = seedtool_render_fit_grouped(value + offset, 48);
+            if (!fit) {
+                return false; /* no progress: the walk would never end */
+            }
+            /* A whole number of groups unless this is the value's own tail. */
+            if (offset + fit < total && fit % SEEDTOOL_GROUP_LEN) {
+                return false;
+            }
+            if (used + fit >= sizeof(rebuilt)) {
+                return false;
+            }
+            memcpy(rebuilt + used, value + offset, fit);
+            used += fit;
+            offset += fit;
+            ++lines;
+        }
+        rebuilt[used] = '\0';
+        if (offset != total || strcmp(rebuilt, value) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The grouped line is centred with its gaps counted in, so it can run off an
+ * edge in a way the plain centred line cannot. Measured, not assumed. */
+static bool grouped_lines_clear_the_edges(void)
+{
+    static const char* const lines[] = { "bc1qw508d6qejxtdg4y5r3zarvary0", "bc1p5cyxnuxmeuwuvkwfem96lqzs" };
+    static const size_t first_group[] = { 0, 7, 14 };
+    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
+        /* The widest a line can be: fit_grouped's own answer for this value. */
+        char line[64] = { 0 };
+        const size_t fit = seedtool_render_fit_grouped(lines[i], 48);
+        memcpy(line, lines[i], fit);
+        const char* const shown[] = { line, line, line };
+        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
+            .confirm = "Continue",
+            .confirm_enabled = true,
+            .back = true,
+            .counter = "1/2" };
+        seedtool_render_nav_grouped(&nav, "m/84'/0'/0'/0/0", shown, first_group, 3);
+        const uint16_t* const pixels = seedtool_render_pixels();
+        for (int y = 30; y < 100; ++y) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH] != 0x0000
+                || pixels[y * SEEDTOOL_DISPLAY_WIDTH + SEEDTOOL_DISPLAY_WIDTH - 1] != 0x0000) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 static bool nav_chrome_bands_do_not_collide(void)
 {
     /* Twelve rows of the widest label review_and_confirm can build: two
@@ -2200,6 +2282,14 @@ static int self_test(void)
     }
     if (!backup_confirm_screen_lines_do_not_wrap()) {
         fputs("Origo backup confirmation screen self-test failed\n", stderr);
+        return 1;
+    }
+    if (!grouped_paging_preserves_the_value()) {
+        fputs("Origo grouped address paging self-test failed\n", stderr);
+        return 1;
+    }
+    if (!grouped_lines_clear_the_edges()) {
+        fputs("Origo grouped address geometry self-test failed\n", stderr);
         return 1;
     }
     if (!nav_chrome_bands_do_not_collide()) {

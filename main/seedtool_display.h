@@ -33,6 +33,8 @@ void seedtool_display_splash(void);
  * chrome itself is already carried by seedtool_nav_t. */
 void seedtool_display_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
+void seedtool_display_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
+    const size_t* first_group, size_t count);
 void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
 void seedtool_display_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);

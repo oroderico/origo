@@ -65,6 +65,17 @@ size_t seedtool_render_fit(const char* text, size_t limit);
  * they are paged with `seedtool_render_fit` instead, which loses nothing. */
 size_t seedtool_render_fit_row(const char* text);
 
+/* Characters per group. Four is the grouping every wallet that does this at
+ * all has settled on, and it divides the eye's span without making the gaps
+ * outnumber the text. */
+#define SEEDTOOL_GROUP_LEN 4
+
+/* How many characters of `text` fit one body line when it is drawn grouped -
+ * see seedtool_render_nav_grouped. Fewer than seedtool_render_fit allows,
+ * since the gaps between groups take width, and always a whole number of
+ * groups unless the value itself ends mid-group. */
+size_t seedtool_render_fit_grouped(const char* text, size_t limit);
+
 /* How many *trailing* characters of `text` fit one body line. A running
  * transcript is read from its end, where what was just entered is. */
 size_t seedtool_render_fit_tail(const char* text);
@@ -145,6 +156,20 @@ typedef struct {
  * also move its own text. */
 void seedtool_render_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
+
+/* The same chrome over a value drawn in groups of four, alternating between
+ * the body's own white and the theme's orange, with a gap at each boundary.
+ * For a Bitcoin address: an unbroken run of characters with no word shapes to
+ * count by, which is exactly what a reader transcribing it loses their place
+ * in. The space and the colour change each say where a group ends, so the
+ * grouping survives a reader who cannot tell the two inks apart.
+ *
+ * `first_group` gives, per line, how many groups came before it, so the
+ * alternation carries across the line break instead of restarting. The value
+ * passed in is never modified: this groups at draw time only, and what is
+ * compared or encoded elsewhere stays the unbroken string. */
+void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
+    const size_t* first_group, size_t count);
 
 /* Four left-aligned rows: a numbered word list, which reads as a table rather
  * than as centred blocks. */

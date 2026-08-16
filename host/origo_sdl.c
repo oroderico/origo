@@ -126,6 +126,13 @@ void seedtool_display_nav_text(
     present();
 }
 
+void seedtool_display_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
+    const size_t* first_group, const size_t count)
+{
+    seedtool_render_nav_grouped(nav, title, lines, first_group, count);
+    present();
+}
+
 void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, const size_t count)
 {
     seedtool_render_nav_rows(nav, title, rows, count);

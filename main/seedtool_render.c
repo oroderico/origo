@@ -389,6 +389,80 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
     return fit_in_wrapped(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
+/* A Bitcoin address is a single unbroken run of base58 or bech32, which is
+ * exactly the shape a reader loses their place in: no word boundaries, no
+ * repeated shapes to count by, and characters chosen to look unlike each
+ * other rather than to group. Drawn in fours with a gap and an alternating
+ * ink, the eye gets a place to rest every four characters and two independent
+ * signals for where one group ends - the space and the colour change - so
+ * neither carries the grouping alone.
+ *
+ * The address itself is never touched. Grouping happens at draw time only:
+ * what is compared, hashed and put in a QR is the same unbroken string it
+ * always was, and nothing downstream has to know to strip separators back
+ * out. */
+#define GROUP_LEN SEEDTOOL_GROUP_LEN
+#define GROUP_GAP 5
+
+/* Ink for the group at `index`, counted from the start of the whole value so
+ * the alternation carries across a line break rather than restarting. */
+static uint16_t group_ink(const size_t index) { return index % 2 ? COLOR_HIGHLIGHT : COLOR_WHITE; }
+
+/* `length` characters of `text` drawn in groups, centred on the line as a
+ * whole. `first_group` is how many groups came before this line. */
+static void draw_grouped(
+    const uint8_t* font, const char* text, const size_t length, const int y, const size_t first_group)
+{
+    int width = 0;
+    for (size_t i = 0; i < length; ++i) {
+        width += glyph_advance(font, (unsigned char)text[i]);
+    }
+    /* Every gap but the trailing one: a line ending on a group boundary would
+     * otherwise be centred as though it carried a group it does not. */
+    const size_t groups = (length + GROUP_LEN - 1) / GROUP_LEN;
+    if (groups > 1) {
+        width += (int)(groups - 1) * GROUP_GAP;
+    }
+    int x = (SEEDTOOL_DISPLAY_WIDTH - width) / 2;
+    if (x < 0) {
+        x = 0;
+    }
+    for (size_t i = 0; i < length; ++i) {
+        if (i && i % GROUP_LEN == 0) {
+            x += GROUP_GAP;
+        }
+        const uint16_t ink = group_ink(first_group + i / GROUP_LEN);
+        draw_glyph(font, (unsigned char)text[i], x, y, ink);
+        x += glyph_advance(font, (unsigned char)text[i]);
+    }
+}
+
+/* How many characters of `text` fit one line once the gaps are paid for.
+ * Rounded down to a whole number of groups, so a group is never split across
+ * a line and the alternation stays readable at the break - unless the value
+ * ends mid-group, which is the one short group allowed. */
+size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
+{
+    const int max_width = SEEDTOOL_DISPLAY_WIDTH - 4;
+    int width = 0;
+    size_t count = 0;
+    for (; count < limit && text[count]; ++count) {
+        int advance = glyph_advance(tft_Ubuntu16, (unsigned char)text[count]);
+        if (count && count % GROUP_LEN == 0) {
+            advance += GROUP_GAP;
+        }
+        if (width + advance > max_width) {
+            break;
+        }
+        width += advance;
+    }
+    if (text[count] && count >= GROUP_LEN) {
+        count -= count % GROUP_LEN;
+    }
+    return count;
+}
+
+
 size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
 size_t seedtool_render_fit_tail(const char* text)
@@ -681,6 +755,22 @@ void seedtool_render_nav_text(
     } else {
         draw_centered(tft_Ubuntu16, line1, 39);
         draw_centered(tft_Ubuntu16, line2, 65);
+    }
+    nav_end(nav);
+}
+
+void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
+    const size_t* first_group, const size_t count)
+{
+    nav_begin(nav, title);
+    /* The three-line pitch, always: an address is long enough to want the
+     * lines and short enough to fit them, and holding one layout keeps a
+     * two-line page from moving its text when a third line appears. */
+    static const int y[] = { 33, 58, 83 };
+    for (size_t i = 0; i < count && i < 3; ++i) {
+        if (lines[i] && lines[i][0]) {
+            draw_grouped(tft_Ubuntu16, lines[i], strlen(lines[i]), y[i], first_group[i]);
+        }
     }
     nav_end(nav);
 }
