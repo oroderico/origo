@@ -1713,16 +1713,21 @@ static int revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t 
  * seedtool_validate_mnemonic yet - the checksum gate belongs only where the
  * mnemonic is meant to be whole and correct, which is why that flow reviews
  * through review_prefix instead.
- * join_words and seedtool_validate_mnemonic are the same pair review_and_
- * confirm itself calls every time it redraws; reused once more here, before
- * the first draw, so an invalid checksum is announced up front rather than
- * only implied by "Review words" silently reading "Review - fix a word"
- * instead - the inert "Checksum invalid" row this screen used to carry (see
- * "Drop the inert 'Checksum invalid' row from word review") was removed for
- * being a dead click, not because the reader shouldn't be told; a one-shot
- * acknowledge, the same widget restore_seed's own "Checksum valid" already
- * uses for the opposite verdict, says it without adding a row that does
- * nothing when picked. */
+ *
+ * No checksum is announced here, and the absence is deliberate: there is
+ * nothing left for it to announce. The last word of a whole mnemonic is
+ * entered under seedtool_final_word_candidates, both keyboards narrow to that
+ * set rather than merely displaying it, and stepping back clears the word so
+ * the last one is always entered last against a filter rebuilt from the words
+ * currently standing. What leaves enter_mnemonic_words with success has a
+ * checksum that holds.
+ *
+ * A one-shot notice did stand here, from before that filter existed, and its
+ * own commit said the check was being moved to where it prevents the mistake
+ * instead of reporting it. Only the moving happened. Restoring it would mean
+ * restoring a screen no input can reach - and the reader is not left without a
+ * gate either way, since review_and_confirm still reads the checksum on every
+ * redraw and keeps Continue untakeable while it fails. */
 static int restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number,
     char* mnemonic, const size_t mnemonic_len, bool resume)
 {
@@ -1736,10 +1741,6 @@ static int restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_L
             const int entered = enter_mnemonic_words(count, words, by_number);
             if (entered != 1) {
                 return entered;
-            }
-            if (join_words(words, count, mnemonic, mnemonic_len)
-                && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
-                notice("Invalid checksum", "Check your words", "Fix one to continue");
             }
         }
         resume = false;
