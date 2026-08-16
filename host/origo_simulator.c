@@ -1714,6 +1714,92 @@ static bool grouped_paging_preserves_the_value(void)
     return true;
 }
 
+/* The QR screen draws the address beside the code, and the margin it has is
+ * not always enough: a taproot address is 62 characters against the 48 two
+ * columns of four hold there. seedtool_render_qr_address must refuse those
+ * outright rather than draw as far as it reaches, because an address cut off
+ * mid-value looks exactly like one that ended there and nothing on screen
+ * says otherwise. This is the check grouped_paging_preserves_the_value does
+ * not make: that one walks seedtool_render_fit_grouped, the paged path at the
+ * body face, and says nothing about groups drawn by any other route. The first
+ * version of this screen truncated a taproot address to 48 of its characters
+ * with every other check still passing.
+ *
+ * Proving the tail is drawn without restating the renderer's own geometry:
+ * change only the value's last group and the margin must change with it. The
+ * margin is everything left of the code, found by looking for the first column
+ * carrying a run of white tall enough to be the code itself rather than a line
+ * of text. */
+static int qr_code_left_edge(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+        int run = 0;
+        for (int y = 0; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+            run = pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0xffff ? run + 1 : 0;
+            if (run > 40) {
+                return x;
+            }
+        }
+    }
+    return -1;
+}
+
+static bool qr_address_draws_every_group(void)
+{
+    static const char* const fits[] = {
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2",
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+    };
+    static uint16_t before[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
+
+    for (size_t v = 0; v < sizeof(fits) / sizeof(fits[0]); ++v) {
+        const char* const value = fits[v];
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", value)) {
+            return false; /* these do fit; refusing them is its own failure */
+        }
+        const int edge = qr_code_left_edge();
+        if (edge <= 0) {
+            return false;
+        }
+        memcpy(before, seedtool_render_pixels(), sizeof(before));
+
+        /* The same value with its last group altered, same length so the code
+         * keeps its version and the margin keeps its width. */
+        char altered[80] = { 0 };
+        const size_t total = strlen(value);
+        if (total + 1 > sizeof(altered) || total < SEEDTOOL_GROUP_LEN) {
+            return false;
+        }
+        memcpy(altered, value, total);
+        for (size_t i = total - SEEDTOOL_GROUP_LEN; i < total; ++i) {
+            altered[i] = altered[i] == 'q' ? 'p' : 'q';
+        }
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", altered)) {
+            return false;
+        }
+        const uint16_t* const after = seedtool_render_pixels();
+
+        bool margin_changed = false;
+        for (int y = 0; y < SEEDTOOL_DISPLAY_HEIGHT && !margin_changed; ++y) {
+            for (int x = 0; x < edge; ++x) {
+                if (before[y * SEEDTOOL_DISPLAY_WIDTH + x] != after[y * SEEDTOOL_DISPLAY_WIDTH + x]) {
+                    margin_changed = true;
+                    break;
+                }
+            }
+        }
+        if (!margin_changed) {
+            return false; /* the tail was never drawn */
+        }
+    }
+
+    /* And the one the margin cannot hold, which must say so rather than clip. */
+    return !seedtool_render_qr_address(
+        "m/86'/0'/0'/0/0", "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr");
+}
+
 /* The grouped line is centred with its gaps counted in, so it can run off an
  * edge in a way the plain centred line cannot. Measured, not assumed. */
 static bool grouped_lines_clear_the_edges(void)
@@ -2345,6 +2431,10 @@ static int self_test(void)
     }
     if (!grouped_lines_clear_the_edges()) {
         fputs("Origo grouped address geometry self-test failed\n", stderr);
+        return 1;
+    }
+    if (!qr_address_draws_every_group()) {
+        fputs("Origo address-beside-QR self-test failed\n", stderr);
         return 1;
     }
     if (!nav_chrome_bands_do_not_collide()) {

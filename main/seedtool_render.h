@@ -243,6 +243,11 @@ size_t seedtool_layout_center(const char* layout);
 
 bool seedtool_render_qr(const char* title, const char* text);
 
+/* The same code, with its derivation path and the value itself drawn in the
+ * margin beside it - for an address, where the code and the text are two halves
+ * of one fact and were on two screens. */
+bool seedtool_render_qr_address(const char* title, const char* text);
+
 /* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
  * fit in one frame at `max_version` and ECC_LOW -- the same error-correction
  * level every other QR this firmware draws already commits to. What a

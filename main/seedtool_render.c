@@ -1304,19 +1304,43 @@ static qr_geometry_t qr_geometry(const int modules)
  * carrying the chrome's three states: every QR screen leaves on the chord from
  * wherever the reader is, so the arrow is not a cursor position to move to -
  * it is a label for what the chord already does. */
+/* One control's box in the margin, drawn the way the header's are: filled when
+ * it is where the cursor sits, outlined when it is not. */
+static void draw_qr_control(const int y, const triangle_dir_t dir, const bool selected)
+{
+    if (selected) {
+        fill_rect(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+    }
+    draw_border(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
+    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2, y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2,
+        NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, dir, selected ? COLOR_BLACK : COLOR_WHITE);
+}
+
+/* The only control a QR screen with nothing after it carries. Always drawn
+ * filled: it is not a cursor position, since those screens leave on the chord
+ * from wherever the reader is - it is a label for what that chord does. */
 static void draw_qr_back(void)
 {
-    fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
-    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
-        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
-        COLOR_BLACK);
+    draw_qr_control(NAV_BACK_Y, TRIANGLE_LEFT, true);
+}
+
+/* Back at the top of the margin, forward at the bottom, stacked the way the
+ * two buttons are: up reaches the way out, down reaches what comes next. For a
+ * QR that has somewhere to go on to - an address, whose text is a screen the
+ * reader may want and mostly does not. */
+#define QR_FORWARD_Y (SEEDTOOL_DISPLAY_HEIGHT - NAV_BACK_Y - NAV_BACK_HEIGHT)
+
+static void draw_qr_nav(const size_t selected)
+{
+    draw_qr_control(NAV_BACK_Y, TRIANGLE_LEFT, selected == SEEDTOOL_NAV_BACK);
+    draw_qr_control(QR_FORWARD_Y, TRIANGLE_RIGHT, selected == SEEDTOOL_NAV_CONFIRM);
 }
 
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
  * `qr`'s modules are populated, whichever encoder filled them. `modules` is
  * only needed back to zero it once drawn — it held whatever the mnemonic or
  * key material was encoded as. */
-static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
+static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t* selected)
 {
     /* The code sits left with its quiet zone intact and the title goes in the
      * margin beside it: on a screen that steps through several codes, one that
@@ -1342,12 +1366,18 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
-    draw_qr_back();
+    if (selected) {
+        draw_qr_nav(*selected);
+    } else {
+        draw_qr_back();
+    }
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
 
-bool seedtool_render_qr(const char* title, const char* text)
+/* Shared by the plain QR and the one that carries a forward control: `selected`
+ * NULL draws only the way out. */
+static bool render_qr_text(const char* title, const char* text, const size_t* selected)
 {
     /* Drawn at the smallest version that actually holds `text` -- like
      * seedtool_render_qr_bytes already does for Compact SeedQR -- rather than
@@ -1366,7 +1396,109 @@ bool seedtool_render_qr(const char* title, const char* text)
         memset(modules, 0, sizeof(modules));
         return false;
     }
-    return draw_qr(&qr, modules, title);
+    return draw_qr(&qr, modules, title, selected);
+}
+
+bool seedtool_render_qr(const char* title, const char* text) { return render_qr_text(title, text, NULL); }
+
+/* Two groups to a line, so the address falls into a fixed block rather than
+ * into however many groups a margin happens to hold: a reader checking one
+ * against paper or a scanner reads the same shape every time, and the ragged
+ * last line is the only thing that varies. A 42-character bech32 address comes
+ * out as five full lines and a short sixth. */
+#define QR_ADDRESS_GROUPS 2
+
+/* The code, its derivation path and the address itself, on one screen. The
+ * margin the right-aligned code leaves is tall enough to hold all three: the
+ * way out at the top, then the path, then the address under it in the same
+ * groups of four the paged view uses, so a reader checking the screen against
+ * a scanner or against paper reads the same shape either way.
+ *
+ * The address is drawn in the small face rather than the body one - it is here
+ * to be checked against something, not transcribed from. */
+bool seedtool_render_qr_address(const char* title, const char* text)
+{
+    const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
+    if (!version) {
+        return false;
+    }
+    const qr_geometry_t g = qr_geometry(17 + 4 * version + 2);
+
+    const int text_top = NAV_BACK_Y + NAV_BACK_HEIGHT + 6 + 2 * tft_DefaultFont[1] + 2;
+    const size_t total = strlen(text);
+
+    /* A real grid, not centred lines. The face is proportional, so groups of
+     * the same length are not the same width - centring each line would start
+     * every one at its own x and the block would read as ragged on both edges.
+     * Each column is as wide as the widest group in this value, and every
+     * group is drawn from its column's own left edge. */
+    int column = 0;
+    for (size_t i = 0; i < total; i += GROUP_LEN) {
+        const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
+        int width = 0;
+        for (size_t j = 0; j < run; ++j) {
+            width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+        }
+        if (width > column) {
+            column = width;
+        }
+    }
+    const int block_width = QR_ADDRESS_GROUPS * column + (QR_ADDRESS_GROUPS - 1) * GROUP_GAP;
+
+    /* Checked before a single pixel is drawn, and the whole reason this
+     * returns a bool. A value that does not fit here must send the caller
+     * somewhere it does fit, not be drawn as far as the margin reaches: an
+     * address cut off at the sixth line looks exactly like an address that
+     * ended there, and the reader has no way to tell. A taproot address is
+     * the case that does not fit - 62 characters against the 48 two columns
+     * of four hold in this margin. */
+    const int step = tft_DefaultFont[1] + 2;
+    const size_t lines = (total + QR_ADDRESS_GROUPS * GROUP_LEN - 1) / (QR_ADDRESS_GROUPS * GROUP_LEN);
+    if (block_width > g.title_width || text_top + (int)lines * step > SEEDTOOL_DISPLAY_HEIGHT) {
+        return false;
+    }
+
+    if (!seedtool_render_qr(NULL, text)) {
+        return false;
+    }
+    int y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
+    /* A blank line between the path and the value: they are two different
+     * facts, and run together they read as one wrapped string. */
+    y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, y) + tft_DefaultFont[1] + 2;
+
+    int left = g.title_x + (g.title_width - block_width) / 2;
+    if (left < g.title_x) {
+        left = g.title_x;
+    }
+
+    for (size_t i = 0; i < total; i += GROUP_LEN) {
+        const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
+        const size_t slot = (i / GROUP_LEN) % QR_ADDRESS_GROUPS;
+        /* A last line that does not fill its columns is centred on the block
+         * instead of left in column one: the grid is there to be read down,
+         * and a lone group hanging off the left edge reads as a column that
+         * lost its partner rather than as the end of the value. */
+        const bool last_line = i + GROUP_LEN >= total && slot == 0;
+        int x;
+        if (last_line) {
+            int width = 0;
+            for (size_t j = 0; j < run; ++j) {
+                width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+            }
+            x = left + (block_width - width) / 2;
+        } else {
+            x = left + (int)slot * (column + GROUP_GAP);
+        }
+        const uint16_t ink = group_ink(i / GROUP_LEN);
+        for (size_t j = 0; j < run; ++j) {
+            draw_glyph(tft_DefaultFont, (unsigned char)text[i + j], x, y, ink);
+            x += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+        }
+        if (slot + 1 == QR_ADDRESS_GROUPS) {
+            y += tft_DefaultFont[1] + 2;
+        }
+    }
+    return true;
 }
 
 size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
@@ -1404,7 +1536,7 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size
         memset(modules, 0, sizeof(modules));
         return false;
     }
-    return draw_qr(&qr, modules, title);
+    return draw_qr(&qr, modules, title, NULL);
 }
 
 /* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own

@@ -833,13 +833,6 @@ static bool page_text(const char* title, const char* text)
     return page_text_impl(title, text, true, false);
 }
 
-/* page_text for a value with no word shapes to read by - an address. Drawn in
- * groups of four so the reader transcribing it has somewhere to keep their
- * place; the string itself is untouched. */
-static bool page_grouped(const char* title, const char* text)
-{
-    return page_text_impl(title, text, true, true);
-}
 
 /* Paged text there is nothing to take. Returns nothing because there is
  * nothing to return: the reader pages down and leaves by the arrow, and a
@@ -1945,19 +1938,35 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
     seedtool_zero(value, sizeof(value));
 }
 
-/* A single address's own QR, opened from the address list: no account key in
- * this view to warn about or to carousel over to, since a photo of one
- * address on its own reveals nothing the address itself did not already. */
+/* A single address's own QR, and the first thing opening an address shows: no
+ * account key in this view to warn about or to carousel over to, since a photo
+ * of one address on its own reveals nothing the address itself did not
+ * already. Scanning is what a reader almost always came for, so the code, its
+ * path and the address itself share one screen rather than two.
+ *
+ * Not every address fits beside its code: a taproot address is 62 characters
+ * against the 48 the margin holds. seedtool_display_qr_address refuses those
+ * rather than drawing as far as it reaches - an address cut off mid-value
+ * looks exactly like one that ended there - and they fall back to the code
+ * alone, then the paged text, which has the width for them. */
 static void show_address_qr(const char* title, const char* address)
 {
     for (;;) {
+        if (seedtool_display_qr_address(title, address)) {
+            if (wait_key() == KEY_REDRAW) {
+                continue;
+            }
+            return;
+        }
         if (!seedtool_display_qr(title, address)) {
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
-        if (wait_key() != KEY_REDRAW) {
-            return;
+        if (wait_key() == KEY_REDRAW) {
+            continue;
         }
+        (void)page_text_impl(title, address, false, true);
+        return;
     }
 }
 
@@ -2238,9 +2247,11 @@ static void show_addresses(
          * make. */
         char path[sizeof(prefix) + 12];
         (void)snprintf(path, sizeof(path), "%s/%u", prefix, (unsigned)index);
-        if (page_grouped(path, address)) {
-            show_address_qr(path, address);
-        }
+        /* One screen: the code, its path, and the address itself beside it.
+         * Opening an address used to land on the text and reach the QR through
+         * it, which cost a step to the reader who came to scan - and left the
+         * two halves of the same fact on separate screens. */
+        show_address_qr(path, address);
         seedtool_zero(address, sizeof(address));
     }
     seedtool_zero(addresses, sizeof(addresses));
