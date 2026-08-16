@@ -107,6 +107,10 @@ seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
 #define SEEDTOOL_NAV_BACK SIZE_MAX
 #define SEEDTOOL_NAV_CONFIRM (SIZE_MAX - 1)
 #define SEEDTOOL_NAV_BODY (SIZE_MAX - 2)
+/* The QR's own second control, which cycles how bright its light half is. Only
+ * a QR screen has one, so it names itself here rather than borrowing CONFIRM,
+ * which would claim the reader had agreed to something. */
+#define SEEDTOOL_NAV_SHADE (SIZE_MAX - 3)
 
 /* The chrome a nav screen wears: a back arrow at the top left, in the title
  * bar where it costs no row, and a confirm bar along the bottom. Both sit in
@@ -241,12 +245,27 @@ char seedtool_layout_key(const char* layout, size_t index);
  * corner is the furthest possible place to start from. */
 size_t seedtool_layout_center(const char* layout);
 
+/* Cycles the shade of the light half of every QR this file draws, one step
+ * darker each time and back to white after the darkest - a ring, because the
+ * control that drives it is a single button pressed repeatedly rather than a
+ * pair of keys with a direction each. The dark modules do not move: what
+ * changes is how bright the field they sit on is, which is what a phone's
+ * exposure meters. A white block on this panel makes some cameras stop down
+ * until the code stops resolving, and a dimmer one is what they lock onto; in
+ * daylight it is the other way about. Starts at white, so a QR nobody touches
+ * is drawn exactly as it was before this existed. */
+void seedtool_render_qr_cycle_shade(void);
+
 bool seedtool_render_qr(const char* title, const char* text);
 
 /* The same code, with its derivation path and the value itself drawn in the
  * margin beside it - for an address, where the code and the text are two halves
- * of one fact and were on two screens. */
-bool seedtool_render_qr_address(const char* title, const char* text);
+ * of one fact and were on two screens.
+ *
+ * `selected` is SEEDTOOL_NAV_BACK or SEEDTOOL_NAV_SHADE: this screen is the one
+ * QR that carries two controls, so unlike the others it needs a cursor to say
+ * which of them the chord would take. */
+bool seedtool_render_qr_address(const char* title, const char* text, size_t selected);
 
 /* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
  * fit in one frame at `max_version` and ECC_LOW -- the same error-correction

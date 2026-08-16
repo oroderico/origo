@@ -1949,11 +1949,31 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
  * rather than drawing as far as it reaches - an address cut off mid-value
  * looks exactly like one that ended there - and they fall back to the code
  * alone, then the paged text, which has the width for them. */
+/* A phone that will not lock onto a white block often locks onto a dimmer one,
+ * so this screen carries a second control beside the way out: the chord on it
+ * cycles how bright the code's light half is drawn, and pressing it again
+ * keeps going round. A control rather than a pair of keys because the QR
+ * screens that animate - the account key's BBQr frames, the Compact SeedQR
+ * carousel - already spend up and down on stepping, and a shade bound to those
+ * keys could never follow the shade anywhere it is most needed.
+ *
+ * Up and down move between the two controls, the chord takes whichever is
+ * highlighted: the same two sentences as every other screen on the device. */
 static void show_address_qr(const char* title, const char* address)
 {
+    size_t selected = SEEDTOOL_NAV_BACK;
     for (;;) {
-        if (seedtool_display_qr_address(title, address)) {
-            if (wait_key() == KEY_REDRAW) {
+        if (seedtool_display_qr_address(title, address, selected)) {
+            const seedtool_key_t key = wait_key();
+            if (key == KEY_PREV || key == KEY_NEXT) {
+                selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
+                continue;
+            }
+            if (key == KEY_REDRAW) {
+                continue;
+            }
+            if (key == KEY_SELECT && selected == SEEDTOOL_NAV_SHADE) {
+                seedtool_render_qr_cycle_shade();
                 continue;
             }
             return;
@@ -1962,6 +1982,9 @@ static void show_address_qr(const char* title, const char* address)
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
+        /* The fallback keeps the chrome it always had - one way out, and the
+         * text after it - since the value that lands here is the one with no
+         * room left in the margin for a second control. */
         if (wait_key() == KEY_REDRAW) {
             continue;
         }

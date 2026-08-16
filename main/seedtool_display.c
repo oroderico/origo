@@ -265,9 +265,9 @@ bool seedtool_display_qr(const char* title, const char* text)
     return ok;
 }
 
-bool seedtool_display_qr_address(const char* title, const char* text)
+bool seedtool_display_qr_address(const char* title, const char* text, const size_t selected)
 {
-    const bool ok = seedtool_render_qr_address(title, text);
+    const bool ok = seedtool_render_qr_address(title, text, selected);
     if (ok) {
         flush();
     }
