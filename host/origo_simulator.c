@@ -1632,6 +1632,11 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
         { "Poor entropy!", "128 of 128 bits", NULL, "Proceed anyway" },
         { "Pattern detected!", NULL, NULL, "Proceed anyway" },
+        /* The coin-word run's reflip warning, the widest question it builds
+         * and the widest subject under it. This table claims to hold every
+         * screen on the chrome and did not hold this one: the screen arrived
+         * with the coin-word method, after the table was written. */
+        { "Flip word 23 again?", "2048  mosquito", "These flips are lost", "Flip again" },
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {

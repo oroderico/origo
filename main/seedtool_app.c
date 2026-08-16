@@ -191,45 +191,10 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
-/* Every choice in the firmware is made here, on a list that shows five options
- * at once. Which rows are on screen follows from the count and the selection
- * alone, so a choice screen is reproducible from what the user has done.
- * `hint` is false only for the Origo menu: the very first screen after the
- * splash is not the place to also be teaching the chord, and every screen
- * reachable from it already carries its own hint until the chord is learned. */
-static int choose_at(const char* title, const char* const* items, const size_t count, const bool hint,
-    const size_t initial)
-{
-    size_t selected = initial < count ? initial : 0, top = 0;
-    for (;;) {
-        /* No page counter here: choosing among options isn't paging through
-         * content, and the scrollbar (seedtool_render_list, gated the same way
-         * on count > SEEDTOOL_LIST_ROWS) already shows position when the list
-         * doesn't fit on screen. */
-        const char* const footer = (hint && !chord_learned) ? NAV_FOOTER : "";
-        top = seedtool_list_top(count, selected, top);
-        seedtool_display_list(title, items, count, selected, top, footer);
-        switch (wait_key()) {
-        case KEY_SELECT:
-            return (int)selected;
-        case KEY_PREV:
-            selected = (selected + count - 1) % count;
-            break;
-        case KEY_NEXT:
-            selected = (selected + 1) % count;
-            break;
-        case KEY_REDRAW:
-            break;
-        default:
-            return -1;
-        }
-    }
-}
 
-/* Outcomes of choose_nav, alongside a non-negative item index. Distinct from
- * choose_at's -1-or-index, because a nav screen has to tell three ways out
- * apart rather than two: the reader left through the arrow, the reader took
- * the confirm bar, or nobody was there. */
+/* Outcomes of choose_nav, alongside a non-negative item index. Three ways out
+ * rather than the two a plain index-or-error would carry: the reader left
+ * through the arrow, the reader took the confirm bar, or nobody was there. */
 #define NAV_TIMEOUT (-1)
 #define NAV_BACK (-2)
 #define NAV_CONFIRM (-3)
@@ -237,25 +202,31 @@ static int choose_at(const char* title, const char* const* items, const size_t c
 /* The nav chrome's ring, laid out the way the screen is: the back arrow at the
  * top, then the items, then the confirm bar at the bottom. Moving down off the
  * last one wraps to the first, as every list here already does. */
-static size_t nav_ring_size(const size_t count, const bool confirm_enabled)
+/* The ring the cursor walks: the arrow, then the items, then the confirm bar,
+ * with either end absent on a screen that does not offer it. `back` is false
+ * only for the two screens with no level above them, which is why the arrow's
+ * slot is counted rather than assumed. */
+static size_t nav_ring_size(const size_t count, const bool confirm_enabled, const bool back)
 {
-    return count + 1 + (confirm_enabled ? 1 : 0);
+    return count + (back ? 1 : 0) + (confirm_enabled ? 1 : 0);
 }
 
-static size_t nav_position(const size_t selected, const size_t count)
+static size_t nav_position(const size_t selected, const size_t count, const bool back)
 {
     if (selected == SEEDTOOL_NAV_BACK) {
         return 0;
     }
-    return selected == SEEDTOOL_NAV_CONFIRM ? count + 1 : selected + 1;
+    const size_t offset = back ? 1 : 0;
+    return selected == SEEDTOOL_NAV_CONFIRM ? count + offset : selected + offset;
 }
 
-static size_t nav_selection(const size_t position, const size_t count)
+static size_t nav_selection(const size_t position, const size_t count, const bool back)
 {
-    if (!position) {
+    if (back && !position) {
         return SEEDTOOL_NAV_BACK;
     }
-    return position > count ? SEEDTOOL_NAV_CONFIRM : position - 1;
+    const size_t index = back ? position - 1 : position;
+    return index >= count ? SEEDTOOL_NAV_CONFIRM : index;
 }
 
 /* The one loop behind every screen whose only controls are the arrow and the
@@ -336,17 +307,27 @@ static void notice(const char* title, const char* one, const char* two, const ch
  *
  * No footer hint: the controls are on screen, and the bar is standing where
  * the hint used to be drawn. Any screen converted to this chrome is reached
- * well past the menus that teach the chord. */
+ * well past the menus that teach the chord.
+ *
+ * `back` is false for the two screens with nowhere to go up to. The Origo menu
+ * has no level above it, and the wallet's only exit erases the session and
+ * reboots - putting that on the arrow would give a control that is cheap and
+ * reversible everywhere else a destructive meaning here, one press from any
+ * row. Both keep their exit as a row the reader has to travel to and take, and
+ * wear the rest of the chrome. A screen with somewhere to go back to gets an
+ * arrow; a screen without one does not pretend. */
 static int choose_nav(const char* title, const char* const* items, const size_t count, const char* confirm,
-    const bool confirm_enabled, size_t* const cursor)
+    const bool confirm_enabled, const bool back, size_t* const cursor)
 {
     size_t top = 0;
     /* A cursor left on a control this draw does not offer - the confirm bar
-     * of a screen that has since become unconfirmable, or an item index from
-     * a longer list - falls back to the arrow, which is always there. */
+     * of a screen that has since become unconfirmable, an item index from a
+     * longer list, or the arrow on a screen that has none - falls back to the
+     * first item, which every list has. */
     if ((*cursor == SEEDTOOL_NAV_CONFIRM && !confirm_enabled)
+        || (*cursor == SEEDTOOL_NAV_BACK && !back)
         || (*cursor != SEEDTOOL_NAV_CONFIRM && *cursor != SEEDTOOL_NAV_BACK && *cursor >= count)) {
-        *cursor = SEEDTOOL_NAV_BACK;
+        *cursor = back ? SEEDTOOL_NAV_BACK : 0;
     }
     for (;;) {
         if (*cursor != SEEDTOOL_NAV_BACK && *cursor != SEEDTOOL_NAV_CONFIRM) {
@@ -356,11 +337,11 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             .selected = *cursor,
             .confirm = confirm,
             .confirm_enabled = confirm_enabled,
-            .back = true,
+            .back = back,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
-        const size_t ring = nav_ring_size(count, confirm_enabled);
-        size_t position = nav_position(*cursor, count);
+        const size_t ring = nav_ring_size(count, confirm_enabled, back);
+        size_t position = nav_position(*cursor, count, back);
         switch (wait_key()) {
         case KEY_SELECT:
             if (*cursor == SEEDTOOL_NAV_BACK) {
@@ -368,10 +349,10 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             }
             return *cursor == SEEDTOOL_NAV_CONFIRM ? NAV_CONFIRM : (int)*cursor;
         case KEY_PREV:
-            *cursor = nav_selection((position + ring - 1) % ring, count);
+            *cursor = nav_selection((position + ring - 1) % ring, count, back);
             break;
         case KEY_NEXT:
-            *cursor = nav_selection((position + 1) % ring, count);
+            *cursor = nav_selection((position + 1) % ring, count, back);
             break;
         case KEY_REDRAW:
             break;
@@ -432,7 +413,7 @@ static seedtool_nav_t page_nav(const size_t position, const size_t pages, const 
  * confirm for the usual default to land on, and the options are the point. */
 static int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
-    const int selected = choose_nav(title, items, count, NULL, false, cursor);
+    const int selected = choose_nav(title, items, count, NULL, false, true, cursor);
     if (selected == NAV_BACK) {
         return (int)count;
     }
@@ -445,26 +426,6 @@ static int choose_menu(const char* title, const char* const* items, const size_t
     return choose_menu_at(title, items, count, &cursor);
 }
 
-/* A menu that reopens where it was left rather than at its first row. Every
- * looping menu here wants this: the row just chosen is the one whose result
- * the reader is coming back from, and it is far more often the neighbour of
- * their next choice than the top of the list is. `cursor` lives in the
- * caller's frame for as long as that screen does, so a fresh visit still
- * starts at the top - the same span the address list keeps its own position
- * over, and for the same reason.
- *
- * Back and a timeout leave `cursor` alone: they end the screen, so there is
- * nothing to come back to, and writing the Back row's index there would mean
- * a screen re-entered later opened on the way out of itself. */
-static int choose_kept(
-    const char* title, const char* const* items, const size_t count, const bool hint, size_t* cursor)
-{
-    const int selected = choose_at(title, items, count, hint, *cursor);
-    if (selected >= 0) {
-        *cursor = (size_t)selected;
-    }
-    return selected;
-}
 
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
@@ -615,10 +576,10 @@ static int enter_value(const char* title, const unsigned position, const unsigne
  * with no carousel to spend a keypress paging through it, showing passively
  * more of what was just flipped is pure upside.
  *
- * No footer hint: NAV_FOOTER's "L/R move BOTH select" would be wrong here —
- * L/R commit a choice rather than moving one, and BOTH undoes rather than
- * selects — and every path that reaches this screen already went through at
- * least one chord-gated menu first, so chord_learned is always true by then
+ * No footer hint: NAV_FOOTER's "Up/Down move BOTH select" would be wrong here —
+ * up and down commit a choice rather than moving one, and BOTH undoes rather
+ * than selects — and every path that reaches this screen already went through
+ * at least one chord-gated menu first, so chord_learned is always true by then
  * anyway. */
 static int enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
     const char* history, const seedtool_progress_t* progress)
@@ -1495,7 +1456,7 @@ static const char* review_items[24];
 /* Lets the reader jump straight to any already-entered word and fix it,
  * rather than losing the other 11 or 23 correct ones over a single mistake -
  * restore_seed used to just discard the whole entry and show "INVALID
- * CHECKSUM" with no way back in. A scrolling list (choose_at, cursor
+ * CHECKSUM" with no way back in. A scrolling list (choose_nav, cursor
  * persisted across edits), the same widget and pattern the address list
  * already uses to pick one item out of several to inspect or act on -
  * coherence with the rest of the app mattered more here than the carousel's
@@ -1552,7 +1513,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
          * does not appear and disappear under them as words are fixed - the
          * title carries the verdict, as it already did. */
         const int selected = choose_nav(
-            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, &cursor);
+            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, true, &cursor);
         if (selected == NAV_TIMEOUT) {
             outcome = -1;
             goto done;
@@ -1627,7 +1588,7 @@ static int review_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t c
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
         }
-        const int selected = choose_nav("Review words", review_items, count, "Continue", true, &cursor);
+        const int selected = choose_nav("Review words", review_items, count, "Continue", true, true, &cursor);
         if (selected == NAV_TIMEOUT) {
             outcome = -1;
             goto done;
@@ -1823,7 +1784,12 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
 static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
 {
-    if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", false)) {
+    /* Opens on the arrow, like every other screen whose purpose is the
+     * warning on it: what this shows reveals every address of the account,
+     * past and future, to anyone who photographs it. That is the same kind of
+     * claim Compact SeedQR makes, and it earns the same treatment - the way
+     * forward is not preselected on a screen that exists to say wait. */
+    if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", true)) {
         return;
     }
     char title[24];
@@ -1861,8 +1827,10 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
 static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
+    /* On the arrow, for the reason the QR export above gives: it carries the
+     * same account key and so the same warning. */
     if (!nav_acknowledge(
-            "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor", false)) {
+            "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor", true)) {
         return;
     }
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
@@ -2503,7 +2471,11 @@ static void show_wallet_data(const char* mnemonic)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
-        const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
+        /* The chrome without an arrow: there is no level above a loaded
+         * wallet, and its only exit erases the session. That stays a row the
+         * reader travels to rather than a control one press from anywhere. */
+        const int selected
+            = choose_nav(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         /* Both ways out of a wallet session reboot: the row, and the timeout
          * that means the reader walked away from a device with a seed on it.
          * Unwinding instead would leave every buffer between here and the main
@@ -3586,7 +3558,12 @@ void seedtool_run(void)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
-        const int selected = choose_kept("Origo", menu, sizeof(menu) / sizeof(menu[0]), false, &cursor);
+        /* No arrow: this is the top, and the only way past it is the board's
+         * own reset. It never carried the chord hint either - it is the first
+         * screen after the splash, and teaching two things at once was already
+         * ruled out - so wearing the chrome costs it nothing it had. */
+        const int selected
+            = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {
