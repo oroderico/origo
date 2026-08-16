@@ -4,3 +4,9 @@ sdkconfig.old
 __pycache__/
 *.py[cod]
 
+# Local tooling and reference material, not part of the firmware or its
+# audit chain - kept off the repo so the tree stays the size the README
+# claims it is.
+.claude/
+jade/
+
