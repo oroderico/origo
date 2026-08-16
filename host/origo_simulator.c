@@ -1476,6 +1476,297 @@ static bool backup_confirm_screen_lines_do_not_wrap(void)
     return true;
 }
 
+/* Lit rows of the nav chrome, scanned band by band. The chrome packs a title
+ * bar, three list rows and a confirm bar into 135 pixels with single-digit
+ * gaps between them, and draw_centered_box wraps rather than clips - so a
+ * title or a button label one word too long lands in the band below instead
+ * of running off the glass, exactly the failure the dice-hint check above
+ * exists for. Bands are the geometry in seedtool_render.c (NAV_BACK_HEIGHT,
+ * LIST_TOP, NAV_ROW_HEIGHT, NAV_BAR_Y), kept in sync with the numbers here. */
+static bool nav_band_is_clear(const int from, const int to)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    for (int y = from; y < to; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* Nothing lit at or right of `x` in the title band. Measured on the right
+ * rather than over the arrow on the left, because that is the side a title too
+ * wide for its column shows up on: draw_centered_box centres by an offset it
+ * clamps at zero, so an overlong line starts hard against its left edge and
+ * runs off the right one. A title that clears this has cleared the arrow. */
+static bool nav_title_stays_in_its_column(const int x)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    for (int y = 0; y < 20; ++y) {
+        for (int column = x; column < SEEDTOOL_DISPLAY_WIDTH; ++column) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + column] != 0x0000) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* The confirm bar's band (NAV_BAR_Y..the bottom of the glass), with its label
+ * required to stay a few pixels clear of both edges. */
+/* NAV_BAR_Y in seedtool_render.c, kept in sync with this. */
+#define NAV_BAR_BAND_Y 118
+
+static bool nav_bar_label_fits(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    int leftmost = SEEDTOOL_DISPLAY_WIDTH, rightmost = -1;
+    for (int y = NAV_BAR_BAND_Y; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0x0000) {
+                continue;
+            }
+            /* The rule drawn along the top of an unfilled bar spans the whole
+             * width and is not the label; skipped by row, not by colour, so a
+             * label sharing the rule's colour still counts. */
+            if (y == NAV_BAR_BAND_Y) {
+                continue;
+            }
+            if (x < leftmost) {
+                leftmost = x;
+            }
+            if (x > rightmost) {
+                rightmost = x;
+            }
+        }
+    }
+    if (rightmost < 0) {
+        return false; /* the label never reached the screen */
+    }
+    return leftmost >= 4 && rightmost <= SEEDTOOL_DISPLAY_WIDTH - 5;
+}
+
+static bool nav_chrome_bands_do_not_collide(void)
+{
+    /* Twelve rows of the widest label review_and_confirm can build: two
+     * digits, a dot, a space and the longest word in the BIP39 list. */
+    static const char* const words[12] = { "01. wildcat", "02. abandon", "03. zoo", "04. mosquito", "05. jealous",
+        "06. abandon", "07. abandon", "08. abandon", "09. abandon", "10. abandon", "11. abandon", "12. abandon" };
+    /* Both titles review_and_confirm shows, and the label on its confirm bar,
+     * copied from seedtool_app.c the same way the dice hints above are. */
+    static const char* const titles[] = { "Review words", "Review - fix a word" };
+    for (size_t i = 0; i < sizeof(titles) / sizeof(titles[0]); ++i) {
+        /* Every state the chrome can be drawn in, since each paints something
+         * the others do not: the arrow highlighted, an item highlighted with
+         * the confirm bar dimmed, and the confirm bar filled. */
+        static const size_t selections[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
+        for (size_t s = 0; s < sizeof(selections) / sizeof(selections[0]); ++s) {
+            /* Item 0 stands for the invalid-checksum screen, the one case
+             * where a word is the selection and the bar cannot be taken - so
+             * that pass is the one that draws the bar dimmed. */
+            const bool confirm_enabled = selections[s] != 0;
+            const seedtool_nav_t nav = { .selected = selections[s],
+                .confirm = "Continue",
+                .confirm_enabled = confirm_enabled,
+                .back = true };
+            seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
+            /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
+             * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
+             * confirm bar starts at 118. Two gaps must stay dark, or a band
+             * has grown into its neighbour. */
+            if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(115, 118)) {
+                return false;
+            }
+            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
+             * both ends, so its right edge is that far in from the glass. */
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+                return false;
+            }
+            /* The label on the bar, measured only in the states where the
+             * bar is not filled - a filled bar lights every pixel of the band
+             * by design, including the bottom row, and would swamp this. The
+             * label is drawn on one line by draw_centered_in, which does not
+             * wrap, so an overlong one runs off the right edge instead of
+             * down; measured on both sides so it is held clear of the glass
+             * rather than merely on it. */
+            if (selections[s] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+                return false;
+            }
+        }
+    }
+    /* The text screen wearing the same chrome: enter_word_number's check of
+     * the number just typed. Its body is drawn by draw_centered, which wraps
+     * rather than clips, so line 2 growing to two lines would march down
+     * towards the bar - and the bar's own label is the widest this chrome
+     * carries anywhere. Strings copied from seedtool_app.c, the same way the
+     * dice hints above are. */
+    /* A menu wears the chrome with no confirm bar at all: its rows are its
+     * actions, so the arrow is the only control and the bar's band must stay
+     * dark rather than holding an empty outline. */
+    for (size_t s = 0; s < 2; ++s) {
+        const seedtool_nav_t nav = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
+        seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
+        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT)) {
+            return false;
+        }
+    }
+    static const struct {
+        const char* title;
+        const char* line1;
+        const char* line2;
+        const char* label;
+    } screens[] = {
+        /* Every screen on the chrome, with the widest text each can build -
+         * the longest word in the list, and every digit of the largest word
+         * number twice over. Copied from seedtool_app.c the same way the dice
+         * hints above are. */
+        { "Word 12/24", "mosquito", "Number 2048 of 2048", "Use this word" },
+        { "Confirm backup", "Retype 8 of the 24 words", "Have your backup ready", "Start quiz" },
+        { "Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet" },
+        { "Word doesn't match", "Check your backup", NULL, "Try again" },
+        { "Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds", "Show QR" },
+        { "QR export", "Account key included", "A photo reveals every address", "Show QR" },
+        { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
+        { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
+        { "Poor entropy!", "128 of 128 bits", NULL, "Proceed anyway" },
+        { "Pattern detected!", NULL, NULL, "Proceed anyway" },
+    };
+    for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
+        for (int on_back = 0; on_back < 2; ++on_back) {
+            const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+                .confirm = screens[i].label,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
+            /* Line 2 sits at 65 and the 16px face is that tall again, so its
+             * wraps land at 81, 97, 113 - and 113 is inside the bar's own
+             * margin. One wrap is tolerated because the export warnings
+             * already take it on the plain screen this chrome inherits its
+             * body layout from ("A photo reveals every address" has always
+             * been two lines there); a second is what would reach the bar. */
+            if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, 118)) {
+                return false;
+            }
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+                return false;
+            }
+            /* Measured only with the arrow selected, for the same reason as
+             * above: a selected bar is filled and would swamp this. */
+            if (on_back && !nav_bar_label_fits()) {
+                return false;
+            }
+        }
+    }
+    /* The same chrome with the entropy quality bar drawn in. Its band is
+     * different: the bar occupies DICE_BAR_Y=90..103, so what is checked here
+     * is the 104..118 gap between it and the confirm bar. A body line wrapping
+     * *into* the quality bar is not checked here and does not need to be -
+     * dice_screen_hints_clear_the_bar above already holds these same hints to
+     * that, at the same body heights this chrome inherits. */
+    static const struct {
+        const char* title;
+        const char* line1;
+        const char* line2;
+        const char* label;
+    } dice[] = {
+        { "Coins", "256 flips needed", "Red bar = non-random", "Start" },
+        { "D6 dice", "99 rolls needed", "Red bar = non-random", "Start" },
+        { "Diamonds", "99 cards needed", "Return & reshuffle each card", "Start" },
+        { "Coins", "256 of 256 bits", "Looks good", "Generate seed" },
+    };
+    const seedtool_progress_t full = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
+    for (size_t i = 0; i < sizeof(dice) / sizeof(dice[0]); ++i) {
+        for (int on_back = 0; on_back < 2; ++on_back) {
+            const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+                .confirm = dice[i].label,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
+            if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
+                return false;
+            }
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+                return false;
+            }
+            if (on_back && !nav_bar_label_fits()) {
+                return false;
+            }
+        }
+    }
+    /* The notices: no arrow, so the title centres across the whole glass and
+     * has the full width to fit in - but the bar is still there, and the body
+     * still wraps rather than clips. Strings from seedtool_app.c. */
+    static const struct {
+        const char* title;
+        const char* line1;
+        const char* line2;
+        const char* label;
+    } notices[] = {
+        { "Invalid checksum", "Check your words", "Fix one to continue", "Fix a word" },
+        { "Passphrase mismatch", "Nothing was derived", "Try again", "Try again" },
+        { "Backup confirmed", "Words matched", NULL, "Continue" },
+        { "Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK" },
+        { "Error", "Could not derive addresses", NULL, "OK" },
+        { "Error", "Could not compute", "word numbers", "OK" },
+    };
+    for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
+        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_CONFIRM,
+            .confirm = notices[i].label,
+            .confirm_enabled = true,
+            .back = false };
+        seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)) {
+            return false;
+        }
+    }
+    /* The paged screens. Their bodies run lower than the two-line ones -
+     * screen4's fourth row ends at 103 - and the page counter goes in what is
+     * left, so the band that must stay clear is only 116..118. Body lines are
+     * already held to their own widths by seedtool_render_fit, which is what
+     * page_text splits by; what is new here is the counter, and whether the
+     * two together clear the bar. */
+    static const size_t cursors[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
+    for (size_t c = 0; c < sizeof(cursors) / sizeof(cursors[0]); ++c) {
+        /* A full-width transcript line, and the widest counter either paged
+         * screen can reach: MAX_PAGE_LINES=24 gives page_text eight pages. */
+        const seedtool_nav_t paged = { .selected = cursors[c],
+            .confirm = "Continue",
+            .confirm_enabled = true,
+            .back = true,
+            .counter = "8/8" };
+        seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+            return false;
+        }
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            return false;
+        }
+        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            return false;
+        }
+        static const char* const rows[] = { "21. mosquito", "22. mosquito", "23. mosquito", "24. mosquito" };
+        const seedtool_nav_t listed = { .selected = cursors[c],
+            .confirm = "Continue",
+            .confirm_enabled = true,
+            .back = true,
+            .counter = "6/6" };
+        seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+            return false;
+        }
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            return false;
+        }
+        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Known-good vectors straight from Krux's own base32 test suite
  * (tests/test_bbqr.py, B32_TEST_BYTES/B32_ENCODED_STRINGS, unpadded form):
  * proof this encoder produces byte-for-byte the same output a BBQr-reading
@@ -1785,6 +2076,10 @@ static int self_test(void)
     }
     if (!backup_confirm_screen_lines_do_not_wrap()) {
         fputs("Origo backup confirmation screen self-test failed\n", stderr);
+        return 1;
+    }
+    if (!nav_chrome_bands_do_not_collide()) {
+        fputs("Origo nav chrome geometry self-test failed\n", stderr);
         return 1;
     }
     /* Every value the QR screen offers must actually encode. The account key
