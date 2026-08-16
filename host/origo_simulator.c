@@ -1125,15 +1125,33 @@ static size_t count_pixel_color(const uint16_t color)
     return count;
 }
 
+/* The chrome these screens now wear, with the cursor on a word rather than on
+ * the arrow. That is not incidental: both proofs below count COLOR_HIGHLIGHT
+ * pixels to measure the lit punch cells, and a selected arrow fills its box
+ * with exactly that colour - the count would then include the chrome and the
+ * unit area discovered from "0001" would be wrong for every number after it.
+ * The cursor sits on a word for all but one position of the real screen's
+ * ring, so this is the ordinary state as well as the measurable one. */
+static seedtool_nav_t stackbit_test_nav(void)
+{
+    const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
+        .confirm = NULL,
+        .confirm_enabled = false,
+        .back = true,
+        .confirm_as_tick = true };
+    return nav;
+}
+
 /* Every one of the 2048 word numbers, drawn as a Stackbit 1248 grid, lights
  * exactly the punch cells its digits' bits call for — checked by counting
  * highlighted pixels rather than by duplicating the renderer's private
  * geometry, the same tactic dice_progress_bar_is_bounded uses. */
 static bool stackbit_grid_is_sound(void)
 {
+    const seedtool_nav_t nav = stackbit_test_nav();
     /* "0001" lights exactly one cell; its pixel count is the discovered
      * per-dot area rather than a hard-coded one. */
-    seedtool_render_stackbit_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    seedtool_render_stackbit_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
     const size_t unit = count_pixel_color(0xfd20);
     if (!unit) {
         return false;
@@ -1146,7 +1164,7 @@ static bool stackbit_grid_is_sound(void)
             const unsigned v = (unsigned)(digits[i] - '0');
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
-        seedtool_render_stackbit_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        seedtool_render_stackbit_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
         if (count_pixel_color(0xfd20) != bits * unit) {
             return false;
         }
@@ -1161,7 +1179,8 @@ static bool stackbit_grid_is_sound(void)
  * regardless of where on screen they are placed. */
 static bool stackbit_physical_grid_is_sound(void)
 {
-    seedtool_render_stackbit_physical_screen("Stackbit 1248", 1, seedtool_word(0), "1/1");
+    const seedtool_nav_t nav = stackbit_test_nav();
+    seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
     const size_t unit = count_pixel_color(0xfd20);
     if (!unit) {
         return false;
@@ -1174,7 +1193,7 @@ static bool stackbit_physical_grid_is_sound(void)
             const unsigned v = (unsigned)(digits[i] - '0');
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
-        seedtool_render_stackbit_physical_screen("Stackbit 1248", number, seedtool_word(number - 1), "1/1");
+        seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
         if (count_pixel_color(0xfd20) != bits * unit) {
             return false;
         }
@@ -1483,11 +1502,22 @@ static bool backup_confirm_screen_lines_do_not_wrap(void)
  * of running off the glass, exactly the failure the dice-hint check above
  * exists for. Bands are the geometry in seedtool_render.c (NAV_BACK_HEIGHT,
  * LIST_TOP, NAV_ROW_HEIGHT, NAV_BAR_Y), kept in sync with the numbers here. */
+/* Chrome the bands are allowed to hold: the 1px rules that separate the cells
+ * and close the back button's box are deliberate and land exactly in these
+ * gaps. What the bands exist to catch is text - a wrapped title or an overlong
+ * button label - so a rule is permitted by colour and anything brighter is
+ * not. COLOR_DIM in seedtool_render.c; a lit glyph is white or the highlight,
+ * both of which still fail. */
+#define NAV_RULE_COLOR UINT16_C(0x39e7)
+
 static bool nav_band_is_clear(const int from, const int to)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
     for (int y = from; y < to; ++y) {
         for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == NAV_RULE_COLOR) {
+                continue;
+            }
             if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
                 return false;
             }
@@ -1514,38 +1544,49 @@ static bool nav_title_stays_in_its_column(const int x)
     return true;
 }
 
-/* The confirm bar's band (NAV_BAR_Y..the bottom of the glass), with its label
- * required to stay a few pixels clear of both edges. */
-/* NAV_BAR_Y in seedtool_render.c, kept in sync with this. */
+
+/* NAV_BAR_Y in seedtool_render.c, kept in sync with this: the band the confirm
+ * bar used to occupy, still the floor the body must stay above. */
 #define NAV_BAR_BAND_Y 118
 
-static bool nav_bar_label_fits(void)
+/* The confirm's box in the title bar's right slot: lit, and inside the glass.
+ * A tick says nothing about what confirming does, so what this can check is
+ * that the control is there at all - the screen that vanished its own confirm
+ * would otherwise look like a screen the reader can only back out of, and
+ * nothing else here would notice. */
+static bool nav_right_slot_is_drawn(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
-    int leftmost = SEEDTOOL_DISPLAY_WIDTH, rightmost = -1;
-    for (int y = NAV_BAR_BAND_Y; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
-        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
-            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == 0x0000) {
-                continue;
-            }
-            /* The rule drawn along the top of an unfilled bar spans the whole
-             * width and is not the label; skipped by row, not by colour, so a
-             * label sharing the rule's colour still counts. */
-            if (y == NAV_BAR_BAND_Y) {
-                continue;
-            }
-            if (x < leftmost) {
-                leftmost = x;
-            }
-            if (x > rightmost) {
-                rightmost = x;
+    /* NAV_BACK_X/WIDTH/Y/HEIGHT in seedtool_render.c, mirrored to the right
+     * edge, kept in sync with the numbers here. */
+    const int left = SEEDTOOL_DISPLAY_WIDTH - 2 - 20;
+    for (int y = 1; y < 1 + 19; ++y) {
+        for (int x = left; x < left + 20; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                return x + 20 <= SEEDTOOL_DISPLAY_WIDTH;
             }
         }
     }
-    if (rightmost < 0) {
-        return false; /* the label never reached the screen */
+    return false;
+}
+
+/* The arrow's own box, the mirror of the tick's check above. A screen whose
+ * only way out is the arrow has to actually draw one: the notices lost their
+ * tick on the argument that a screen with nothing to accept should not offer
+ * assent, and that argument only holds if what replaced it is really there. */
+static bool nav_left_slot_is_drawn(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    /* NAV_BACK_X = 2, NAV_BACK_WIDTH = 20, NAV_BACK_Y = 1, NAV_BACK_HEIGHT = 19
+     * in seedtool_render.c, kept in sync with the numbers here. */
+    for (int y = 1; y < 1 + 19; ++y) {
+        for (int x = 2; x < 2 + 20; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                return true;
+            }
+        }
     }
-    return leftmost >= 4 && rightmost <= SEEDTOOL_DISPLAY_WIDTH - 5;
+    return false;
 }
 
 static bool nav_chrome_bands_do_not_collide(void)
@@ -1570,7 +1611,8 @@ static bool nav_chrome_bands_do_not_collide(void)
             const seedtool_nav_t nav = { .selected = selections[s],
                 .confirm = "Continue",
                 .confirm_enabled = confirm_enabled,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
@@ -1579,19 +1621,21 @@ static bool nav_chrome_bands_do_not_collide(void)
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(115, 118)) {
                 return false;
             }
-            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
-             * both ends, so its right edge is that far in from the glass. */
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* The label on the bar, measured only in the states where the
-             * bar is not filled - a filled bar lights every pixel of the band
-             * by design, including the bottom row, and would swamp this. The
-             * label is drawn on one line by draw_centered_in, which does not
-             * wrap, so an overlong one runs off the right edge instead of
-             * down; measured on both sides so it is held clear of the glass
-             * rather than merely on it. */
-            if (selections[s] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
+             * both ends, so its right edge is that far in from the glass - and
+             * that is exactly where the tick's box begins, so an overlong
+             * title landing past its column would read as the control. The
+             * title's placement depends only on whether there is an arrow, so
+             * it is measured on a tick-free rendering of the same screen. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = nav.confirm_enabled,
+                .back = true };
+            seedtool_render_nav_list(&bare, titles[i], words, 12, 0);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
@@ -1602,13 +1646,18 @@ static bool nav_chrome_bands_do_not_collide(void)
      * towards the bar - and the bar's own label is the widest this chrome
      * carries anywhere. Strings copied from seedtool_app.c, the same way the
      * dice hints above are. */
-    /* A menu wears the chrome with no confirm bar at all: its rows are its
-     * actions, so the arrow is the only control and the bar's band must stay
-     * dark rather than holding an empty outline. */
+    /* A menu wears the chrome with no confirm at all: its rows are its
+     * actions, so the arrow is the only control. Both places the confirm could
+     * appear must stay empty - the band along the bottom, and the title bar's
+     * right slot. The slot is the one that caught a real bug: confirm_as_tick
+     * is set for every list, so the tick drew on the Origo and Wallet menus,
+     * offering an answer to a question those screens never ask. Nothing here
+     * noticed, because every check only ever asserted the tick was present. */
     for (size_t s = 0; s < 2; ++s) {
-        const seedtool_nav_t nav = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
+        const seedtool_nav_t nav
+            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_as_tick = true };
         seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
-        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT)) {
+        if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT) || nav_right_slot_is_drawn()) {
             return false;
         }
     }
@@ -1630,15 +1679,29 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "QR export", "Account key included", "A photo reveals every address", "Show QR" },
         { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
-        { "Poor entropy!", "128 of 128 bits", NULL, "Proceed anyway" },
-        { "Pattern detected!", NULL, NULL, "Proceed anyway" },
+        /* The two entropy verdicts wear no title: the finding is drawn in the
+         * body, so what the widest-text check has to hold is the body line, and
+         * a NULL title here is the table saying that is deliberate rather than
+         * an entry someone forgot to fill in. */
+        { NULL, "Poor entropy!", "128 of 128 bits", "Proceed anyway" },
+        { NULL, "Pattern detected!", NULL, "Proceed anyway" },
+        /* The coin-word run's reflip warning, the widest question it builds
+         * and the widest subject under it. This table claims to hold every
+         * screen on the chrome and did not hold this one: the screen arrived
+         * with the coin-word method, after the table was written. */
+        { "Flip word 23 again?", "2048  mosquito", "These flips are lost", "Flip again" },
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
+            /* confirm_as_tick, because that is what nav_screen sets and these
+             * are its screens: the confirm is a box in the title bar's right
+             * slot and no bar is drawn. Rendering them with a bar would have
+             * this table checking a layout the firmware stopped shipping. */
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
                 .confirm = screens[i].label,
                 .confirm_enabled = true,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
@@ -1649,12 +1712,26 @@ static bool nav_chrome_bands_do_not_collide(void)
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, 118)) {
                 return false;
             }
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            /* No bar to measure on these screens any more - the confirm is a
+             * box in the right slot, so what has to hold is that the slot is
+             * drawn at all. A screen that lost its confirm would otherwise
+             * look like one the reader can only back out of, and nothing else
+             * here would notice. */
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* Measured only with the arrow selected, for the same reason as
-             * above: a selected bar is filled and would swamp this. */
-            if (on_back && !nav_bar_label_fits()) {
+            /* The title's column ends exactly where the tick's box begins, so
+             * on a rendering that draws the tick the two are indistinguishable
+             * by position: an overlong title painting past its column lands
+             * inside the box and reads as the box. The title's placement
+             * depends only on whether there is an arrow, never on the tick, so
+             * it is measured on a tick-free rendering of the same screen. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_text(&bare, screens[i].title, screens[i].line1, screens[i].line2, NULL);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
@@ -1682,42 +1759,57 @@ static bool nav_chrome_bands_do_not_collide(void)
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
                 .confirm = dice[i].label,
                 .confirm_enabled = true,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
             }
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            if (on_back && !nav_bar_label_fits()) {
+            /* Title measured tick-free, for the reason given above: the box
+             * stands exactly where an overlong title would land. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_dice(&bare, dice[i].title, dice[i].line1, dice[i].line2, &full);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
     }
-    /* The notices: no arrow, so the title centres across the whole glass and
-     * has the full width to fit in - but the bar is still there, and the body
+    /* The notices: an arrow and no tick, since there is nothing on them to
+     * agree to. The title therefore shares the bar with the arrow and is held
+     * to the same column the acknowledge screens' titles are, and the body
      * still wraps rather than clips. Strings from seedtool_app.c. */
     static const struct {
         const char* title;
         const char* line1;
         const char* line2;
-        const char* label;
     } notices[] = {
-        { "Invalid checksum", "Check your words", "Fix one to continue", "Fix a word" },
-        { "Passphrase mismatch", "Nothing was derived", "Try again", "Try again" },
-        { "Backup confirmed", "Words matched", NULL, "Continue" },
-        { "Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK" },
-        { "Error", "Could not derive addresses", NULL, "OK" },
-        { "Error", "Could not compute", "word numbers", "OK" },
+        { "Invalid checksum", "Check your words", "Fix one to continue" },
+        { "Passphrase mismatch", "Nothing was derived", "Try again" },
+        { "Backup confirmed", "Words matched", NULL },
+        { "Too long for a QR", "Compact SeedQR", "Read it as text instead" },
+        { "Error", "Could not derive addresses", NULL },
+        { "Error", "Could not compute", "word numbers" },
     };
     for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
-        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_CONFIRM,
-            .confirm = notices[i].label,
+        const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BACK,
+            .confirm = NULL,
             .confirm_enabled = true,
-            .back = false };
+            .back = true,
+            .confirm_as_tick = true };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
-        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)) {
+        /* A notice's only control is now the arrow - if that failed to draw the
+         * screen would be one the reader cannot leave at all, which is worth
+         * more than checking a label's width. The mirror of the old check: the
+         * tick must be absent, or the screen would be offering an answer its
+         * caller has no way to receive. */
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y) || !nav_left_slot_is_drawn()
+            || nav_right_slot_is_drawn()) {
             return false;
         }
     }
@@ -1735,16 +1827,23 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = "Continue",
             .confirm_enabled = true,
             .back = true,
-            .counter = "8/8" };
+            .counter = "8/8",
+            .confirm_as_tick = true };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }
-        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+        if (!nav_right_slot_is_drawn()) {
             return false;
         }
-        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+        /* Title measured tick-free, for the reason the list pass above gives. */
+        const seedtool_nav_t bare_paged
+            = { .selected = paged.selected, .confirm = paged.confirm, .confirm_enabled = true, .back = true,
+                  .counter = paged.counter };
+        seedtool_render_nav_text(&bare_paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+            "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
             return false;
         }
         static const char* const rows[] = { "21. mosquito", "22. mosquito", "23. mosquito", "24. mosquito" };
@@ -1752,15 +1851,20 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm = "Continue",
             .confirm_enabled = true,
             .back = true,
-            .counter = "6/6" };
+            .counter = "6/6",
+            .confirm_as_tick = true };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
         }
-        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+        if (!nav_right_slot_is_drawn()) {
             return false;
         }
-        if (cursors[c] != SEEDTOOL_NAV_CONFIRM && !nav_bar_label_fits()) {
+        /* Title measured tick-free, as above. */
+        const seedtool_nav_t bare_rows = { .selected = listed.selected, .confirm = listed.confirm,
+            .confirm_enabled = true, .back = true, .counter = listed.counter };
+        seedtool_render_nav_rows(&bare_rows, "BIP39 word numbers", rows, 4);
+        if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
             return false;
         }
     }

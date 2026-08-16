@@ -210,17 +210,17 @@ bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, const
     return ok;
 }
 
-void seedtool_display_stackbit_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+void seedtool_display_stackbit_screen(const seedtool_nav_t* nav, const char* title, const unsigned word_number,
+    const char* word, const char* footer)
 {
-    seedtool_render_stackbit_screen(title, word_number, word, footer);
+    seedtool_render_stackbit_screen(nav, title, word_number, word, footer);
     present();
 }
 
-void seedtool_display_stackbit_physical_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+void seedtool_display_stackbit_physical_screen(const seedtool_nav_t* nav, const char* title,
+    const unsigned word_number, const char* word, const char* footer)
 {
-    seedtool_render_stackbit_physical_screen(title, word_number, word, footer);
+    seedtool_render_stackbit_physical_screen(nav, title, word_number, word, footer);
     present();
 }
 

@@ -66,7 +66,7 @@
 #define NAV_BACK_X 2
 #define NAV_BACK_Y 1
 #define NAV_BACK_WIDTH 20
-#define NAV_BACK_HEIGHT 18
+#define NAV_BACK_HEIGHT 19
 #define NAV_ARROW_WIDTH 7
 #define NAV_ARROW_HEIGHT 11
 #define NAV_ROW_HEIGHT 32
@@ -513,11 +513,17 @@ void seedtool_render_list(const char* title, const char* const* items, const siz
         const char* const item = items[top + row];
         const bool highlighted = top + row == selected;
         const int y = LIST_TOP + (int)row * LIST_ROW_HEIGHT;
-        /* The last row of every list is the way out of it — Back, Erase and
-         * restart, [delete]. A rule above it lifts it out of the choices,
-         * which is what it is not. It goes in the gap between cells so the
-         * selection bar never paints over it. */
-        if (top + row == count - 1 && count > 1) {
+        /* A rule between rows, matching the nav lists and Jade's own menus:
+         * the rows read as cells rather than as stacked lines of text, and it
+         * sits in the gap between them so the selection bar never paints over
+         * it. Between them and not above the first, so this list and a nav one
+         * carry the same line in the same places - a screen that gained the
+         * chrome should not also change how its rows are drawn.
+         *
+         * It used to be drawn above the last row alone, to set the way out
+         * apart from the choices. That distinction now rests on position,
+         * which the last row has always had and which every list here keeps. */
+        if (row) {
             fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         }
         if (highlighted) {
@@ -547,6 +553,31 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
     }
 }
 
+/* A tick, drawn rather than set, for the same reason the arrow above is: the
+ * 16px face has no glyph for one and Jade's symbols font is a component the
+ * audit rejects by name. Two strokes from a common low point - a short one up
+ * to the left, a long one up to the right - each a stack of 2px squares so the
+ * diagonals read as solid rather than as a dotted line of single pixels. */
+static void draw_tick(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    const int foot_x = x + width / 3;
+    const int foot_y = y + height - 2;
+    for (int i = 0; i < width / 3; ++i) {
+        fill_rect(foot_x - i, foot_y - i, 2, 2, color);
+    }
+    for (int i = 0; i < width - width / 3; ++i) {
+        fill_rect(foot_x + i, foot_y - i, 2, 2, color);
+    }
+}
+
+static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    fill_rect(x, y, width, 1, color);
+    fill_rect(x, y + height - 1, width, 1, color);
+    fill_rect(x, y, 1, height, color);
+    fill_rect(x + width - 1, y, 1, height, color);
+}
+
 /* The chrome itself, drawn the same way for every screen that wears it - the
  * point of the thing being that the arrow and the bar are found in one place
  * regardless of what sits between them. Split from the screens so a new one
@@ -561,19 +592,71 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         if (on_back) {
             fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
         }
+        /* Sides and top, no bottom - Jade's own header buttons are bordered
+         * that way on a full menu, its comment giving the reason: "bottom edge
+         * will be covered by upper line above top menu item" (ui/dialogs.c).
+         * The rule above the first row sits directly under this box, so the
+         * two meet and the chrome reads as one frame rather than as a button
+         * hovering above an unrelated list. Drawn whether or not the arrow is
+         * selected, dim when idle: a bare arrow in the corner reads as
+         * decoration, a box reads as something that can be taken. */
+        const uint16_t edge = on_back ? COLOR_HIGHLIGHT : COLOR_DIM;
+        fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
+        fill_rect(NAV_BACK_X, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        fill_rect(NAV_BACK_X + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         draw_back_arrow(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
             on_back ? COLOR_BLACK : COLOR_WHITE);
+    }
+    /* The confirm as a tick in the right slot, mirroring the arrow: same box,
+     * same borders, same rule closing it underneath. The slot has been held
+     * open by the title's own margins since the chrome arrived, so nothing
+     * moves to make room for it. */
+    /* Only when there is something to confirm. A menu passes no label because
+     * its rows are its actions, and a tick there offers an answer to a
+     * question the screen never asked - the same guard the bar had, which this
+     * did not inherit when it replaced it. */
+    if (nav->confirm_as_tick && nav->confirm) {
+        /* Three states, the same three the bar had: filled when it is both
+         * available and selected, outlined when available and not, and drawn
+         * dim throughout when confirming is not possible yet - the checksum
+         * screen with a word still wrong is the case that needs the third.
+         * The control keeps its place in every state, so what changes is
+         * whether it can be taken and never whether it is there. */
+        const bool on_tick = nav->confirm_enabled && nav->selected == SEEDTOOL_NAV_CONFIRM;
+        const int x = SEEDTOOL_DISPLAY_WIDTH - NAV_BACK_X - NAV_BACK_WIDTH;
+        if (on_tick) {
+            fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+        }
+        const uint16_t edge = on_tick ? COLOR_HIGHLIGHT : COLOR_DIM;
+        fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
+        fill_rect(x, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        draw_tick(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+            !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE);
     }
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right
      * against the arrow, and a long one would paint into it. */
     (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
+    /* The rule that closes the header, and with it the bottom of the arrow's
+     * box and the tick's - both are drawn with sides and top only, on the
+     * understanding that a line underneath would be the fourth edge. On a list
+     * that line was the rule above the first cell, so the frame closed and the
+     * chrome read as one piece; every other screen wearing this header had no
+     * cells to supply it, so the two boxes hung open with nothing across the
+     * bar. Drawn here instead of by each body, so a screen gets it for wearing
+     * the header rather than for happening to be a list. */
+    fill_rect(NAV_BACK_X, NAV_BACK_Y + NAV_BACK_HEIGHT, SEEDTOOL_DISPLAY_WIDTH - 2 * NAV_BACK_X, 1, COLOR_DIM);
 }
 
 static void draw_nav_bar(const seedtool_nav_t* nav)
 {
-    if (!nav->confirm) {
+    /* Nothing along the bottom when the confirm is a tick in the header: the
+     * control exists once, and drawing it twice would make the reader look for
+     * the difference between them. */
+    if (!nav->confirm || nav->confirm_as_tick) {
         return;
     }
     const bool on_confirm = nav->selected == SEEDTOOL_NAV_CONFIRM;
@@ -652,8 +735,17 @@ void seedtool_render_nav_list(
         const char* const item = items[top + row];
         const bool highlighted = top + row == nav->selected;
         const int y = LIST_TOP + (int)row * NAV_ROW_HEIGHT;
-        /* No rule above the last row here: what a plain list sets apart that
-         * way is its way out, and on this screen the way out is the arrow. */
+        /* A rule above every row, the first included, so they read as cells
+         * rather than as lines of text that happen to be stacked - Jade draws
+         * a border under each menu item and above the top one (ui/dialogs.c).
+         * It sits in the gap between cells, so the selection bar never paints
+         * over it. The topmost one lands on the header's own closing rule and
+         * repaints it in the same colour: that rule used to be this line's job,
+         * until every screen wearing the header needed one and it moved there.
+         * Kept because the cell wants a top edge whether or not the header drew
+         * one. The last cell is closed by the confirm bar's own rule, so three
+         * rules here and that one frame three rows. */
+        fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
         }
@@ -758,14 +850,6 @@ static const char* key_label(const char key, char* scratch)
         scratch[1] = '\0';
         return scratch;
     }
-}
-
-static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
-{
-    fill_rect(x, y, width, 1, color);
-    fill_rect(x, y + height - 1, width, 1, color);
-    fill_rect(x, y, 1, height, color);
-    fill_rect(x + width - 1, y, 1, height, color);
 }
 
 static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
@@ -985,13 +1069,12 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
 }
 
 void seedtool_render_stackbit_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
 {
     static const uint8_t WEIGHTS[STACKBIT_ROWS] = { 1, 2, 4, 8 };
     static const char WEIGHT_LABELS[] = "1248";
 
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    nav_begin(nav, title);
 
     char digits[STACKBIT_DIGITS + 1];
     (void)snprintf(digits, sizeof(digits), "%04u", word_number);
@@ -1017,10 +1100,9 @@ void seedtool_render_stackbit_screen(
 }
 
 void seedtool_render_stackbit_physical_screen(
-    const char* title, const unsigned word_number, const char* word, const char* footer)
+    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
 {
-    seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, LIST_TITLE_Y);
+    nav_begin(nav, title);
 
     char digits[STACKBIT_DIGITS + 1];
     (void)snprintf(digits, sizeof(digits), "%04u", word_number);

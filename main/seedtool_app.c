@@ -191,45 +191,10 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
     return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
 }
 
-/* Every choice in the firmware is made here, on a list that shows five options
- * at once. Which rows are on screen follows from the count and the selection
- * alone, so a choice screen is reproducible from what the user has done.
- * `hint` is false only for the Origo menu: the very first screen after the
- * splash is not the place to also be teaching the chord, and every screen
- * reachable from it already carries its own hint until the chord is learned. */
-static int choose_at(const char* title, const char* const* items, const size_t count, const bool hint,
-    const size_t initial)
-{
-    size_t selected = initial < count ? initial : 0, top = 0;
-    for (;;) {
-        /* No page counter here: choosing among options isn't paging through
-         * content, and the scrollbar (seedtool_render_list, gated the same way
-         * on count > SEEDTOOL_LIST_ROWS) already shows position when the list
-         * doesn't fit on screen. */
-        const char* const footer = (hint && !chord_learned) ? NAV_FOOTER : "";
-        top = seedtool_list_top(count, selected, top);
-        seedtool_display_list(title, items, count, selected, top, footer);
-        switch (wait_key()) {
-        case KEY_SELECT:
-            return (int)selected;
-        case KEY_PREV:
-            selected = (selected + count - 1) % count;
-            break;
-        case KEY_NEXT:
-            selected = (selected + 1) % count;
-            break;
-        case KEY_REDRAW:
-            break;
-        default:
-            return -1;
-        }
-    }
-}
 
-/* Outcomes of choose_nav, alongside a non-negative item index. Distinct from
- * choose_at's -1-or-index, because a nav screen has to tell three ways out
- * apart rather than two: the reader left through the arrow, the reader took
- * the confirm bar, or nobody was there. */
+/* Outcomes of choose_nav, alongside a non-negative item index. Three ways out
+ * rather than the two a plain index-or-error would carry: the reader left
+ * through the arrow, the reader took the confirm bar, or nobody was there. */
 #define NAV_TIMEOUT (-1)
 #define NAV_BACK (-2)
 #define NAV_CONFIRM (-3)
@@ -237,25 +202,31 @@ static int choose_at(const char* title, const char* const* items, const size_t c
 /* The nav chrome's ring, laid out the way the screen is: the back arrow at the
  * top, then the items, then the confirm bar at the bottom. Moving down off the
  * last one wraps to the first, as every list here already does. */
-static size_t nav_ring_size(const size_t count, const bool confirm_enabled)
+/* The ring the cursor walks: the arrow, then the items, then the confirm bar,
+ * with either end absent on a screen that does not offer it. `back` is false
+ * only for the two screens with no level above them, which is why the arrow's
+ * slot is counted rather than assumed. */
+static size_t nav_ring_size(const size_t count, const bool confirm_enabled, const bool back)
 {
-    return count + 1 + (confirm_enabled ? 1 : 0);
+    return count + (back ? 1 : 0) + (confirm_enabled ? 1 : 0);
 }
 
-static size_t nav_position(const size_t selected, const size_t count)
+static size_t nav_position(const size_t selected, const size_t count, const bool back)
 {
     if (selected == SEEDTOOL_NAV_BACK) {
         return 0;
     }
-    return selected == SEEDTOOL_NAV_CONFIRM ? count + 1 : selected + 1;
+    const size_t offset = back ? 1 : 0;
+    return selected == SEEDTOOL_NAV_CONFIRM ? count + offset : selected + offset;
 }
 
-static size_t nav_selection(const size_t position, const size_t count)
+static size_t nav_selection(const size_t position, const size_t count, const bool back)
 {
-    if (!position) {
+    if (back && !position) {
         return SEEDTOOL_NAV_BACK;
     }
-    return position > count ? SEEDTOOL_NAV_CONFIRM : position - 1;
+    const size_t index = back ? position - 1 : position;
+    return index >= count ? SEEDTOOL_NAV_CONFIRM : index;
 }
 
 /* The one loop behind every screen whose only controls are the arrow and the
@@ -272,10 +243,24 @@ static int nav_screen(const char* title, const char* one, const char* two, const
     const bool start_on_back, const seedtool_progress_t* progress)
 {
     seedtool_nav_t nav = {
-        .selected = back && start_on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+        /* Opening on a control that is not drawn would leave nothing lit and
+         * nowhere to move to, since the ring below only turns when both
+         * controls exist. No label means no tick, so such a screen opens on
+         * the arrow whatever the caller asked for - the condition is derived
+         * here rather than left as an unwritten rule the callers must keep. */
+        .selected = back && (start_on_back || !label) ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
         .confirm = label,
         .confirm_enabled = true,
         .back = back,
+        /* A screen the reader takes or leaves has two controls, and one the
+         * reader can only take in has just the arrow; either way they sit
+         * where Jade puts them: leave on the left of the title bar, take on
+         * the right, nothing along the bottom. The label stays in the struct
+         * for the width checks even though no bar draws it - the title is what
+         * tells the reader what taking it does, on every screen here but the
+         * two entropy verdicts, which pass no title and say it in the body
+         * instead for the reason given at their call. */
+        .confirm_as_tick = true,
     };
     for (;;) {
         if (progress) {
@@ -288,9 +273,13 @@ static int nav_screen(const char* title, const char* one, const char* two, const
             return nav.selected == SEEDTOOL_NAV_BACK ? NAV_BACK : NAV_CONFIRM;
         case KEY_PREV:
         case KEY_NEXT:
-            /* Two controls at most, so either direction is the other one -
-             * and with no arrow there is nothing to move to. */
-            if (back) {
+            /* Two controls at most, so either direction is the other one - and
+             * with only one of them there is nothing to move to. Both halves of
+             * that guard are load-bearing: a screen with no arrow has nowhere
+             * to go from the tick, and a screen with no label has no tick, so
+             * toggling would park the cursor on a control that is not drawn and
+             * leave nothing lit for the reader to aim at. */
+            if (back && label) {
                 nav.selected = nav.selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_CONFIRM : SEEDTOOL_NAV_BACK;
             }
             break;
@@ -321,11 +310,18 @@ static bool nav_dice_confirm(const char* title, const char* one, const char* two
 /* A notice the reader can only take in: the screens whose answer every caller
  * discards. They used to carry "BOTH continue   Up/Down back" over a screen
  * where back and continue did the same thing, so the footer was describing a
- * way out that was not there. One bar, no arrow, and up/down do nothing
- * rather than pretending to. */
-static void notice(const char* title, const char* one, const char* two, const char* label)
+ * way out that was not there.
+ *
+ * The tick went the same way, and for the same reason. A tick is the answer to
+ * a question - the firmware says so itself where a menu is drawn, which passes
+ * no label because "a tick there offers an answer to a question the screen
+ * never asked" - and a screen whose result every caller throws away asks
+ * nothing. What the reader does here is read it and leave, so the only control
+ * is the one that means leave. These carried the opposite pair until now: a
+ * tick and no arrow, the single way out wearing the glyph for assent. */
+static void notice(const char* title, const char* one, const char* two)
 {
-    (void)nav_screen(title, one, two, label, false, false, NULL);
+    (void)nav_screen(title, one, two, NULL, true, true, NULL);
 }
 
 /* A choice made under the back-arrow-and-confirm-bar chrome. `cursor` carries
@@ -336,17 +332,27 @@ static void notice(const char* title, const char* one, const char* two, const ch
  *
  * No footer hint: the controls are on screen, and the bar is standing where
  * the hint used to be drawn. Any screen converted to this chrome is reached
- * well past the menus that teach the chord. */
+ * well past the menus that teach the chord.
+ *
+ * `back` is false for the two screens with nowhere to go up to. The Origo menu
+ * has no level above it, and the wallet's only exit erases the session and
+ * reboots - putting that on the arrow would give a control that is cheap and
+ * reversible everywhere else a destructive meaning here, one press from any
+ * row. Both keep their exit as a row the reader has to travel to and take, and
+ * wear the rest of the chrome. A screen with somewhere to go back to gets an
+ * arrow; a screen without one does not pretend. */
 static int choose_nav(const char* title, const char* const* items, const size_t count, const char* confirm,
-    const bool confirm_enabled, size_t* const cursor)
+    const bool confirm_enabled, const bool back, size_t* const cursor)
 {
     size_t top = 0;
     /* A cursor left on a control this draw does not offer - the confirm bar
-     * of a screen that has since become unconfirmable, or an item index from
-     * a longer list - falls back to the arrow, which is always there. */
+     * of a screen that has since become unconfirmable, an item index from a
+     * longer list, or the arrow on a screen that has none - falls back to the
+     * first item, which every list has. */
     if ((*cursor == SEEDTOOL_NAV_CONFIRM && !confirm_enabled)
+        || (*cursor == SEEDTOOL_NAV_BACK && !back)
         || (*cursor != SEEDTOOL_NAV_CONFIRM && *cursor != SEEDTOOL_NAV_BACK && *cursor >= count)) {
-        *cursor = SEEDTOOL_NAV_BACK;
+        *cursor = back ? SEEDTOOL_NAV_BACK : 0;
     }
     for (;;) {
         if (*cursor != SEEDTOOL_NAV_BACK && *cursor != SEEDTOOL_NAV_CONFIRM) {
@@ -356,11 +362,20 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             .selected = *cursor,
             .confirm = confirm,
             .confirm_enabled = confirm_enabled,
-            .back = true,
+            .back = back,
+            /* The tick here too, so there is one confirm control in the
+             * firmware and it is always in the same corner. Reading the ring
+             * as a walk down the screen breaks at exactly one point either
+             * way: with a bar, moving down off it wrapped to the arrow at the
+             * top; with the tick, the last row wraps to the corner instead. A
+             * ring has one discontinuity wherever it is put, and putting it
+             * here sets the two ways out of a screen side by side rather than
+             * at opposite ends of the glass. */
+            .confirm_as_tick = true,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
-        const size_t ring = nav_ring_size(count, confirm_enabled);
-        size_t position = nav_position(*cursor, count);
+        const size_t ring = nav_ring_size(count, confirm_enabled, back);
+        size_t position = nav_position(*cursor, count, back);
         switch (wait_key()) {
         case KEY_SELECT:
             if (*cursor == SEEDTOOL_NAV_BACK) {
@@ -368,10 +383,10 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             }
             return *cursor == SEEDTOOL_NAV_CONFIRM ? NAV_CONFIRM : (int)*cursor;
         case KEY_PREV:
-            *cursor = nav_selection((position + ring - 1) % ring, count);
+            *cursor = nav_selection((position + ring - 1) % ring, count, back);
             break;
         case KEY_NEXT:
-            *cursor = nav_selection((position + 1) % ring, count);
+            *cursor = nav_selection((position + 1) % ring, count, back);
             break;
         case KEY_REDRAW:
             break;
@@ -384,10 +399,14 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
 /* Where the cursor sits on a paged screen: 0 is the back arrow, 1..pages are
  * the pages themselves, and pages + 1 is the confirm bar. Moving down is
  * therefore reading forward - the cursor *is* the reading position - and the
- * first page's neighbour above is the arrow rather than the way out. */
-static size_t page_step(const size_t position, const size_t pages, const bool forward)
+ * first page's neighbour above is the arrow rather than the way out.
+ *
+ * `confirmable` false drops that last stop, for a screen there is nothing to
+ * agree to on. The ring is then the arrow and the pages, so reading past the
+ * last page wraps to the arrow: down, down, and back out the way in. */
+static size_t page_step(const size_t position, const size_t pages, const bool forward, const bool confirmable)
 {
-    const size_t ring = pages + 2;
+    const size_t ring = pages + (confirmable ? 2 : 1);
     return (position + (forward ? 1 : ring - 1)) % ring;
 }
 
@@ -408,14 +427,24 @@ static size_t page_selection(const size_t position, const size_t pages)
 
 /* The chrome a paged screen wears, so page_text and show_numbered_list say it
  * once each rather than both spelling out the same four fields. */
-static seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* counter)
+static seedtool_nav_t page_nav(
+    const size_t position, const size_t pages, const char* counter, const bool confirmable)
 {
     const seedtool_nav_t nav = {
         .selected = page_selection(position, pages),
-        .confirm = "Continue",
+        /* No label is what removes the tick, the same way a menu removes it:
+         * the reading screens have nothing for the reader to agree to, so the
+         * corner that would mean "I accept" is left empty rather than given a
+         * meaning the caller then discards. */
+        .confirm = confirmable ? "Continue" : NULL,
         .confirm_enabled = true,
         .back = true,
         .counter = counter,
+        /* Same tick as everywhere else. On a paged screen the ring is the
+         * reading order - arrow, page 1..N, then done - so the confirm being
+         * a corner rather than a bar changes where the cursor lands after the
+         * last page and nothing about how the pages are read. */
+        .confirm_as_tick = true,
     };
     return nav;
 }
@@ -432,7 +461,7 @@ static seedtool_nav_t page_nav(const size_t position, const size_t pages, const 
  * confirm for the usual default to land on, and the options are the point. */
 static int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
-    const int selected = choose_nav(title, items, count, NULL, false, cursor);
+    const int selected = choose_nav(title, items, count, NULL, false, true, cursor);
     if (selected == NAV_BACK) {
         return (int)count;
     }
@@ -445,26 +474,6 @@ static int choose_menu(const char* title, const char* const* items, const size_t
     return choose_menu_at(title, items, count, &cursor);
 }
 
-/* A menu that reopens where it was left rather than at its first row. Every
- * looping menu here wants this: the row just chosen is the one whose result
- * the reader is coming back from, and it is far more often the neighbour of
- * their next choice than the top of the list is. `cursor` lives in the
- * caller's frame for as long as that screen does, so a fresh visit still
- * starts at the top - the same span the address list keeps its own position
- * over, and for the same reason.
- *
- * Back and a timeout leave `cursor` alone: they end the screen, so there is
- * nothing to come back to, and writing the Back row's index there would mean
- * a screen re-entered later opened on the way out of itself. */
-static int choose_kept(
-    const char* title, const char* const* items, const size_t count, const bool hint, size_t* cursor)
-{
-    const int selected = choose_at(title, items, count, hint, *cursor);
-    if (selected >= 0) {
-        *cursor = (size_t)selected;
-    }
-    return selected;
-}
 
 static unsigned step_value(
     unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
@@ -615,10 +624,10 @@ static int enter_value(const char* title, const unsigned position, const unsigne
  * with no carousel to spend a keypress paging through it, showing passively
  * more of what was just flipped is pure upside.
  *
- * No footer hint: NAV_FOOTER's "L/R move BOTH select" would be wrong here —
- * L/R commit a choice rather than moving one, and BOTH undoes rather than
- * selects — and every path that reaches this screen already went through at
- * least one chord-gated menu first, so chord_learned is always true by then
+ * No footer hint: NAV_FOOTER's "Up/Down move BOTH select" would be wrong here —
+ * up and down commit a choice rather than moving one, and BOTH undoes rather
+ * than selects — and every path that reaches this screen already went through
+ * at least one chord-gated menu first, so chord_learned is always true by then
  * anyway. */
 static int enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
     const char* history, const seedtool_progress_t* progress)
@@ -722,7 +731,7 @@ static void hexstr(const uint8_t* bytes, const size_t len, char* output)
  * the tighter line pitch seedtool_render_screen3 uses: a third fewer pages to
  * review the same value. Returns true when the reader advanced past the last
  * page or accepted, false when they backed out. */
-static bool page_text(const char* title, const char* text)
+static bool page_text_impl(const char* title, const char* text, const bool confirmable)
 {
     size_t start[MAX_PAGE_LINES], length[MAX_PAGE_LINES];
     const size_t total = strlen(text);
@@ -763,7 +772,7 @@ static bool page_text(const char* title, const char* text)
             line3[length[first + 2]] = '\0';
         }
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(position, pages, footer);
+        const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable);
         seedtool_display_nav_text(&nav, title, line1, line2, line3);
         switch (wait_key()) {
         case KEY_SELECT:
@@ -778,13 +787,13 @@ static bool page_text(const char* title, const char* text)
             /* The chord on a page reads on rather than doing nothing: it is
              * the same direction the old one went, one step at a time now
              * instead of straight out of the screen. */
-            position = page_step(position, pages, true);
+            position = page_step(position, pages, true, confirmable);
             break;
         case KEY_NEXT:
-            position = page_step(position, pages, true);
+            position = page_step(position, pages, true, confirmable);
             break;
         case KEY_PREV:
-            position = page_step(position, pages, false);
+            position = page_step(position, pages, false, confirmable);
             break;
         case KEY_REDRAW:
             break;
@@ -798,6 +807,22 @@ done:
     seedtool_zero(line2, sizeof(line2));
     seedtool_zero(line3, sizeof(line3));
     return advanced;
+}
+
+/* Paged text with something to take at the end of it - the descriptor, the
+ * account key, the transcript and its hash, the completed mnemonic. The
+ * caller acts on the answer, so the tick is there to give one. */
+static bool page_text(const char* title, const char* text)
+{
+    return page_text_impl(title, text, true);
+}
+
+/* Paged text there is nothing to take. Returns nothing because there is
+ * nothing to return: the reader pages down and leaves by the arrow, and a
+ * caller that cannot ask for an answer cannot forget to use it. */
+static void page_read(const char* title, const char* text)
+{
+    (void)page_text_impl(title, text, false);
 }
 
 /* The account key carries its key origin, so a scan does not have to be told
@@ -854,7 +879,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
     const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity(BBQR_FRAME_MAX_VERSION);
     const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
     if (!parts) {
-        notice("Too long for a QR", title, "Read it as text instead", "OK");
+        notice("Too long for a QR", title, "Read it as text instead");
         return KEY_SELECT;
     }
     size_t part = 0;
@@ -883,7 +908,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             && seedtool_display_qr(frame_title, frame);
         seedtool_zero(frame, sizeof(frame));
         if (!ok) {
-            notice("Too long for a QR", title, "Read it as text instead", "OK");
+            notice("Too long for a QR", title, "Read it as text instead");
             return KEY_SELECT;
         }
         if (manual) {
@@ -1495,7 +1520,7 @@ static const char* review_items[24];
 /* Lets the reader jump straight to any already-entered word and fix it,
  * rather than losing the other 11 or 23 correct ones over a single mistake -
  * restore_seed used to just discard the whole entry and show "INVALID
- * CHECKSUM" with no way back in. A scrolling list (choose_at, cursor
+ * CHECKSUM" with no way back in. A scrolling list (choose_nav, cursor
  * persisted across edits), the same widget and pattern the address list
  * already uses to pick one item out of several to inspect or act on -
  * coherence with the rest of the app mattered more here than the carousel's
@@ -1552,7 +1577,7 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
          * does not appear and disappear under them as words are fixed - the
          * title carries the verdict, as it already did. */
         const int selected = choose_nav(
-            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, &cursor);
+            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, true, &cursor);
         if (selected == NAV_TIMEOUT) {
             outcome = -1;
             goto done;
@@ -1627,7 +1652,7 @@ static int review_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t c
                 (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
             review_items[i] = review_labels[i];
         }
-        const int selected = choose_nav("Review words", review_items, count, "Continue", true, &cursor);
+        const int selected = choose_nav("Review words", review_items, count, "Continue", true, true, &cursor);
         if (selected == NAV_TIMEOUT) {
             outcome = -1;
             goto done;
@@ -1714,7 +1739,7 @@ static int restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_L
             }
             if (join_words(words, count, mnemonic, mnemonic_len)
                 && seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK) {
-                notice("Invalid checksum", "Check your words", "Fix one to continue", "Fix a word");
+                notice("Invalid checksum", "Check your words", "Fix one to continue");
             }
         }
         resume = false;
@@ -1810,7 +1835,7 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
         memcpy(passphrase, attempt, sizeof(attempt));
     } else {
-        notice("Passphrase mismatch", "Passphrase unchanged", "Try again", "Try again");
+        notice("Passphrase mismatch", "Passphrase unchanged", "Try again");
     }
     seedtool_zero(attempt, sizeof(attempt));
     seedtool_zero(confirmation, sizeof(confirmation));
@@ -1823,7 +1848,12 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
 static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
 {
-    if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", false)) {
+    /* Opens on the arrow, like every other screen whose purpose is the
+     * warning on it: what this shows reveals every address of the account,
+     * past and future, to anyone who photographs it. That is the same kind of
+     * claim Compact SeedQR makes, and it earns the same treatment - the way
+     * forward is not preselected on a screen that exists to say wait. */
+    if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", true)) {
         return;
     }
     char title[24];
@@ -1836,7 +1866,7 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
         show_account_key_qr(title, value);
     } else {
         seedtool_zero(xpub, sizeof(xpub));
-        notice("Error", "Could not derive", NULL, "OK");
+        notice("Error", "Could not derive", NULL);
     }
     seedtool_zero(value, sizeof(value));
 }
@@ -1861,8 +1891,10 @@ static void export_qr(const char* mnemonic, const char* passphrase, const char* 
 static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
     const seedtool_address_type_t type, const uint32_t account)
 {
+    /* On the arrow, for the reason the QR export above gives: it carries the
+     * same account key and so the same warning. */
     if (!nav_acknowledge(
-            "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor", false)) {
+            "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor", true)) {
         return;
     }
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
@@ -1878,11 +1910,11 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
                 show_account_key_qr("Descriptor", value);
             }
         } else {
-            notice("Error", "Could not derive", NULL, "OK");
+            notice("Error", "Could not derive", NULL);
         }
     } else {
         seedtool_zero(xpub, sizeof(xpub));
-        notice("Error", "Could not derive", NULL, "OK");
+        notice("Error", "Could not derive", NULL);
     }
     seedtool_zero(body, sizeof(body));
     seedtool_zero(value, sizeof(value));
@@ -1895,7 +1927,7 @@ static void show_address_qr(const char* title, const char* address)
 {
     for (;;) {
         if (!seedtool_display_qr(title, address)) {
-            notice("Too long for a QR", title, "Read it as text instead", "OK");
+            notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
         if (wait_key() != KEY_REDRAW) {
@@ -1942,7 +1974,7 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
     if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
-        notice("Error", "Could not derive addresses", NULL, "OK");
+        notice("Error", "Could not derive addresses", NULL);
         return false;
     }
     for (uint32_t i = 0; i < ADDRESS_SHOWN_ROWS; ++i) {
@@ -2080,7 +2112,7 @@ static void show_account_key(const char* mnemonic, const char* passphrase, const
             export_qr(mnemonic, passphrase, fphex, type, account, format);
         }
     } else {
-        notice("Error", "Could not derive account key", NULL, "OK");
+        notice("Error", "Could not derive account key", NULL);
     }
     seedtool_zero(xpub, sizeof(xpub));
 }
@@ -2203,7 +2235,7 @@ static void show_stackbit(const char* mnemonic)
     uint16_t numbers[24];
     size_t count = 0;
     if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
-        notice("Error", "Could not compute", "word numbers", "OK");
+        notice("Error", "Could not compute", "word numbers");
         return;
     }
     const char* const layouts[] = { "Simple grid", "Physical layout" };
@@ -2212,22 +2244,40 @@ static void show_stackbit(const char* mnemonic)
         seedtool_zero(numbers, sizeof(numbers));
         return;
     }
-    size_t selected = 0;
+    /* The same ring the paged screens walk, with the words where their pages
+     * go: position 0 is the arrow and 1..count are the words, so stepping off
+     * either end of the carousel lands on the way out rather than wrapping
+     * straight past it. This screen used to wrap forever and leave only by the
+     * chord, which meant the one control it had was the one control it never
+     * drew. `confirmable` is false throughout - there is nothing to accept
+     * here, only a backup to read off and punch. */
+    size_t position = 1;
     for (;;) {
+        const size_t selected = page_shown(position, count);
         char footer[16];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(selected + 1), (unsigned)count);
         const char* const word = seedtool_word(numbers[selected] - 1);
+        const seedtool_nav_t nav = page_nav(position, count, NULL, false);
         if (layout == 0) {
-            seedtool_display_stackbit_screen("Stackbit 1248", numbers[selected], word, footer);
+            seedtool_display_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         } else {
-            seedtool_display_stackbit_physical_screen("Stackbit 1248", numbers[selected], word, footer);
+            seedtool_display_stackbit_physical_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         }
         switch (wait_key()) {
-        case KEY_PREV:
-            selected = (selected + count - 1) % count;
+        case KEY_SELECT:
+            /* On the arrow the chord leaves; on a word it reads on, the same
+             * answer page_text gives the chord on a page. */
+            if (!position) {
+                seedtool_zero(numbers, sizeof(numbers));
+                return;
+            }
+            position = page_step(position, count, true, false);
             break;
         case KEY_NEXT:
-            selected = (selected + 1) % count;
+            position = page_step(position, count, true, false);
+            break;
+        case KEY_PREV:
+            position = page_step(position, count, false, false);
             break;
         case KEY_REDRAW:
             break;
@@ -2252,13 +2302,16 @@ static void show_stackbit(const char* mnemonic)
  * last page, false on backing out at the first page or a timeout - so a
  * caller chaining this into a must-complete sequence (show_generated) can
  * short-circuit on it exactly like any other page_text step, while
- * show_backup_menu's own callers, which don't chain, just discard it. */
-static bool show_numbered_list(const char* mnemonic, const bool show_words)
+ * show_backup_menu's own callers, which don't chain, just discard it. Those
+ * are the two wrappers below, and `confirmable` is the difference: the chained
+ * one ends on a tick that means "written down", the browsed one has no such
+ * step to offer and so does not draw one. */
+static bool show_numbered_list_impl(const char* mnemonic, const bool show_words, const bool confirmable)
 {
     uint16_t numbers[24];
     size_t count = 0;
     if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &count) != SEEDTOOL_OK) {
-        notice("Error", "Could not compute", "word numbers", "OK");
+        notice("Error", "Could not compute", "word numbers");
         return false;
     }
     const size_t pages = (count + 3) / 4;
@@ -2299,7 +2352,7 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
          * the firmware build even though the host build lets it pass. */
         char footer[24];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
-        const seedtool_nav_t nav = page_nav(cursor, pages, footer);
+        const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable);
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
         seedtool_display_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
         switch (wait_key()) {
@@ -2312,13 +2365,13 @@ static bool show_numbered_list(const char* mnemonic, const bool show_words)
                 advanced = true;
                 goto done;
             }
-            cursor = page_step(cursor, pages, true);
+            cursor = page_step(cursor, pages, true, confirmable);
             break;
         case KEY_NEXT:
-            cursor = page_step(cursor, pages, true);
+            cursor = page_step(cursor, pages, true, confirmable);
             break;
         case KEY_PREV:
-            cursor = page_step(cursor, pages, false);
+            cursor = page_step(cursor, pages, false, confirmable);
             break;
         case KEY_REDRAW:
             break;
@@ -2331,6 +2384,20 @@ done:
     seedtool_zero(numbers, sizeof(numbers));
     seedtool_zero(lines, sizeof(lines));
     return advanced;
+}
+
+/* The list as a step in a sequence: the caller goes on to the next screen only
+ * if this one was seen through, so it ends on a tick. */
+static bool show_numbered_list(const char* mnemonic, const bool show_words)
+{
+    return show_numbered_list_impl(mnemonic, show_words, true);
+}
+
+/* The list as something to look at from the backup menu, which does nothing
+ * with the answer either way. Down the pages and out by the arrow. */
+static void read_numbered_list(const char* mnemonic, const bool show_words)
+{
+    (void)show_numbered_list_impl(mnemonic, show_words, false);
 }
 
 /* Entering this screen reaches the whole seed, so the warning is far starker
@@ -2361,7 +2428,7 @@ static void export_seed_qr(const char* mnemonic)
                 : selected == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
                                 : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 2);
             if (!ok) {
-                notice("Too long for a QR", "Compact SeedQR", "Read it as text instead", "OK");
+                notice("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
             }
             switch (wait_key()) {
@@ -2378,7 +2445,7 @@ static void export_seed_qr(const char* mnemonic)
             }
         }
     } else {
-        notice("Error", "Could not derive entropy", NULL, "OK");
+        notice("Error", "Could not derive entropy", NULL);
     }
 done:
     seedtool_zero(entropy, sizeof(entropy));
@@ -2394,9 +2461,9 @@ static void show_backup_menu(const char* mnemonic)
             return;
         }
         if (selected == 0) {
-            (void)show_numbered_list(mnemonic, true);
+            read_numbered_list(mnemonic, true);
         } else if (selected == 1) {
-            (void)show_numbered_list(mnemonic, false);
+            read_numbered_list(mnemonic, false);
         } else if (selected == 2) {
             show_stackbit(mnemonic);
         } else {
@@ -2449,7 +2516,7 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
         if (selected == 0) {
             if (edit_session_passphrase(passphrase)) {
                 if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
-                    notice("Error", "Derivation failed", NULL, "OK");
+                    notice("Error", "Derivation failed", NULL);
                 } else {
                     hexstr(fp, 4, fphex);
                 }
@@ -2480,7 +2547,7 @@ static void show_wallet_data(const char* mnemonic)
      * in full on Derivation's own row, and by the fingerprint titling the menu
      * below, which is a function of it and moves whenever it changes. */
     if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
-        notice("Error", "Derivation failed", NULL, "OK");
+        notice("Error", "Derivation failed", NULL);
         goto done;
     }
     hexstr(fp, sizeof(fp), fphex);
@@ -2510,7 +2577,11 @@ static void show_wallet_data(const char* mnemonic)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
-        const int selected = choose_kept(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), true, &cursor);
+        /* The chrome without an arrow: there is no level above a loaded
+         * wallet, and its only exit erases the session. That stays a row the
+         * reader travels to rather than a control one press from anywhere. */
+        const int selected
+            = choose_nav(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         /* Both ways out of a wallet session reboot: the row, and the timeout
          * that means the reader walked away from a device with a seed on it.
          * Unwinding instead would leave every buffer between here and the main
@@ -2629,7 +2700,7 @@ static int confirm_backup(const char* mnemonic, const size_t count)
         }
         if (!wrong) {
             seedtool_zero(numbers, sizeof(numbers));
-            notice("Backup confirmed", "Words matched", NULL, "Continue");
+            notice("Backup confirmed", "Words matched", NULL);
             return 1;
         }
         if (!nav_acknowledge("Word doesn't match", "Check your backup", NULL, "Try again", false)) {
@@ -2923,11 +2994,18 @@ static int collect_entropy(const int source, const size_t words)
          * was actually made on, not just the verdict. */
         char bits_line[24];
         (void)snprintf(bits_line, sizeof(bits_line), "%d of %u bits", bits, (unsigned)min_bits);
+        /* These two carry their verdict in the body rather than the title bar,
+         * which is the one place the chrome's usual rule is set aside. A title
+         * is read as the name of the screen you are on; these are not names but
+         * findings about the run just made, and a finding that the seed may be
+         * weak should land where the eye already is - the middle of the glass -
+         * not in the strip the reader has learned to skim. The bar keeps the
+         * arrow and the tick, so the way out and the way on are unchanged. */
         if (poor) {
-            proceed = nav_acknowledge("Poor entropy!", bits_line, NULL, "Proceed anyway", true);
+            proceed = nav_acknowledge(NULL, "Poor entropy!", bits_line, "Proceed anyway", true);
         }
         if (proceed && pattern) {
-            proceed = nav_acknowledge("Pattern detected!", NULL, NULL, "Proceed anyway", true);
+            proceed = nav_acknowledge(NULL, "Pattern detected!", NULL, "Proceed anyway", true);
         }
         if (proceed && !poor && !pattern) {
             /* The positive case: the bar's outline goes green, the one point in
@@ -2941,7 +3019,7 @@ static int collect_entropy(const int source, const size_t words)
         }
         if (proceed) {
             if (seedtool_generate((seedtool_source_t)source, words, values, required, &generated) != SEEDTOOL_OK) {
-                notice("Error", "Could not generate seed", NULL, "OK");
+                notice("Error", "Could not generate seed", NULL);
                 break;
             }
             if (show_generated(&generated)) {
@@ -3244,7 +3322,7 @@ static bool flip_words(const size_t words)
         }
 
         if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
-            notice("Error", "Could not complete", "the mnemonic", "OK");
+            notice("Error", "Could not complete", "the mnemonic");
             break;
         }
         review_backup_and_show_wallet(completed, words);
@@ -3403,7 +3481,7 @@ static bool complete_checksum(void)
                 /* Said out loud rather than fallen through silently, which is
                  * what this used to do: the reader typed eleven words and flipped
                  * seven coins and was handed back the menu with no reason. */
-                notice("Error", "Could not complete", "the checksum", "OK");
+                notice("Error", "Could not complete", "the checksum");
                 break;
             }
             if (page_text("Completed mnemonic", completed)) {
@@ -3549,7 +3627,7 @@ static void show_settings_menu(void)
         } else if (selected == 1) {
             show_brightness();
         } else {
-            (void)page_text("Safety",
+            page_read("Safety",
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
                 "record entropy independently. The two buttons sit one above the other; top and bottom move, both "
                 "together select. Origo is derived from parts of Blockstream Jade (github.com/Blockstream/Jade), "
@@ -3593,7 +3671,12 @@ void seedtool_run(void)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
-        const int selected = choose_kept("Origo", menu, sizeof(menu) / sizeof(menu[0]), false, &cursor);
+        /* No arrow: this is the top, and the only way past it is the board's
+         * own reset. It never carried the chord hint either - it is the first
+         * screen after the splash, and teaching two things at once was already
+         * ruled out - so wearing the chrome costs it nothing it had. */
+        const int selected
+            = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {

@@ -618,6 +618,37 @@ class SeedToolVerifierTests(unittest.TestCase):
             self.assertEqual(
                 body.count(f"{plain}("), 0, f"enter_word_number calls {plain} directly, bypassing the filter")
 
+    def test_warning_screens_do_not_preselect_the_way_forward(self):
+        # A screen whose purpose is the warning on it opens on the back arrow,
+        # not on the confirm bar: the way forward should not be one press away
+        # on a screen that exists to say this may be a bad idea. The rule was
+        # applied to three screens and missed on two carrying the same "reveals
+        # every address" warning, which is the kind of drift a convention takes
+        # when nothing checks it.
+        #
+        # nav_acknowledge's last argument is that choice. Matched by the text
+        # the screen shows rather than by a list of call sites, so a new screen
+        # making one of these claims is covered the day it is written.
+        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
+        warnings = (
+            "A photo reveals every address",
+            "A photo = total loss of funds",
+            "These flips are lost",
+        )
+        calls = re.findall(r"nav_acknowledge\(\s*(.*?)\)\s*\)", source, re.S)
+        calls += re.findall(r"nav_screen\(\s*(.*?),\s*NULL\s*\)", source, re.S)
+        seen = 0
+        for call in calls:
+            if not any(w in call for w in warnings):
+                continue
+            seen += 1
+            # The last argument before the closing paren is start_on_back.
+            self.assertTrue(
+                call.rstrip().rstrip(")").rstrip().endswith("true"),
+                f"a warning screen does not open on the arrow: {' '.join(call.split())[:90]}",
+            )
+        self.assertGreaterEqual(seen, 4, f"the warning-text scan found only {seen} screens; it has stopped matching")
+
     def test_passphrase_keyboards_cover_printable_ascii(self):
         source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
         layouts = source.split("passphrase_layouts[PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]

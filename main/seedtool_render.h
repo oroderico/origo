@@ -138,6 +138,18 @@ typedef struct {
     bool back;
     /* Page counter, drawn small in the gap above the bar. NULL draws none. */
     const char* counter;
+    /* Draw the confirm as a tick in the title bar's right slot instead of as a
+     * bar along the bottom. That slot is already held open - the title is
+     * centred between two margins the width of the arrow's box, so the right
+     * one has been empty since the chrome arrived - which is how Jade lays out
+     * a screen the reader takes or leaves: reject on the left, accept on the
+     * right, nothing along the bottom (ui/confirm_address.c).
+     *
+     * A tick says "yes" and nothing else, so this is for screens whose title
+     * already names what confirming does. `confirm` is still the label the
+     * screen would have used, kept for the self-test's width checks and for a
+     * caller that wants to fall back to the bar. */
+    bool confirm_as_tick;
 } seedtool_nav_t;
 
 /* Two or three centred body lines - three when `line3` is given, the same
@@ -262,7 +274,8 @@ bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, siz
  * the word it means before it is punched. One simple layout, adapted from
  * Krux's Stackbit 1248 export (github.com/selfcustody/krux,
  * src/krux/pages/stack_1248.py) rather than its three alternates. */
-void seedtool_render_stackbit_screen(const char* title, unsigned word_number, const char* word, const char* footer);
+void seedtool_render_stackbit_screen(
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 /* The same backup, laid out the way a physical Stackbit 1248 plate actually
  * is: two rows, not four, with the thousands digit a single column of two
@@ -270,7 +283,7 @@ void seedtool_render_stackbit_screen(const char* title, unsigned word_number, co
  * plate side by side with the screen and matching its layout by eye rather
  * than by the weight label alone. */
 void seedtool_render_stackbit_physical_screen(
-    const char* title, unsigned word_number, const char* word, const char* footer);
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 const uint16_t* seedtool_render_pixels(void);
 

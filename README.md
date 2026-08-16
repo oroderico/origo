@@ -541,8 +541,11 @@ layout to draw:
   screen.
 
 Both encode the same word the same way; only where each punch is drawn
-differs. `L/R` step word to word, `BOTH` returns to the Backup menu. This is a
-display only: a plate already punched from a Stackbit-compatible device
+differs. `L/R` step through the words, which sit on the same ring the paged
+screens use: the back arrow is the position above the first word, so stepping
+off either end lands on the way out rather than wrapping past it. `BOTH` reads
+on to the next word, and returns to the Backup menu when the arrow is the thing
+selected. This is a display only: a plate already punched from a Stackbit-compatible device
 restores today with zero new code, by choosing "Enter word numbers" during
 Restore Seed and typing what is punched. Stackbit 1248 is a third-party
 physical backup product; Origo has no affiliation with it.

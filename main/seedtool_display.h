@@ -54,8 +54,9 @@ bool seedtool_display_qr(const char* title, const char* text);
 bool seedtool_display_qr_bytes(const char* title, const uint8_t* data, size_t len);
 bool seedtool_display_qr_bytes_region(const char* title, const uint8_t* data, size_t len, size_t region_index);
 bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, size_t len);
-void seedtool_display_stackbit_screen(const char* title, unsigned word_number, const char* word, const char* footer);
+void seedtool_display_stackbit_screen(
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 void seedtool_display_stackbit_physical_screen(
-    const char* title, unsigned word_number, const char* word, const char* footer);
+    const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 #endif
