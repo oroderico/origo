@@ -1641,8 +1641,12 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "QR export", "Account key included", "A photo reveals every address", "Show QR" },
         { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
-        { "Poor entropy!", "128 of 128 bits", NULL, "Proceed anyway" },
-        { "Pattern detected!", NULL, NULL, "Proceed anyway" },
+        /* The two entropy verdicts wear no title: the finding is drawn in the
+         * body, so what the widest-text check has to hold is the body line, and
+         * a NULL title here is the table saying that is deliberate rather than
+         * an entry someone forgot to fill in. */
+        { NULL, "Poor entropy!", "128 of 128 bits", "Proceed anyway" },
+        { NULL, "Pattern detected!", NULL, "Proceed anyway" },
         /* The coin-word run's reflip warning, the widest question it builds
          * and the widest subject under it. This table claims to hold every
          * screen on the chrome and did not hold this one: the screen arrived

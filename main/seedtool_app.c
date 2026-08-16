@@ -2908,11 +2908,18 @@ static int collect_entropy(const int source, const size_t words)
          * was actually made on, not just the verdict. */
         char bits_line[24];
         (void)snprintf(bits_line, sizeof(bits_line), "%d of %u bits", bits, (unsigned)min_bits);
+        /* These two carry their verdict in the body rather than the title bar,
+         * which is the one place the chrome's usual rule is set aside. A title
+         * is read as the name of the screen you are on; these are not names but
+         * findings about the run just made, and a finding that the seed may be
+         * weak should land where the eye already is - the middle of the glass -
+         * not in the strip the reader has learned to skim. The bar keeps the
+         * arrow and the tick, so the way out and the way on are unchanged. */
         if (poor) {
-            proceed = nav_acknowledge("Poor entropy!", bits_line, NULL, "Proceed anyway", true);
+            proceed = nav_acknowledge(NULL, "Poor entropy!", bits_line, "Proceed anyway", true);
         }
         if (proceed && pattern) {
-            proceed = nav_acknowledge("Pattern detected!", NULL, NULL, "Proceed anyway", true);
+            proceed = nav_acknowledge(NULL, "Pattern detected!", NULL, "Proceed anyway", true);
         }
         if (proceed && !poor && !pattern) {
             /* The positive case: the bar's outline goes green, the one point in
