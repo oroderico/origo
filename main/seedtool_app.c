@@ -731,13 +731,14 @@ static void hexstr(const uint8_t* bytes, const size_t len, char* output)
  * the tighter line pitch the renderer uses for a third line: a third fewer
  * pages to review the same value. Returns true when the reader advanced past
  * the last page or accepted, false when they backed out. */
-static bool page_text_impl(const char* title, const char* text, const bool confirmable)
+static bool page_text_impl(const char* title, const char* text, const bool confirmable, const bool grouped)
 {
     size_t start[MAX_PAGE_LINES], length[MAX_PAGE_LINES];
     const size_t total = strlen(text);
     size_t lines = 0, offset = 0;
     while (lines < MAX_PAGE_LINES && (offset < total || !lines)) {
-        const size_t fit = seedtool_render_fit(text + offset, MAX_LINE_CHARS);
+        const size_t fit = grouped ? seedtool_render_fit_grouped(text + offset, MAX_LINE_CHARS)
+                                   : seedtool_render_fit(text + offset, MAX_LINE_CHARS);
         start[lines] = offset;
         length[lines] = fit;
         /* A glyph wider than the display would otherwise loop forever. */
@@ -773,7 +774,19 @@ static bool page_text_impl(const char* title, const char* text, const bool confi
         }
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
         const seedtool_nav_t nav = page_nav(position, pages, footer, confirmable);
-        seedtool_display_nav_text(&nav, title, line1, line2, line3);
+        if (grouped) {
+            /* Where each line sits in the whole value, in groups, so the
+             * alternating ink carries across the line break rather than
+             * restarting three times a page. Every line but a final short one
+             * is a whole number of groups, which is what makes this exact. */
+            const char* const shown[] = { line1, line2, line3 };
+            const size_t first_group[] = { start[first] / SEEDTOOL_GROUP_LEN,
+                (first + 1 < lines ? start[first + 1] : 0) / SEEDTOOL_GROUP_LEN,
+                (first + 2 < lines ? start[first + 2] : 0) / SEEDTOOL_GROUP_LEN };
+            seedtool_display_nav_grouped(&nav, title, shown, first_group, 3);
+        } else {
+            seedtool_display_nav_text(&nav, title, line1, line2, line3);
+        }
         switch (wait_key()) {
         case KEY_SELECT:
             if (!position) {
@@ -814,7 +827,15 @@ done:
  * caller acts on the answer, so the tick is there to give one. */
 static bool page_text(const char* title, const char* text)
 {
-    return page_text_impl(title, text, true);
+    return page_text_impl(title, text, true, false);
+}
+
+/* page_text for a value with no word shapes to read by - an address. Drawn in
+ * groups of four so the reader transcribing it has somewhere to keep their
+ * place; the string itself is untouched. */
+static bool page_grouped(const char* title, const char* text)
+{
+    return page_text_impl(title, text, true, true);
 }
 
 /* Paged text there is nothing to take. Returns nothing because there is
@@ -822,7 +843,7 @@ static bool page_text(const char* title, const char* text)
  * caller that cannot ask for an answer cannot forget to use it. */
 static void page_read(const char* title, const char* text)
 {
-    (void)page_text_impl(title, text, false);
+    (void)page_text_impl(title, text, false, false);
 }
 
 /* The account key carries its key origin, so a scan does not have to be told
@@ -2214,7 +2235,7 @@ static void show_addresses(
          * make. */
         char path[sizeof(prefix) + 12];
         (void)snprintf(path, sizeof(path), "%s/%u", prefix, (unsigned)index);
-        if (page_text(path, address)) {
+        if (page_grouped(path, address)) {
             show_address_qr(path, address);
         }
         seedtool_zero(address, sizeof(address));
