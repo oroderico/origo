@@ -188,20 +188,6 @@ void seedtool_display_screen(const char* title, const char* line1, const char* l
     flush();
 }
 
-void seedtool_display_screen3(
-    const char* title, const char* line1, const char* line2, const char* line3, const char* footer)
-{
-    seedtool_render_screen3(title, line1, line2, line3, footer);
-    flush();
-}
-
-void seedtool_display_screen4(const char* title, const char* line1, const char* line2, const char* line3,
-    const char* line4, const char* footer)
-{
-    seedtool_render_screen4(title, line1, line2, line3, line4, footer);
-    flush();
-}
-
 void seedtool_display_digits(const char* title, const char* digits, const size_t count, const size_t active,
     const char* footer, const seedtool_progress_t* progress)
 {
@@ -226,13 +212,6 @@ void seedtool_display_dice_screen(const char* title, const char* line1, const ch
 void seedtool_display_splash(void)
 {
     seedtool_render_splash();
-    flush();
-}
-
-void seedtool_display_list(const char* title, const char* const* items, const size_t count, const size_t selected,
-    const size_t top, const char* footer)
-{
-    seedtool_render_list(title, items, count, selected, top, footer);
     flush();
 }
 
