@@ -1530,6 +1530,27 @@ static bool nav_title_stays_in_its_column(const int x)
 /* NAV_BAR_Y in seedtool_render.c, kept in sync with this. */
 #define NAV_BAR_BAND_Y 118
 
+/* The confirm's box in the title bar's right slot: lit, and inside the glass.
+ * A tick says nothing about what confirming does, so what this can check is
+ * that the control is there at all - the screen that vanished its own confirm
+ * would otherwise look like a screen the reader can only back out of, and
+ * nothing else here would notice. */
+static bool nav_right_slot_is_drawn(void)
+{
+    const uint16_t* const pixels = seedtool_render_pixels();
+    /* NAV_BACK_X/WIDTH/Y/HEIGHT in seedtool_render.c, mirrored to the right
+     * edge, kept in sync with the numbers here. */
+    const int left = SEEDTOOL_DISPLAY_WIDTH - 2 - 20;
+    for (int y = 1; y < 1 + 19; ++y) {
+        for (int x = left; x < left + 20; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                return x + 20 <= SEEDTOOL_DISPLAY_WIDTH;
+            }
+        }
+    }
+    return false;
+}
+
 static bool nav_bar_label_fits(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -1651,10 +1672,15 @@ static bool nav_chrome_bands_do_not_collide(void)
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
+            /* confirm_as_tick, because that is what nav_screen sets and these
+             * are its screens: the confirm is a box in the title bar's right
+             * slot and no bar is drawn. Rendering them with a bar would have
+             * this table checking a layout the firmware stopped shipping. */
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
                 .confirm = screens[i].label,
                 .confirm_enabled = true,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
@@ -1665,12 +1691,26 @@ static bool nav_chrome_bands_do_not_collide(void)
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, 118)) {
                 return false;
             }
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            /* No bar to measure on these screens any more - the confirm is a
+             * box in the right slot, so what has to hold is that the slot is
+             * drawn at all. A screen that lost its confirm would otherwise
+             * look like one the reader can only back out of, and nothing else
+             * here would notice. */
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* Measured only with the arrow selected, for the same reason as
-             * above: a selected bar is filled and would swamp this. */
-            if (on_back && !nav_bar_label_fits()) {
+            /* The title's column ends exactly where the tick's box begins, so
+             * on a rendering that draws the tick the two are indistinguishable
+             * by position: an overlong title painting past its column lands
+             * inside the box and reads as the box. The title's placement
+             * depends only on whether there is an arrow, never on the tick, so
+             * it is measured on a tick-free rendering of the same screen. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_text(&bare, screens[i].title, screens[i].line1, screens[i].line2, NULL);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
@@ -1698,15 +1738,23 @@ static bool nav_chrome_bands_do_not_collide(void)
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
                 .confirm = dice[i].label,
                 .confirm_enabled = true,
-                .back = true };
+                .back = true,
+                .confirm_as_tick = true };
             seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
             }
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
+            if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            if (on_back && !nav_bar_label_fits()) {
+            /* Title measured tick-free, for the reason given above: the box
+             * stands exactly where an overlong title would land. */
+            const seedtool_nav_t bare = { .selected = nav.selected,
+                .confirm = nav.confirm,
+                .confirm_enabled = true,
+                .back = true };
+            seedtool_render_nav_dice(&bare, dice[i].title, dice[i].line1, dice[i].line2, &full);
+            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
         }
@@ -1731,9 +1779,14 @@ static bool nav_chrome_bands_do_not_collide(void)
         const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_CONFIRM,
             .confirm = notices[i].label,
             .confirm_enabled = true,
-            .back = false };
+            .back = false,
+            .confirm_as_tick = true };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
-        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)) {
+        /* A notice has no arrow, so its only control is the tick - if that
+         * failed to draw the screen would be one the reader cannot leave at
+         * all, which is worth more than checking a label's width. */
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y)
+            || !nav_right_slot_is_drawn()) {
             return false;
         }
     }

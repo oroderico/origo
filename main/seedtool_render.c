@@ -553,6 +553,23 @@ static void draw_back_arrow(const int x, const int y, const int width, const int
     }
 }
 
+/* A tick, drawn rather than set, for the same reason the arrow above is: the
+ * 16px face has no glyph for one and Jade's symbols font is a component the
+ * audit rejects by name. Two strokes from a common low point - a short one up
+ * to the left, a long one up to the right - each a stack of 2px squares so the
+ * diagonals read as solid rather than as a dotted line of single pixels. */
+static void draw_tick(const int x, const int y, const int width, const int height, const uint16_t color)
+{
+    const int foot_x = x + width / 3;
+    const int foot_y = y + height - 2;
+    for (int i = 0; i < width / 3; ++i) {
+        fill_rect(foot_x - i, foot_y - i, 2, 2, color);
+    }
+    for (int i = 0; i < width - width / 3; ++i) {
+        fill_rect(foot_x + i, foot_y - i, 2, 2, color);
+    }
+}
+
 static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
 {
     fill_rect(x, y, width, 1, color);
@@ -591,6 +608,24 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
             NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
             on_back ? COLOR_BLACK : COLOR_WHITE);
     }
+    /* The confirm as a tick in the right slot, mirroring the arrow: same box,
+     * same borders, same rule closing it underneath. The slot has been held
+     * open by the title's own margins since the chrome arrived, so nothing
+     * moves to make room for it. */
+    if (nav->confirm_as_tick) {
+        const bool on_tick = nav->selected == SEEDTOOL_NAV_CONFIRM;
+        const int x = SEEDTOOL_DISPLAY_WIDTH - NAV_BACK_X - NAV_BACK_WIDTH;
+        if (on_tick) {
+            fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+        }
+        const uint16_t edge = on_tick ? COLOR_HIGHLIGHT : COLOR_DIM;
+        fill_rect(x, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
+        fill_rect(x, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
+        draw_tick(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+            NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
+            on_tick ? COLOR_BLACK : COLOR_WHITE);
+    }
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right
      * against the arrow, and a long one would paint into it. */
@@ -599,7 +634,10 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
 
 static void draw_nav_bar(const seedtool_nav_t* nav)
 {
-    if (!nav->confirm) {
+    /* Nothing along the bottom when the confirm is a tick in the header: the
+     * control exists once, and drawing it twice would make the reader look for
+     * the difference between them. */
+    if (!nav->confirm || nav->confirm_as_tick) {
         return;
     }
     const bool on_confirm = nav->selected == SEEDTOOL_NAV_CONFIRM;

@@ -138,6 +138,18 @@ typedef struct {
     bool back;
     /* Page counter, drawn small in the gap above the bar. NULL draws none. */
     const char* counter;
+    /* Draw the confirm as a tick in the title bar's right slot instead of as a
+     * bar along the bottom. That slot is already held open - the title is
+     * centred between two margins the width of the arrow's box, so the right
+     * one has been empty since the chrome arrived - which is how Jade lays out
+     * a screen the reader takes or leaves: reject on the left, accept on the
+     * right, nothing along the bottom (ui/confirm_address.c).
+     *
+     * A tick says "yes" and nothing else, so this is for screens whose title
+     * already names what confirming does. `confirm` is still the label the
+     * screen would have used, kept for the self-test's width checks and for a
+     * caller that wants to fall back to the bar. */
+    bool confirm_as_tick;
 } seedtool_nav_t;
 
 /* Two or three centred body lines - three when `line3` is given, the same

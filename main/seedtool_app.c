@@ -247,6 +247,12 @@ static int nav_screen(const char* title, const char* one, const char* two, const
         .confirm = label,
         .confirm_enabled = true,
         .back = back,
+        /* A screen the reader takes or leaves has two controls and nothing
+         * else, so they sit where Jade puts them: leave on the left of the
+         * title bar, take on the right, nothing along the bottom. The label
+         * stays in the struct for the width checks even though no bar draws
+         * it - the title is what tells the reader what taking it does. */
+        .confirm_as_tick = true,
     };
     for (;;) {
         if (progress) {
