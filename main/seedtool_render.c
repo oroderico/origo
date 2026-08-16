@@ -110,7 +110,7 @@
  * quietly clipped by the bottom of the display. */
 #define QR_VERSION 6
 #define QR_MAX_MODULES (17 + 4 * QR_VERSION)
-#define QR_LEFT 3
+#define QR_MARGIN 3
 #define QR_TITLE_Y 50
 _Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest QR no longer fits the display");
 
@@ -1270,19 +1270,38 @@ typedef struct {
     int scale;
     int extent;
     int top;
+    int code_x;
     int title_x;
     int title_width;
 } qr_geometry_t;
 
+/* The code sits against the right edge and everything that is not the code -
+ * the title, and the arrow back out - shares the margin left of it. It used to
+ * be the other way round, which left no room on the left for the arrow: a QR
+ * screen was the one place in the firmware whose way out was drawn nowhere at
+ * all, and the reader had to already know the chord left it. */
 static qr_geometry_t qr_geometry(const int modules)
 {
     qr_geometry_t g;
     g.scale = SEEDTOOL_DISPLAY_HEIGHT / modules;
     g.extent = modules * g.scale;
     g.top = (SEEDTOOL_DISPLAY_HEIGHT - g.extent) / 2;
-    g.title_x = QR_LEFT + g.extent + 5;
-    g.title_width = SEEDTOOL_DISPLAY_WIDTH - g.title_x - 3;
+    g.code_x = SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - g.extent;
+    g.title_x = QR_MARGIN;
+    g.title_width = g.code_x - 2 * QR_MARGIN;
     return g;
+}
+
+/* The way out, in the margin the code leaves. Always drawn filled rather than
+ * carrying the chrome's three states: every QR screen leaves on the chord from
+ * wherever the reader is, so the arrow is not a cursor position to move to -
+ * it is a label for what the chord already does. */
+static void draw_qr_back(void)
+{
+    fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
+    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
+        COLOR_BLACK);
 }
 
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
@@ -1306,15 +1325,16 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title)
     const int title_x = g.title_x;
     const int title_width = g.title_width;
     seedtool_render_clear();
-    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
+    fill_rect(g.code_x, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr->size; ++y) {
         for (uint8_t x = 0; x < qr->size; ++x) {
             if (qrcode_getModule(qr, x, y)) {
-                fill_rect(QR_LEFT + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
+                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
             }
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_qr_back();
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
@@ -1433,16 +1453,16 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
     /* The code's own top-left corner, one quiet-zone module in from the white
      * fill's corner: where the boundary grid and the region labels are drawn
      * relative to, since the quiet zone itself has no region to divide. */
-    const int code_left = QR_LEFT + scale;
+    const int code_left = g.code_x + scale;
     const int code_top = top + scale;
     const int code_extent = (int)qr.size * scale;
     const int block = (int)region_size * scale;
     seedtool_render_clear();
-    fill_rect(QR_LEFT, top, extent, extent, COLOR_WHITE);
+    fill_rect(g.code_x, top, extent, extent, COLOR_WHITE);
     for (uint8_t y = 0; y < qr.size; ++y) {
         for (uint8_t x = 0; x < qr.size; ++x) {
             if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(QR_LEFT + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
+                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
             }
         }
     }
@@ -1470,6 +1490,7 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_qr_back();
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
@@ -1497,17 +1518,18 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
             const size_t qx = column * region_size + x;
             const size_t qy = row * region_size + y;
             const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
-            fill_rect(QR_LEFT + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : COLOR_WHITE);
+            fill_rect(g.code_x + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : COLOR_WHITE);
         }
     }
     for (size_t i = 0; i <= region_size; ++i) {
-        fill_rect(QR_LEFT, top + (int)i * scale, extent, 1, COLOR_DIM);
-        fill_rect(QR_LEFT + (int)i * scale, top, 1, extent, COLOR_DIM);
+        fill_rect(g.code_x, top + (int)i * scale, extent, 1, COLOR_DIM);
+        fill_rect(g.code_x + (int)i * scale, top, 1, extent, COLOR_DIM);
     }
     const int label_y = draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
     draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
+    draw_qr_back();
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }
 
