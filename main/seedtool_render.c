@@ -48,6 +48,13 @@
 #define LIST_TOP 21
 #define LIST_ROW_HEIGHT 33
 #define LIST_FOOTER_Y 122
+
+/* The plain screens put their title at the top and their footer near the
+ * bottom; the band between is what the screen is for. Named because the digit
+ * field centres itself in it. */
+#define SCREEN_TITLE_Y 2
+#define SCREEN_TITLE_BOTTOM (SCREEN_TITLE_Y + 16) /* the 16px face's own height */
+#define SCREEN_FOOTER_Y 111
 #define LIST_GUTTER 10
 #define LIST_BAR_X 2
 #define LIST_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - LIST_GUTTER - 2 * LIST_BAR_X)
@@ -434,7 +441,7 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
      * small because 16px there would run off the bottom of the display. */
     draw_centered(tft_Ubuntu16, line1, 39);
     draw_centered(tft_Ubuntu16, line2, 65);
-    draw_centered(tft_DefaultFont, footer, 111);
+    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
 }
 
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
@@ -852,15 +859,23 @@ static void draw_progress_bar(const seedtool_progress_t* progress)
 #define DIGIT_BOX_WIDTH 34
 #define DIGIT_BOX_HEIGHT 32
 #define DIGIT_BOX_GAP 6
-#define DIGIT_BOX_Y 36
 #define DIGIT_ARROW_WIDTH 11
 /* Six rows, not seven: the half-width steps in whole pixels, so an 11-wide
  * triangle has exactly six distinct rows (1, 3, 5, 7, 9, 11). A seventh row
  * has no width left of its own and repeats one, which reads as a flat spot in
  * the edge rather than a straight diagonal. */
 #define DIGIT_ARROW_HEIGHT 6
-#define DIGIT_ARROW_UP_Y 26
-#define DIGIT_ARROW_DOWN_Y 71
+
+/* An arrow, the boxes, an arrow: one stack, sitting at a different height on
+ * each screen that draws it because what is under it differs - the value box
+ * shares its screen with the entropy quality bar, the digit field has only the
+ * footer. Derived from the stack's own parts, so changing an arrow's height
+ * moves the stack rather than silently unbalancing it. */
+#define DIGIT_FIELD_GAP 4
+#define DIGIT_FIELD_HEIGHT (2 * (DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP) + DIGIT_BOX_HEIGHT)
+#define DIGIT_FIELD_TOP(bottom) (SCREEN_TITLE_BOTTOM + ((bottom) -SCREEN_TITLE_BOTTOM - DIGIT_FIELD_HEIGHT) / 2)
+#define DIGIT_FIELD_BOX_Y(top) ((top) + DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP)
+#define DIGIT_FIELD_DOWN_Y(top) (DIGIT_FIELD_BOX_Y(top) + DIGIT_BOX_HEIGHT + DIGIT_FIELD_GAP)
 
 /* Held rather than eyeballed. The widest field is one box per digit a word
  * number can have, and it is centred, so a box or gap grown by a few pixels
@@ -871,9 +886,14 @@ static void draw_progress_bar(const seedtool_progress_t* progress)
 _Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXES_MAX - 1) * DIGIT_BOX_GAP
         <= SEEDTOOL_DISPLAY_WIDTH,
     "the digit boxes are wider than the display");
-_Static_assert(DIGIT_ARROW_UP_Y + DIGIT_ARROW_HEIGHT <= DIGIT_BOX_Y, "the up arrow runs into the digit boxes");
-_Static_assert(DIGIT_BOX_Y + DIGIT_BOX_HEIGHT <= DIGIT_ARROW_DOWN_Y, "the digit boxes run into the down arrow");
-_Static_assert(DIGIT_ARROW_DOWN_Y + DIGIT_ARROW_HEIGHT <= LIST_FOOTER_Y, "the down arrow runs into the footer");
+/* Both placements, each against the thing that actually bounds it. */
+_Static_assert(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y) >= SCREEN_TITLE_BOTTOM, "the digit field runs into the title");
+_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y)) + DIGIT_ARROW_HEIGHT <= SCREEN_FOOTER_Y,
+    "the digit field runs into the footer");
+_Static_assert(DIGIT_FIELD_TOP(DICE_BAR_Y) >= SCREEN_TITLE_BOTTOM, "the value box runs into the title");
+_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(DICE_BAR_Y)) + DIGIT_ARROW_HEIGHT <= DICE_BAR_Y,
+    "the value box runs into the quality bar");
+
 
 /* One wider box for a value scrolled whole rather than digit by digit: a die
  * face is 1-6 and a D20 is 1-20, so splitting it into per-digit boxes would
@@ -885,21 +905,27 @@ void seedtool_render_value_box(
     const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 2);
+    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
+    /* Centred above the quality bar, not the footer: the bar is what shares
+     * this screen, whether or not `progress` draws one this time - the box
+     * should not jump between runs that grade their entropy and runs that do
+     * not. */
+    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
+    const int box_y = DIGIT_FIELD_BOX_Y(top);
     const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
-    fill_rect(x, DIGIT_BOX_Y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
-    draw_border(x, DIGIT_BOX_Y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
+    fill_rect(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
+    draw_border(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
     if (back) {
         draw_backspace(x + (VALUE_BOX_WIDTH - BACKSPACE_WIDTH) / 2,
-            DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2, COLOR_BLACK, COLOR_HIGHLIGHT);
+            box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2, COLOR_BLACK, COLOR_HIGHLIGHT);
     } else {
         draw_centered_in(tft_Ubuntu16, text, x, VALUE_BOX_WIDTH,
-            DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2, COLOR_BLACK);
+            box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2, COLOR_BLACK);
     }
     const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-    draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
-    draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
-    draw_centered(tft_DefaultFont, footer, 111);
+    draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
+    draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
+    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
     if (progress) {
         draw_progress_bar(progress);
     }
@@ -909,8 +935,12 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
     const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 2);
+    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
 
+    /* Nothing under this field but the footer, so it centres in that whole
+     * band rather than sharing the value box's higher placement. */
+    const int top = DIGIT_FIELD_TOP(SCREEN_FOOTER_Y);
+    const int box_y = DIGIT_FIELD_BOX_Y(top);
     const int span = (int)count * DIGIT_BOX_WIDTH + ((int)count - 1) * DIGIT_BOX_GAP;
     const int left = (SEEDTOOL_DISPLAY_WIDTH - span) / 2;
     for (size_t i = 0; i < count; ++i) {
@@ -918,20 +948,20 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
         const bool selected = i == active;
         const bool set = i < active;
         if (selected) {
-            fill_rect(x, DIGIT_BOX_Y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
+            fill_rect(x, box_y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
         }
-        draw_border(x, DIGIT_BOX_Y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT,
+        draw_border(x, box_y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT,
             selected ? COLOR_HIGHLIGHT : set ? COLOR_WHITE : COLOR_DIM);
 
         const char shown = digits[i];
-        const int glyph_y = DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2;
+        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2;
         if (shown == SEEDTOOL_KEY_ACCEPT) {
             draw_centered_in(tft_Ubuntu16, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
             /* The way out of the field rides the same ring as the digits, so
              * the box shows the backspace glyph the keypad already uses for
              * it rather than a letter the reader has to decode. */
-            draw_backspace(x + (DIGIT_BOX_WIDTH - BACKSPACE_WIDTH) / 2, DIGIT_BOX_Y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2,
+            draw_backspace(x + (DIGIT_BOX_WIDTH - BACKSPACE_WIDTH) / 2, box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2,
                 COLOR_BLACK, COLOR_HIGHLIGHT);
         } else if (shown && shown != ' ') {
             const char text[2] = { shown, '\0' };
@@ -940,12 +970,13 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
 
         if (selected) {
             const int arrow_x = x + (DIGIT_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-            draw_triangle(arrow_x, DIGIT_ARROW_UP_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
-            draw_triangle(arrow_x, DIGIT_ARROW_DOWN_Y, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
+            draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
+            draw_triangle(
+                arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
         }
     }
 
-    draw_centered(tft_DefaultFont, footer, 111);
+    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
     if (progress) {
         draw_progress_bar(progress);
     }
