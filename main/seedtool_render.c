@@ -463,6 +463,32 @@ size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 }
 
 
+/* A row's text, with an ellipsis when it did not all fit. A row that simply
+ * stops is indistinguishable from a row that ended - which is fine for a menu
+ * label, since those are held to fitting by a self-test, and wrong for the
+ * address list, where every row is a value cut short and the reader has no
+ * way to tell how much is missing. The three dots say "there is more" without
+ * claiming how much; the address's own page says the rest.
+ *
+ * The ellipsis is paid for out of the same width, not drawn past it: the fit
+ * is recomputed against what is left after reserving room for the dots, so a
+ * truncated row is never wider than one that fits. */
+#define ROW_ELLIPSIS "..."
+
+static void draw_row(const uint8_t* font, const char* text, const int x, const int y, const int width,
+    const uint16_t ink)
+{
+    const size_t fit = fit_in(font, text, SIZE_MAX, width);
+    if (!text[fit]) {
+        draw_line_at(font, text, fit, x, y, ink);
+        return;
+    }
+    const int dots = text_width(font, ROW_ELLIPSIS, strlen(ROW_ELLIPSIS));
+    const size_t shortened = fit_in(font, text, SIZE_MAX, width - dots);
+    draw_line_at(font, text, shortened, x, y, ink);
+    draw_line_at(font, ROW_ELLIPSIS, strlen(ROW_ELLIPSIS), x + text_width(font, text, shortened), y, ink);
+}
+
 size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
 size_t seedtool_render_fit_tail(const char* text)
@@ -807,8 +833,8 @@ void seedtool_render_nav_list(
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
         }
-        draw_line_at(tft_Ubuntu16, item, seedtool_render_fit_row(item), LIST_TEXT_X,
-            y + (NAV_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, highlighted ? COLOR_BLACK : COLOR_WHITE);
+        draw_row(tft_Ubuntu16, item, LIST_TEXT_X, y + (NAV_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, LIST_TEXT_WIDTH,
+            highlighted ? COLOR_BLACK : COLOR_WHITE);
     }
     if (count > SEEDTOOL_LIST_ROWS) {
         const seedtool_thumb_t thumb = seedtool_list_thumb(count, top, NAV_SCROLL_HEIGHT);

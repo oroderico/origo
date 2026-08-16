@@ -1620,6 +1620,57 @@ static bool nav_left_slot_is_drawn(void)
  * alternating ink meaningful across a break: a line ending mid-group would
  * put two same-coloured groups against each other with only the gap between
  * them, and the gap is the signal the colour is there to back up. */
+/* A truncated row has to say so, and has to pay for saying it out of the same
+ * width. Two things are checked, because either alone passes while the other
+ * is broken: that the dots stay inside the row's own column rather than
+ * running under the scrollbar, and that they are drawn at all.
+ *
+ * The second is the one worth explaining. A row drawn without the ellipsis
+ * would be exactly its own fit_row prefix, so rendering that prefix as a row
+ * in its own right and comparing the two framebuffers says whether anything
+ * extra reached the screen. Without it this test would pass on a draw_row
+ * that silently cut, which is the bug it exists for. */
+static bool truncated_rows_show_an_ellipsis(void)
+{
+    static uint16_t truncated[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
+    /* Longer than any row can hold, which is what every address row is: an
+     * index, two spaces and a full address. */
+    static const char* const row = "  0  bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const seedtool_nav_t nav = { .selected = 0, .back = true };
+    const char* const items[] = { row };
+    seedtool_render_nav_list(&nav, "m/84'/0'/0'/0", items, 1, 0);
+    memcpy(truncated, seedtool_render_pixels(), sizeof(truncated));
+
+    int rightmost = -1;
+    for (int y = 21; y < 55; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (truncated[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000 && x > rightmost) {
+                rightmost = x;
+            }
+        }
+    }
+    if (rightmost < 0) {
+        return false; /* the row never reached the screen */
+    }
+    /* LIST_TEXT_X + LIST_TEXT_WIDTH in seedtool_render.c, kept in sync with
+     * the 6 + 222 below: the row's own column, which the ellipsis has to stay
+     * inside rather than run past into the scrollbar's strip. */
+    if (rightmost > 6 + 222) {
+        return false;
+    }
+
+    /* What a silent cut would have drawn. */
+    char prefix[64] = { 0 };
+    const size_t fit = seedtool_render_fit_row(row);
+    if (fit >= sizeof(prefix) || fit >= strlen(row)) {
+        return false; /* the row was meant to be too long for one */
+    }
+    memcpy(prefix, row, fit);
+    const char* const cut[] = { prefix };
+    seedtool_render_nav_list(&nav, "m/84'/0'/0'/0", cut, 1, 0);
+    return memcmp(truncated, seedtool_render_pixels(), sizeof(truncated)) != 0;
+}
+
 static bool grouped_paging_preserves_the_value(void)
 {
     static const char* const values[] = {
@@ -2282,6 +2333,10 @@ static int self_test(void)
     }
     if (!backup_confirm_screen_lines_do_not_wrap()) {
         fputs("Origo backup confirmation screen self-test failed\n", stderr);
+        return 1;
+    }
+    if (!truncated_rows_show_an_ellipsis()) {
+        fputs("Origo truncated row self-test failed\n", stderr);
         return 1;
     }
     if (!grouped_paging_preserves_the_value()) {
