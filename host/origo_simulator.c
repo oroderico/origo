@@ -1235,7 +1235,7 @@ static bool compact_seedqr_is_sound(void)
     if (qrcode_versionForBytes(ECC_LOW, (uint16_t)len, 6) != 1) {
         return false;
     }
-    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
+    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len, SEEDTOOL_NAV_BACK)) {
         return false;
     }
     if (seedtool_mnemonic_entropy(mnemonic24, entropy, sizeof(entropy), &len) != SEEDTOOL_OK || len != 32) {
@@ -1249,7 +1249,7 @@ static bool compact_seedqr_is_sound(void)
     if (qrcode_versionForBytes(ECC_LOW, (uint16_t)len, 6) != 2) {
         return false;
     }
-    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len)) {
+    if (!seedtool_render_qr_bytes("Compact SeedQR", entropy, len, SEEDTOOL_NAV_BACK)) {
         return false;
     }
     return seedtool_mnemonic_entropy(bad_checksum_mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK;
@@ -1275,11 +1275,11 @@ static bool zoomed_qr_regions_are_sound(void)
         return false;
     }
     for (size_t i = 0; i < 9; ++i) {
-        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i)) {
+        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i, SEEDTOOL_NAV_BACK)) {
             return false;
         }
     }
-    if (seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 9)) {
+    if (seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 9, SEEDTOOL_NAV_BACK)) {
         return false;
     }
 
@@ -1290,11 +1290,11 @@ static bool zoomed_qr_regions_are_sound(void)
         return false;
     }
     for (size_t i = 0; i < 25; ++i) {
-        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i)) {
+        if (!seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, i, SEEDTOOL_NAV_BACK)) {
             return false;
         }
     }
-    return !seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 25);
+    return !seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 25, SEEDTOOL_NAV_BACK);
 }
 
 /* The bar's warn (red) and complete (green) colors appear nowhere else on a
@@ -1756,7 +1756,7 @@ static bool qr_address_draws_every_group(void)
 
     for (size_t v = 0; v < sizeof(fits) / sizeof(fits[0]); ++v) {
         const char* const value = fits[v];
-        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", value)) {
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", value, SEEDTOOL_NAV_BACK)) {
             return false; /* these do fit; refusing them is its own failure */
         }
         const int edge = qr_code_left_edge();
@@ -1776,7 +1776,7 @@ static bool qr_address_draws_every_group(void)
         for (size_t i = total - SEEDTOOL_GROUP_LEN; i < total; ++i) {
             altered[i] = altered[i] == 'q' ? 'p' : 'q';
         }
-        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", altered)) {
+        if (!seedtool_render_qr_address("m/84'/0'/0'/0/0", altered, SEEDTOOL_NAV_BACK)) {
             return false;
         }
         const uint16_t* const after = seedtool_render_pixels();
@@ -1796,8 +1796,143 @@ static bool qr_address_draws_every_group(void)
     }
 
     /* And the one the margin cannot hold, which must say so rather than clip. */
-    return !seedtool_render_qr_address(
-        "m/86'/0'/0'/0/0", "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr");
+    return !seedtool_render_qr_address("m/86'/0'/0'/0/0",
+        "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr", SEEDTOOL_NAV_BACK);
+}
+
+/* How far right the theme's orange reaches in the strip the two QR controls
+ * share - NAV_BACK_Y + NAV_BACK_HEIGHT tall, above the first line a margin
+ * draws. Which control the cursor is on is read off this rather than off a
+ * box's coordinates, so the proofs below survive the chrome being moved. */
+static int qr_highlight_reach(void)
+{
+    const uint16_t highlight = 0xfd20;
+    const uint16_t* const pixels = seedtool_render_pixels();
+    int reach = -1;
+    for (int y = 0; y < 20; ++y) {
+        for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+            if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] == highlight && x > reach) {
+                reach = x;
+            }
+        }
+    }
+    return reach;
+}
+
+/* Every QR screen wears the same two controls, and the cursor reaches the sun
+ * on all of them: the account key animates and the Compact SeedQR carousels,
+ * so a shade that only the address screen could reach would be missing from
+ * exactly the codes hardest to scan. */
+static bool qr_chrome_is_the_same_everywhere(void)
+{
+    static const char* const text = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    static const uint8_t entropy[16] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    for (int screen = 0; screen < 5; ++screen) {
+        int reach[2];
+        for (int i = 0; i < 2; ++i) {
+            const size_t selected = i ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
+            const bool ok = screen == 0 ? seedtool_render_qr("Account key", text, selected)
+                : screen == 1           ? seedtool_render_qr_address("m/84'/0'/0'/0/0", text, selected)
+                : screen == 2 ? seedtool_render_qr_bytes("Compact SeedQR", entropy, sizeof(entropy), selected)
+                : screen == 3 ? seedtool_render_qr_bytes_map("Compact SeedQR", entropy, sizeof(entropy), selected)
+                              : seedtool_render_qr_bytes_region("Compact SeedQR", entropy, sizeof(entropy), 0, selected);
+            if (!ok) {
+                return false;
+            }
+            reach[i] = qr_highlight_reach();
+        }
+        if (reach[0] < 0 || reach[1] <= reach[0]) {
+            return false; /* no cursor, or one that cannot reach the sun */
+        }
+    }
+    return true;
+}
+
+/* Cycling the QR's shade has to move the light half of the code and nothing
+ * else: a step that also touched the dark modules would be lowering contrast
+ * from both sides, which is the opposite of what a camera that cannot lock on
+ * needs. Measured off the panel rather than read off the ramp, so the test
+ * says nothing about which greys were chosen - only that one press lands the
+ * light field on one new colour, that the ring closes on itself, and that the
+ * cursor can be seen to be on the control that does it. */
+static bool qr_shade_moves_only_the_light_field(void)
+{
+    static const char* const value = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    static const char* const path = "m/84'/0'/0'/0/0";
+    static uint16_t white[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
+    static uint16_t cycled[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
+    const size_t count = sizeof(white) / sizeof(white[0]);
+
+    /* Nothing has touched the shade yet, so this is also the proof that a QR
+     * left alone is drawn exactly as it was before the ramp existed. */
+    if (!seedtool_render_qr_address(path, value, SEEDTOOL_NAV_BACK)) {
+        return false;
+    }
+    memcpy(white, seedtool_render_pixels(), sizeof(white));
+
+    /* The cursor has to be visible ON the control, not merely somewhere on the
+     * screen: moving to the second control has to carry the highlight to it.
+     * A check that "something changed" passes even when the second control
+     * ignores the cursor entirely, because the first one still gives its
+     * highlight up. */
+    const int back_reach = qr_highlight_reach();
+    if (back_reach < 0) {
+        return false; /* the cursor was never on the way out either */
+    }
+    if (!seedtool_render_qr_address(path, value, SEEDTOOL_NAV_SHADE)) {
+        return false;
+    }
+    if (qr_highlight_reach() <= back_reach) {
+        return false; /* the highlight did not move to the second control */
+    }
+
+    seedtool_render_qr_cycle_shade();
+    if (!seedtool_render_qr_address(path, value, SEEDTOOL_NAV_BACK)) {
+        return false;
+    }
+    memcpy(cycled, seedtool_render_pixels(), sizeof(cycled));
+
+    /* Every pixel that moved was white and is now one single other colour -
+     * the code's light field and the swatch on the button that reports it. */
+    uint16_t shade = 0xffff;
+    size_t moved = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (white[i] == cycled[i]) {
+            continue;
+        }
+        if (white[i] != 0xffff) {
+            return false; /* something other than the light field moved */
+        }
+        if (!moved) {
+            shade = cycled[i];
+        } else if (cycled[i] != shade) {
+            return false; /* the light field is no longer one colour */
+        }
+        ++moved;
+    }
+    if (!moved || shade == 0xffff) {
+        return false;
+    }
+
+    /* The ring closes: pressing on round the ramp lands back on white, in the
+     * same number of presses every time. Each one has to move something, or a
+     * ramp with a repeated entry would still come home and look correct. */
+    for (int i = 0; i < 32; ++i) {
+        seedtool_render_qr_cycle_shade();
+        if (!seedtool_render_qr_address(path, value, SEEDTOOL_NAV_BACK)) {
+            return false;
+        }
+        if (memcmp(cycled, seedtool_render_pixels(), sizeof(cycled)) == 0) {
+            return false; /* a press that changed nothing */
+        }
+        memcpy(cycled, seedtool_render_pixels(), sizeof(cycled));
+        if (memcmp(white, cycled, sizeof(white)) == 0) {
+            /* Home again, and the ramp is left where every other test expects
+             * to find it. */
+            return true;
+        }
+    }
+    return false; /* the ring never came back to where it started */
 }
 
 /* The grouped line is centred with its gaps counted in, so it can run off an
@@ -2437,6 +2572,14 @@ static int self_test(void)
         fputs("Origo address-beside-QR self-test failed\n", stderr);
         return 1;
     }
+    if (!qr_chrome_is_the_same_everywhere()) {
+        fputs("Origo QR chrome self-test failed\n", stderr);
+        return 1;
+    }
+    if (!qr_shade_moves_only_the_light_field()) {
+        fputs("Origo QR shade self-test failed\n", stderr);
+        return 1;
+    }
     if (!nav_chrome_bands_do_not_collide()) {
         fputs("Origo nav chrome geometry self-test failed\n", stderr);
         return 1;
@@ -2452,7 +2595,7 @@ static int self_test(void)
         const unsigned purpose = i ? 86 : 84;
         (void)snprintf(payload, sizeof(payload), "[73c5da0a/%u'/0'/%u']%s", purpose, SEEDTOOL_MAX_ACCOUNT_INDEX,
             i ? expected_xpub86 : expected_xpub84);
-        if (strlen(payload) > 134 || !seedtool_render_qr("BIP84 account key", payload)) {
+        if (strlen(payload) > 134 || !seedtool_render_qr("BIP84 account key", payload, SEEDTOOL_NAV_BACK)) {
             fputs("Origo account key QR self-test failed\n", stderr);
             return 1;
         }
@@ -2465,7 +2608,7 @@ static int self_test(void)
     }
     seedtool_render_screen("ORIGO", "HOST SELF-TEST", address, "OK");
     seedtool_render_splash();
-    if (!seedtool_render_qr("BIP84 address 0", address)) {
+    if (!seedtool_render_qr("BIP84 address 0", address, SEEDTOOL_NAV_BACK)) {
         fputs("Origo QR self-test failed\n", stderr);
         return 1;
     }

@@ -15,6 +15,20 @@
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
 
+/* Five greys the light half of a QR can be drawn in, evenly spaced from
+ * near-black to white: 16, 74, 124, 198, 255 packed as RGB565. The last is
+ * COLOR_WHITE, and is where the ramp starts. */
+static const uint16_t qr_shades[]
+    = { UINT16_C(0x1082), UINT16_C(0x4a49), UINT16_C(0x7bef), UINT16_C(0xc618), COLOR_WHITE };
+#define QR_SHADE_COUNT (sizeof(qr_shades) / sizeof(qr_shades[0]))
+static size_t qr_shade_index = QR_SHADE_COUNT - 1;
+static uint16_t qr_light(void) { return qr_shades[qr_shade_index]; }
+
+void seedtool_render_qr_cycle_shade(void)
+{
+    qr_shade_index = qr_shade_index ? qr_shade_index - 1 : QR_SHADE_COUNT - 1;
+}
+
 /* Sits in the gap between the transcript line (ends y=81) and the footer
  * (starts y=111) that seedtool_render_screen leaves empty on a dice-entry
  * screen. */
@@ -1304,43 +1318,90 @@ static qr_geometry_t qr_geometry(const int modules)
  * carrying the chrome's three states: every QR screen leaves on the chord from
  * wherever the reader is, so the arrow is not a cursor position to move to -
  * it is a label for what the chord already does. */
-/* One control's box in the margin, drawn the way the header's are: filled when
- * it is where the cursor sits, outlined when it is not. */
-static void draw_qr_control(const int y, const triangle_dir_t dir, const bool selected)
+/* The way out, drawn the way the header's controls are: filled when it is
+ * where the cursor sits, outlined when it is not. */
+static void draw_qr_back(const bool selected)
 {
-    if (selected) {
-        fill_rect(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
-    }
-    draw_border(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
-    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2, y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2,
-        NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, dir, selected ? COLOR_BLACK : COLOR_WHITE);
+    /* Painted either way, not only when selected: a screen that redraws a
+     * control to move the cursor off it has to cover the highlight it had. */
+    fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
+    draw_border(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
+    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
+        selected ? COLOR_BLACK : COLOR_WHITE);
 }
 
-/* The only control a QR screen with nothing after it carries. Always drawn
- * filled: it is not a cursor position, since those screens leave on the chord
- * from wherever the reader is - it is a label for what that chord does. */
-static void draw_qr_back(void)
+/* Against the code's own left edge, in the strip the margin leaves empty above
+ * its text: what this control changes is the code, not the way out, and a box
+ * sitting against the code says so without a label. Stacked under the back
+ * arrow it would push the path and the address down, and there is no room
+ * below them to give.
+ *
+ * A sun, because that is what the setting is - and its disc is drawn in the
+ * shade the code's light half currently uses, so the glyph dims as the code
+ * dims and the button reports the state it is about to change. The rays and
+ * the disc's outline stay in ink, which is what keeps a sun visible once its
+ * disc has gone dark enough to vanish into the panel. Drawn from rectangles
+ * rather than set in a symbol font: the two faces this firmware carries are
+ * ASCII, and a font added for one glyph is a dependency added for one glyph. */
+#define QR_SHADE_GAP 3
+#define QR_SUN_CORE 5
+#define QR_SUN_GAP 2
+#define QR_SUN_RAY 2
+#define QR_SUN_EXTENT (QR_SUN_CORE + 2 * (QR_SUN_GAP + QR_SUN_RAY))
+
+/* A code is never wider than the display is tall, so its left edge never comes
+ * further left than this - which is what keeps the sun clear of the way out no
+ * matter which version a screen draws. Checked here rather than trusted,
+ * because the two boxes overlapping would be a quiet mess rather than a
+ * failure: both would still draw. */
+_Static_assert(SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - SEEDTOOL_DISPLAY_HEIGHT - QR_SHADE_GAP - NAV_BACK_WIDTH
+        > NAV_BACK_X + NAV_BACK_WIDTH,
+    "the QR's shade control would overlap its back arrow");
+
+static void draw_qr_shade(const int box_x, const bool selected)
 {
-    draw_qr_control(NAV_BACK_Y, TRIANGLE_LEFT, true);
+    fill_rect(box_x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
+    draw_border(box_x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
+
+    const uint16_t ink = selected ? COLOR_BLACK : COLOR_WHITE;
+    const int left = box_x + (NAV_BACK_WIDTH - QR_SUN_EXTENT) / 2;
+    const int top = NAV_BACK_Y + (NAV_BACK_HEIGHT - QR_SUN_EXTENT) / 2;
+    const int core_x = left + QR_SUN_GAP + QR_SUN_RAY;
+    const int core_y = top + QR_SUN_GAP + QR_SUN_RAY;
+    fill_rect(core_x, core_y, QR_SUN_CORE, QR_SUN_CORE, qr_light());
+    draw_border(core_x - 1, core_y - 1, QR_SUN_CORE + 2, QR_SUN_CORE + 2, ink);
+
+    /* One ray per side, each starting a gap out from the disc's outline. */
+    const int middle = core_x + QR_SUN_CORE / 2;
+    const int centre = core_y + QR_SUN_CORE / 2;
+    fill_rect(middle, top, 1, QR_SUN_RAY, ink);
+    fill_rect(middle, top + QR_SUN_EXTENT - QR_SUN_RAY, 1, QR_SUN_RAY, ink);
+    fill_rect(left, centre, QR_SUN_RAY, 1, ink);
+    fill_rect(left + QR_SUN_EXTENT - QR_SUN_RAY, centre, QR_SUN_RAY, 1, ink);
+    /* And a dot on each diagonal, which is what stops four rays reading as a
+     * cross rather than as a sun. */
+    fill_rect(left + 1, top + 1, 1, 1, ink);
+    fill_rect(left + QR_SUN_EXTENT - 2, top + 1, 1, 1, ink);
+    fill_rect(left + 1, top + QR_SUN_EXTENT - 2, 1, 1, ink);
+    fill_rect(left + QR_SUN_EXTENT - 2, top + QR_SUN_EXTENT - 2, 1, 1, ink);
 }
 
-/* Back at the top of the margin, forward at the bottom, stacked the way the
- * two buttons are: up reaches the way out, down reaches what comes next. For a
- * QR that has somewhere to go on to - an address, whose text is a screen the
- * reader may want and mostly does not. */
-#define QR_FORWARD_Y (SEEDTOOL_DISPLAY_HEIGHT - NAV_BACK_Y - NAV_BACK_HEIGHT)
-
-static void draw_qr_nav(const size_t selected)
+/* Every QR screen wears the same two controls: the way out at the top left,
+ * and the sun against the code's own left edge. One shape everywhere, so the
+ * chord means the same thing on the address, on the account key's frames and
+ * on the Compact SeedQR's tiles - take whatever is highlighted. */
+static void draw_qr_chrome(const int code_x, const size_t selected)
 {
-    draw_qr_control(NAV_BACK_Y, TRIANGLE_LEFT, selected == SEEDTOOL_NAV_BACK);
-    draw_qr_control(QR_FORWARD_Y, TRIANGLE_RIGHT, selected == SEEDTOOL_NAV_CONFIRM);
+    draw_qr_back(selected == SEEDTOOL_NAV_BACK);
+    draw_qr_shade(code_x - QR_SHADE_GAP - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
 }
 
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
  * `qr`'s modules are populated, whichever encoder filled them. `modules` is
  * only needed back to zero it once drawn — it held whatever the mnemonic or
  * key material was encoded as. */
-static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t* selected)
+static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
 {
     /* The code sits left with its quiet zone intact and the title goes in the
      * margin beside it: on a screen that steps through several codes, one that
@@ -1357,7 +1418,7 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_
     const int title_x = g.title_x;
     const int title_width = g.title_width;
     seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, COLOR_WHITE);
+    fill_rect(g.code_x, top, extent, extent, qr_light());
     for (uint8_t y = 0; y < qr->size; ++y) {
         for (uint8_t x = 0; x < qr->size; ++x) {
             if (qrcode_getModule(qr, x, y)) {
@@ -1366,18 +1427,14 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
-    if (selected) {
-        draw_qr_nav(*selected);
-    } else {
-        draw_qr_back();
-    }
+    draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
 
 /* Shared by the plain QR and the one that carries a forward control: `selected`
  * NULL draws only the way out. */
-static bool render_qr_text(const char* title, const char* text, const size_t* selected)
+static bool render_qr_text(const char* title, const char* text, const size_t selected)
 {
     /* Drawn at the smallest version that actually holds `text` -- like
      * seedtool_render_qr_bytes already does for Compact SeedQR -- rather than
@@ -1399,7 +1456,10 @@ static bool render_qr_text(const char* title, const char* text, const size_t* se
     return draw_qr(&qr, modules, title, selected);
 }
 
-bool seedtool_render_qr(const char* title, const char* text) { return render_qr_text(title, text, NULL); }
+bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
+{
+    return render_qr_text(title, text, selected);
+}
 
 /* Two groups to a line, so the address falls into a fixed block rather than
  * into however many groups a margin happens to hold: a reader checking one
@@ -1416,7 +1476,7 @@ bool seedtool_render_qr(const char* title, const char* text) { return render_qr_
  *
  * The address is drawn in the small face rather than the body one - it is here
  * to be checked against something, not transcribed from. */
-bool seedtool_render_qr_address(const char* title, const char* text)
+bool seedtool_render_qr_address(const char* title, const char* text, const size_t selected)
 {
     const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
     if (!version) {
@@ -1458,7 +1518,7 @@ bool seedtool_render_qr_address(const char* title, const char* text)
         return false;
     }
 
-    if (!seedtool_render_qr(NULL, text)) {
+    if (!seedtool_render_qr(NULL, text, selected)) {
         return false;
     }
     int y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
@@ -1510,7 +1570,7 @@ size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
     return chars;
 }
 
-bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len)
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
     if (len > UINT16_MAX) {
         return false;
@@ -1536,7 +1596,7 @@ bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size
         memset(modules, 0, sizeof(modules));
         return false;
     }
-    return draw_qr(&qr, modules, title, NULL);
+    return draw_qr(&qr, modules, title, selected);
 }
 
 /* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own
@@ -1567,7 +1627,7 @@ size_t seedtool_render_qr_bytes_regions(const size_t len)
  * a region apart instead of a module apart. So the legend can never fall out
  * of step with what a zoomed tile actually shows, and the code is never
  * shrunk to make room for it. */
-bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len)
+bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
     if (len > UINT16_MAX) {
         return false;
@@ -1598,7 +1658,7 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
     const int code_extent = (int)qr.size * scale;
     const int block = (int)region_size * scale;
     seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, COLOR_WHITE);
+    fill_rect(g.code_x, top, extent, extent, qr_light());
     for (uint8_t y = 0; y < qr.size; ++y) {
         for (uint8_t x = 0; x < qr.size; ++x) {
             if (qrcode_getModule(&qr, x, y)) {
@@ -1630,7 +1690,7 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
         }
     }
     draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
-    draw_qr_back();
+    draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
@@ -1642,7 +1702,7 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
  * is drawn around it, unlike draw_qr's full code: a block is meant to be
  * hand-copied, never scanned on its own. */
 static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, const size_t region_size,
-    const size_t columns, const size_t region_index)
+    const size_t columns, const size_t region_index, const size_t selected)
 {
     const size_t row = region_index / columns;
     const size_t column = region_index % columns;
@@ -1658,7 +1718,7 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
             const size_t qx = column * region_size + x;
             const size_t qy = row * region_size + y;
             const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
-            fill_rect(g.code_x + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : COLOR_WHITE);
+            fill_rect(g.code_x + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : qr_light());
         }
     }
     for (size_t i = 0; i <= region_size; ++i) {
@@ -1669,11 +1729,12 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
     draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
-    draw_qr_back();
+    draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }
 
-bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, const size_t len, const size_t region_index)
+bool seedtool_render_qr_bytes_region(
+    const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
 {
     if (len > UINT16_MAX) {
         return false;
@@ -1697,7 +1758,7 @@ bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, con
         memset(modules, 0, sizeof(modules));
         return false;
     }
-    draw_qr_region(&qr, modules, title, region_size, columns, region_index);
+    draw_qr_region(&qr, modules, title, region_size, columns, region_index, selected);
     return true;
 }
 
