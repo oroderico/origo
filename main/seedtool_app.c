@@ -862,9 +862,18 @@ static void page_read(const char* title, const char* text)
 #define BBQR_MAX_VALUE_LEN ((ACCOUNT_KEY_LEN > DESCRIPTOR_LEN ? ACCOUNT_KEY_LEN : DESCRIPTOR_LEN) - 1)
 #define BBQR_FRAME_LEN (SEEDTOOL_BBQR_HEADER_LEN + (BBQR_MAX_VALUE_LEN * 8 + 4) / 5 + 1)
 
-/* Frames auto-advance with no press needed; BOTH/timeout leave the screen,
- * same as a static QR would. */
-#define BBQR_FRAME_INTERVAL_MS 700
+/* Frames auto-advance with no press needed, and that is the only way they
+ * advance: up and down move between the screen's two controls instead, the
+ * same as on every other QR. Stepping a multi-part code by hand was the wrong
+ * shape anyway - a reader collects the parts across repeats, so a frame held
+ * still can never complete one - and it was spending both keys on every
+ * animated screen to do it.
+ *
+ * Slower than the 700ms it ran at while a reader could step out of the
+ * animation, since now they cannot: a camera that misses a frame waits a whole
+ * cycle for it to come round. A guess, like the last one - the number to beat
+ * is whatever drops frames on a real panel. */
+#define BBQR_FRAME_INTERVAL_MS 1000
 
 /* Each frame is capped well below this file's QR_VERSION so it draws at a
  * coarser, more legible module grid on this display's 135px height: versions
@@ -882,14 +891,6 @@ static void page_read(const char* title, const char* text)
  * its "Z" compressed encoding, so this always sends "2" (plain base32).
  * Returns the key that ended the animation, exactly what a single
  * seedtool_display_qr call would have handed back. */
-/* Shared by both places show_bbqr steps a frame by hand (already manual, and
- * the moment auto-advance switches to manual), so the wraparound at each end
- * of the frame range is one expression, not two copies to keep in sync. */
-static size_t bbqr_step_part(const size_t part, const size_t parts, const bool forward)
-{
-    return forward ? (part + 1) % parts : (part + parts - 1) % parts;
-}
-
 static seedtool_key_t show_bbqr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
@@ -900,13 +901,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
         return KEY_SELECT;
     }
     size_t part = 0;
-    /* Once the reader steps a frame by hand, auto-advance stops for the rest
-     * of this screen: the 700ms cadence is a guess at what a given camera
-     * needs, and a reader who has already found that guess wrong is better
-     * served by a still frame they step themselves than by the same guess
-     * still running underneath them. A single-part value has nothing to
-     * step to, so it starts (and stays) in that same still mode. */
-    bool manual = parts <= 1;
+    size_t selected = SEEDTOOL_NAV_BACK;
     for (;;) {
         char frame[BBQR_FRAME_LEN];
         /* export_qr's title buffer is 24 bytes; %.20s plus the widest
@@ -922,25 +917,17 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             (void)snprintf(frame_title, sizeof(frame_title), "%.20s", title);
         }
         const bool ok = seedtool_bbqr_part((const uint8_t*)value, len, '2', 'U', part, parts, frame, sizeof(frame))
-            && seedtool_display_qr(frame_title, frame);
+            && seedtool_display_qr(frame_title, frame, selected);
         seedtool_zero(frame, sizeof(frame));
         if (!ok) {
             notice("Too long for a QR", title, "Read it as text instead");
             return KEY_SELECT;
         }
-        if (manual) {
-            const seedtool_key_t key = wait_key();
-            if (key == KEY_REDRAW) {
-                continue;
-            }
-            if (key == KEY_PREV || key == KEY_NEXT) {
-                part = bbqr_step_part(part, parts, key == KEY_NEXT);
-                continue;
-            }
-            return key;
-        }
+        /* A single part has nothing to advance to, so it waits like the still
+         * screen it is rather than redrawing the same code every second. */
         bool ticked = false;
-        const seedtool_key_t key = wait_key_or_tick(BBQR_FRAME_INTERVAL_MS, &ticked);
+        const seedtool_key_t key
+            = parts > 1 ? wait_key_or_tick(BBQR_FRAME_INTERVAL_MS, &ticked) : wait_key();
         if (ticked) {
             part = (part + 1) % parts;
             continue;
@@ -949,8 +936,11 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             continue;
         }
         if (key == KEY_PREV || key == KEY_NEXT) {
-            manual = true;
-            part = bbqr_step_part(part, parts, key == KEY_NEXT);
+            selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
+            continue;
+        }
+        if (key == KEY_SELECT && selected == SEEDTOOL_NAV_SHADE) {
+            seedtool_render_qr_cycle_shade();
             continue;
         }
         return key;
@@ -1978,7 +1968,7 @@ static void show_address_qr(const char* title, const char* address)
             }
             return;
         }
-        if (!seedtool_display_qr(title, address)) {
+        if (!seedtool_display_qr(title, address, SEEDTOOL_NAV_BACK)) {
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
@@ -2468,7 +2458,14 @@ static void read_numbered_list(const char* mnemonic, const bool show_words)
  * region map (that same code, with the boundaries and labels each zoomed
  * tile beyond it will use); 2..regions+1 are Krux-style "Zoomed Region"
  * tiles, stepped sideways the same way show_qr steps between values, so the
- * carousel convention stays one shape everywhere a QR is shown. */
+ * carousel convention stays one shape everywhere a QR is shown.
+ *
+ * One past the last tile is the sun, the only stop that is a control rather
+ * than a view. These are separate views of separate content, not frames of one
+ * payload the way the account key's are, so up and down cannot be freed here
+ * the way they were there - the shade earns its place in the ring instead.
+ * The view under it stays whichever one was being read, so the shade changes
+ * on the code the reader already has a camera pointed at. */
 static void export_seed_qr(const char* mnemonic)
 {
     if (!nav_acknowledge(
@@ -2479,28 +2476,41 @@ static void export_seed_qr(const char* mnemonic)
     size_t len = 0;
     if (seedtool_mnemonic_entropy(mnemonic, entropy, sizeof(entropy), &len) == SEEDTOOL_OK) {
         const size_t regions = seedtool_render_qr_bytes_regions(len);
-        const size_t steps = regions + 2;
-        size_t selected = 0;
+        const size_t views = regions + 2;
+        const size_t steps = views + 1;
+        size_t cursor = 0;
+        size_t view = 0;
         for (;;) {
-            const bool ok = selected == 0
-                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len)
-                : selected == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len)
-                                : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, selected - 2);
+            const size_t chrome = cursor < views ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_SHADE;
+            const bool ok = view == 0
+                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len, chrome)
+                : view == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len, chrome)
+                            : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, view - 2, chrome);
             if (!ok) {
                 notice("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
             }
-            switch (wait_key()) {
+            const seedtool_key_t key = wait_key();
+            if (key == KEY_SELECT && cursor == views) {
+                seedtool_render_qr_cycle_shade();
+                continue;
+            }
+            switch (key) {
             case KEY_PREV:
-                selected = (selected + steps - 1) % steps;
+                cursor = (cursor + steps - 1) % steps;
                 break;
             case KEY_NEXT:
-                selected = (selected + 1) % steps;
+                cursor = (cursor + 1) % steps;
                 break;
             case KEY_REDRAW:
                 break;
             default:
                 goto done;
+            }
+            /* The sun is the one stop that shows no view of its own, so it
+             * leaves the last one standing rather than blanking the screen. */
+            if (cursor < views) {
+                view = cursor;
             }
         }
     } else {

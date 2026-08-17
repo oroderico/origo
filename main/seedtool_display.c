@@ -256,9 +256,9 @@ void seedtool_display_keyboard(const char* title, const char* text, const char* 
     flush();
 }
 
-bool seedtool_display_qr(const char* title, const char* text)
+bool seedtool_display_qr(const char* title, const char* text, const size_t selected)
 {
-    const bool ok = seedtool_render_qr(title, text);
+    const bool ok = seedtool_render_qr(title, text, selected);
     if (ok) {
         flush();
     }
@@ -274,27 +274,28 @@ bool seedtool_display_qr_address(const char* title, const char* text, const size
     return ok;
 }
 
-bool seedtool_display_qr_bytes(const char* title, const uint8_t* data, const size_t len)
+bool seedtool_display_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
-    const bool ok = seedtool_render_qr_bytes(title, data, len);
+    const bool ok = seedtool_render_qr_bytes(title, data, len, selected);
     if (ok) {
         flush();
     }
     return ok;
 }
 
-bool seedtool_display_qr_bytes_region(const char* title, const uint8_t* data, const size_t len, const size_t region_index)
+bool seedtool_display_qr_bytes_region(
+    const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
 {
-    const bool ok = seedtool_render_qr_bytes_region(title, data, len, region_index);
+    const bool ok = seedtool_render_qr_bytes_region(title, data, len, region_index, selected);
     if (ok) {
         flush();
     }
     return ok;
 }
 
-bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, const size_t len)
+bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
-    const bool ok = seedtool_render_qr_bytes_map(title, data, len);
+    const bool ok = seedtool_render_qr_bytes_map(title, data, len, selected);
     if (ok) {
         flush();
     }

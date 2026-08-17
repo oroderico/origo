@@ -256,7 +256,7 @@ size_t seedtool_layout_center(const char* layout);
  * is drawn exactly as it was before this existed. */
 void seedtool_render_qr_cycle_shade(void);
 
-bool seedtool_render_qr(const char* title, const char* text);
+bool seedtool_render_qr(const char* title, const char* text, size_t selected);
 
 /* The same code, with its derivation path and the value itself drawn in the
  * margin beside it - for an address, where the code and the text are two halves
@@ -280,7 +280,7 @@ size_t seedtool_render_qr_alphanumeric_capacity(uint8_t max_version);
  * string: entropy can contain embedded 0x00 bytes, which qrcode_initText's
  * strlen() would silently truncate at. `len` is passed straight through to
  * the byte-mode encoder instead. */
-bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len);
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len, size_t selected);
 
 /* How many "Zoomed Region" tiles seedtool_render_qr_bytes_region below can
  * step through for a byte-mode payload of `len` bytes: the QR is split into
@@ -303,7 +303,7 @@ size_t seedtool_render_qr_bytes_regions(size_t len);
  * code and the zoomed tiles, so a reader has already seen the code at this
  * size before the labels are laid over it, and knows where "A1" sits
  * relative to "B2" before copying either onto a paper template. */
-bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, size_t len);
+bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, size_t len, size_t selected);
 
 /* Draws one zoomed-in region tile of a byte-mode payload's QR code, in raster
  * order (region_index 0 is the top-left block, stepping right then down),
@@ -312,7 +312,8 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, size_t
  * whole code drawn small enough to trace by eye. Krux's "Zoomed Regions Mode"
  * ported to this display's layout. `region_index` must be less than what
  * seedtool_render_qr_bytes_regions(len) returns. */
-bool seedtool_render_qr_bytes_region(const char* title, const uint8_t* data, size_t len, size_t region_index);
+bool seedtool_render_qr_bytes_region(
+    const char* title, const uint8_t* data, size_t len, size_t region_index, size_t selected);
 
 /* The Stackbit 1248 punch-grid backup display: one word's one-based word
  * number (1-2048, the convention enter_word_number() restores by) shown as
