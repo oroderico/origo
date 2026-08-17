@@ -1952,6 +1952,7 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
 static void show_address_qr(const char* title, const char* address)
 {
     size_t selected = SEEDTOOL_NAV_BACK;
+    size_t fallback = SEEDTOOL_NAV_BACK;
     for (;;) {
         if (seedtool_display_qr_address(title, address, selected)) {
             const seedtool_key_t key = wait_key();
@@ -1968,18 +1969,32 @@ static void show_address_qr(const char* title, const char* address)
             }
             return;
         }
-        if (!seedtool_display_qr(title, address, SEEDTOOL_NAV_BACK)) {
+        if (!seedtool_display_qr(title, address, fallback)) {
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
-        /* The fallback keeps the chrome it always had - one way out, and the
-         * text after it - since the value that lands here is the one with no
-         * room left in the margin for a second control. */
-        if (wait_key() == KEY_REDRAW) {
-            continue;
+        /* The fallback wears the same chrome as every other QR, so it answers
+         * the same two keys: a sun drawn here and inert would be a control
+         * that does nothing on the one screen whose value is hardest to
+         * scan. The chord on the way out leads to the text, which is what
+         * this path exists for. */
+        for (;;) {
+            const seedtool_key_t key = wait_key();
+            if (key == KEY_PREV || key == KEY_NEXT) {
+                fallback = fallback == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
+                break;
+            }
+            if (key == KEY_REDRAW) {
+                break;
+            }
+            if (key == KEY_SELECT && fallback == SEEDTOOL_NAV_SHADE) {
+                seedtool_render_qr_cycle_shade();
+                break;
+            }
+            (void)page_text_impl(title, address, false, true);
+            return;
         }
-        (void)page_text_impl(title, address, false, true);
-        return;
+        continue;
     }
 }
 

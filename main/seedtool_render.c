@@ -1318,18 +1318,18 @@ static qr_geometry_t qr_geometry(const int modules)
  * carrying the chrome's three states: every QR screen leaves on the chord from
  * wherever the reader is, so the arrow is not a cursor position to move to -
  * it is a label for what the chord already does. */
-/* One control's box in the margin, drawn the way the header's are: filled when
- * it is where the cursor sits, outlined when it is not. */
-static void draw_qr_control(const int y, const triangle_dir_t dir, const bool selected)
+/* The way out, drawn the way the header's controls are: filled when it is
+ * where the cursor sits, outlined when it is not. */
+static void draw_qr_back(const bool selected)
 {
     /* Painted either way, not only when selected: a screen that redraws a
      * control to move the cursor off it has to cover the highlight it had. */
-    fill_rect(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
-    draw_border(NAV_BACK_X, y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
-    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2, y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2,
-        NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, dir, selected ? COLOR_BLACK : COLOR_WHITE);
+    fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
+    draw_border(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
+    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
+        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
+        selected ? COLOR_BLACK : COLOR_WHITE);
 }
-
 
 /* Against the code's own left edge, in the strip the margin leaves empty above
  * its text: what this control changes is the code, not the way out, and a box
@@ -1344,10 +1344,20 @@ static void draw_qr_control(const int y, const triangle_dir_t dir, const bool se
  * disc has gone dark enough to vanish into the panel. Drawn from rectangles
  * rather than set in a symbol font: the two faces this firmware carries are
  * ASCII, and a font added for one glyph is a dependency added for one glyph. */
+#define QR_SHADE_GAP 3
 #define QR_SUN_CORE 5
 #define QR_SUN_GAP 2
 #define QR_SUN_RAY 2
 #define QR_SUN_EXTENT (QR_SUN_CORE + 2 * (QR_SUN_GAP + QR_SUN_RAY))
+
+/* A code is never wider than the display is tall, so its left edge never comes
+ * further left than this - which is what keeps the sun clear of the way out no
+ * matter which version a screen draws. Checked here rather than trusted,
+ * because the two boxes overlapping would be a quiet mess rather than a
+ * failure: both would still draw. */
+_Static_assert(SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - SEEDTOOL_DISPLAY_HEIGHT - QR_SHADE_GAP - NAV_BACK_WIDTH
+        > NAV_BACK_X + NAV_BACK_WIDTH,
+    "the QR's shade control would overlap its back arrow");
 
 static void draw_qr_shade(const int box_x, const bool selected)
 {
@@ -1383,8 +1393,8 @@ static void draw_qr_shade(const int box_x, const bool selected)
  * on the Compact SeedQR's tiles - take whatever is highlighted. */
 static void draw_qr_chrome(const int code_x, const size_t selected)
 {
-    draw_qr_control(NAV_BACK_Y, TRIANGLE_LEFT, selected == SEEDTOOL_NAV_BACK);
-    draw_qr_shade(code_x - 3 - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
+    draw_qr_back(selected == SEEDTOOL_NAV_BACK);
+    draw_qr_shade(code_x - QR_SHADE_GAP - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
 }
 
 /* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
