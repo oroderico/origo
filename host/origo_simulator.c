@@ -14,6 +14,13 @@
 #include <string.h>
 #include <wally_core.h>
 
+/* COLOR_HIGHLIGHT in seedtool_render.c, which is private to that file - so it
+ * is mirrored here, once, rather than spelled out at each of the checks below
+ * that count or locate highlighted pixels. ORIGO_HIGHLIGHT_WIRE is the same
+ * value byte-swapped, the order the panel is fed. */
+#define ORIGO_HIGHLIGHT UINT16_C(0xfc80)
+#define ORIGO_HIGHLIGHT_WIRE UINT16_C(0x80fc)
+
 /* Published BIP84/BIP86 vectors for the all-zero entropy mnemonic. */
 static const char mnemonic[]
     = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -346,9 +353,9 @@ static bool wire_order_is_big_endian(void)
     seedtool_render_wire_rows(wire, 21, 1);
     bool orange_found = false;
     for (size_t i = 0; i < SEEDTOOL_DISPLAY_WIDTH; ++i) {
-        if (pixels[21 * SEEDTOOL_DISPLAY_WIDTH + i] == 0xfd20) {
+        if (pixels[21 * SEEDTOOL_DISPLAY_WIDTH + i] == ORIGO_HIGHLIGHT) {
             orange_found = true;
-            if (wire[i] != 0x20fd) {
+            if (wire[i] != ORIGO_HIGHLIGHT_WIRE) {
                 return false;
             }
         }
@@ -546,7 +553,7 @@ static bool labels_fit_a_row(void)
 static bool coin_word_screens_fit(void)
 {
     static const char* const fixed[] = { "Word 11 of 23", "Final bits", "Flip word 11 again?",
-        "These flips are lost", "11111111111", "Heads (up)   Tails (down)" };
+        "These flips are lost", "11111111111", "Up heads   Down tails" };
     for (size_t i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
         if (seedtool_render_fit_row(fixed[i]) != strlen(fixed[i])) {
             return false;
@@ -1163,7 +1170,7 @@ static bool stackbit_grid_is_sound(void)
     /* "0001" lights exactly one cell; its pixel count is the discovered
      * per-dot area rather than a hard-coded one. */
     seedtool_render_stackbit_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
-    const size_t unit = count_pixel_color(0xfd20);
+    const size_t unit = count_pixel_color(ORIGO_HIGHLIGHT);
     if (!unit) {
         return false;
     }
@@ -1176,7 +1183,7 @@ static bool stackbit_grid_is_sound(void)
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
         seedtool_render_stackbit_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
-        if (count_pixel_color(0xfd20) != bits * unit) {
+        if (count_pixel_color(ORIGO_HIGHLIGHT) != bits * unit) {
             return false;
         }
     }
@@ -1192,7 +1199,7 @@ static bool stackbit_physical_grid_is_sound(void)
 {
     const seedtool_nav_t nav = stackbit_test_nav();
     seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", 1, seedtool_word(0), "1/1");
-    const size_t unit = count_pixel_color(0xfd20);
+    const size_t unit = count_pixel_color(ORIGO_HIGHLIGHT);
     if (!unit) {
         return false;
     }
@@ -1205,7 +1212,7 @@ static bool stackbit_physical_grid_is_sound(void)
             bits += (v & 1u) + ((v >> 1) & 1u) + ((v >> 2) & 1u) + ((v >> 3) & 1u);
         }
         seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", number, seedtool_word(number - 1), "1/1");
-        if (count_pixel_color(0xfd20) != bits * unit) {
+        if (count_pixel_color(ORIGO_HIGHLIGHT) != bits * unit) {
             return false;
         }
     }
@@ -1303,7 +1310,7 @@ static bool zoomed_qr_regions_are_sound(void)
  * renderer's private layout constants here. */
 static bool dice_progress_bar_is_bounded(void)
 {
-    const uint16_t warn_color = 0xf800, go_color = 0x07e0, fill_color = 0xfd20;
+    const uint16_t warn_color = 0xf800, go_color = 0x07e0, fill_color = ORIGO_HIGHLIGHT;
     const char* const footer = "L/R move   BOTH select";
     const seedtool_progress_t low = { .rolls_pct = 10, .entropy_pct = 10, .warn = false, .complete = false };
     seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &low);
@@ -1443,7 +1450,7 @@ static bool dice_screen_titles_clear_the_edges(void)
  * comment names. */
 static bool dice_screen_hints_clear_the_bar(void)
 {
-    static const char* const hints[] = { "Red bar = non-random", "Return & reshuffle each card", "Looks good" };
+    static const char* const hints[] = { "Red bar = non-random", "Return & reshuffle", "Looks good" };
     /* NAV_FOOTER's own text (seedtool_app.c) - not reachable from here, since
      * it is a #define private to that file rather than a declaration in a
      * header, so it is spelled out rather than named. */
@@ -1507,7 +1514,7 @@ static bool backup_confirm_screen_lines_do_not_wrap(void)
      * below them, copied from show_generated() in seedtool_app.c the same way
      * the dice hints above are. */
     static const char* const lines[]
-        = { "Retype 4 of the 12 words", "Retype 8 of the 24 words", "Have your backup ready" };
+        = { "Retype 4 of 12 words", "Retype 8 of 24 words", "Get your backup ready" };
     for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
         if (rendered_bottom(lines[i]) > one_line) {
             return false;
@@ -1567,8 +1574,8 @@ static bool nav_title_stays_in_its_column(const int x)
 
 
 /* NAV_BAR_Y in seedtool_render.c, kept in sync with this: the band the confirm
- * bar used to occupy, still the floor the body must stay above. */
-#define NAV_BAR_BAND_Y 118
+ * bar occupies, and so the floor the body must stay above. */
+#define NAV_BAR_BAND_Y 117
 
 /* The confirm's box in the title bar's right slot: lit, and inside the glass.
  * A tick says nothing about what confirming does, so what this can check is
@@ -1806,7 +1813,7 @@ static bool qr_address_draws_every_group(void)
  * box's coordinates, so the proofs below survive the chrome being moved. */
 static int qr_highlight_reach(void)
 {
-    const uint16_t highlight = 0xfd20;
+    const uint16_t highlight = ORIGO_HIGHLIGHT;
     const uint16_t* const pixels = seedtool_render_pixels();
     int reach = -1;
     for (int y = 0; y < 20; ++y) {
@@ -2047,7 +2054,7 @@ static bool nav_chrome_bands_do_not_collide(void)
          * number twice over. Copied from seedtool_app.c the same way the dice
          * hints above are. */
         { "Word 12/24", "mosquito", "Number 2048 of 2048", "Use this word" },
-        { "Confirm backup", "Retype 8 of the 24 words", "Have your backup ready", "Start quiz" },
+        { "Confirm backup", "Retype 8 of 24 words", "Get your backup ready", "Start quiz" },
         { "Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet" },
         { "Word doesn't match", "Check your backup", NULL, "Try again" },
         { "Compact SeedQR", "Encodes your ENTIRE seed", "A photo = total loss of funds", "Show QR" },
@@ -2125,7 +2132,7 @@ static bool nav_chrome_bands_do_not_collide(void)
     } dice[] = {
         { "Coins", "256 flips needed", "Red bar = non-random", "Start" },
         { "D6 dice", "99 rolls needed", "Red bar = non-random", "Start" },
-        { "Diamonds", "99 cards needed", "Return & reshuffle each card", "Start" },
+        { "Diamonds", "99 cards needed", "Return & reshuffle", "Start" },
         { "Coins", "256 of 256 bits", "Looks good", "Generate seed" },
     };
     const seedtool_progress_t full = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
@@ -2188,8 +2195,8 @@ static bool nav_chrome_bands_do_not_collide(void)
         }
     }
     /* The paged screens. Their bodies run lower than the two-line ones -
-     * screen4's fourth row ends at 103 - and the page counter goes in what is
-     * left, so the band that must stay clear is only 116..118. Body lines are
+     * screen4's fourth row ends at 101 - and the page counter goes in what is
+     * left, so the band that must stay clear is only 116..117. Body lines are
      * already held to their own widths by seedtool_render_fit, which is what
      * page_text splits by; what is new here is the counter, and whether the
      * two together clear the bar. */
@@ -2205,7 +2212,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
-        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, NAV_BAR_BAND_Y)) {
             return false;
         }
         if (!nav_right_slot_is_drawn()) {
@@ -2228,7 +2235,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             .counter = "6/6",
             .confirm_style = SEEDTOOL_CONFIRM_TICK };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
-        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
+        if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, NAV_BAR_BAND_Y)) {
             return false;
         }
         if (!nav_right_slot_is_drawn()) {

@@ -45,7 +45,8 @@ add_executable(origo-simulator
     "${ORIGO_ROOT}/main/seedtool_logo.c"
     "${ORIGO_ROOT}/main/qrcode.c"
     "${ORIGO_ROOT}/main/fonts/DefaultFont.c"
-    "${ORIGO_ROOT}/main/fonts/Ubuntu16.c")
+    "${ORIGO_ROOT}/main/fonts/Ubuntu16.c"
+    "${ORIGO_ROOT}/main/fonts/DejaVuSans18.c")
 target_include_directories(origo-simulator PRIVATE "${ORIGO_ROOT}/main")
 target_compile_options(origo-simulator PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
 target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)

@@ -11,7 +11,16 @@
 #define COLOR_BLACK UINT16_C(0x0000)
 #define COLOR_WHITE UINT16_C(0xffff)
 #define COLOR_DIM UINT16_C(0x39e7)
-#define COLOR_HIGHLIGHT UINT16_C(0xfd20)
+/* Bitcoin orange, warmed. #F7931A encodes to 0xf483 and read cold on the panel,
+ * so the hue is walked toward red: red to full, green down, blue trimmed, which
+ * lands at 27.4 degrees against the brand's 32.8. Neighbours on the same ramp,
+ * if this wants nudging: 0xfc22 is cooler at 29.6, 0xfba2 warmer at 25.4.
+ *
+ * The label on it is black - white on this fill measures 2.6:1, black 8.2.
+ * Darkening the fill until white measured well was tried and reverted, because
+ * it left the brand colour behind, and the fill is also ink - on black -
+ * wherever a group of an address or the quality bar is drawn in it. */
+#define COLOR_HIGHLIGHT UINT16_C(0xfc80)
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
 
@@ -67,7 +76,9 @@ void seedtool_render_qr_cycle_shade(void)
  * bottom; the band between is what the screen is for. Named because the digit
  * field centres itself in it. */
 #define SCREEN_TITLE_Y 2
-#define SCREEN_TITLE_BOTTOM (SCREEN_TITLE_Y + 16) /* the 16px face's own height */
+/* FONT_TITLE's own height. Spelled as a literal rather than read from the face
+ * because the static asserts below are compile-time. */
+#define SCREEN_TITLE_BOTTOM (SCREEN_TITLE_Y + 16)
 #define SCREEN_FOOTER_Y 111
 #define LIST_GUTTER 10
 #define LIST_BAR_X 2
@@ -104,20 +115,25 @@ void seedtool_render_qr_cycle_shade(void)
  * plain list can let its track overhang that gap, having nothing below it,
  * but here the confirm bar is what comes next and the two must not touch. */
 #define NAV_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * NAV_ROW_HEIGHT - 2)
-#define NAV_BAR_Y 118
-#define NAV_BAR_HEIGHT 17
+/* The bar has to be at least FONT_BODY's own height or its label sits proud of
+ * the fill, so it is exactly that height and its bottom stays flush with the
+ * display. One pixel lower than that would clip the label; one higher would
+ * touch the page counter, whose small face ends at 115. */
+#define NAV_BAR_Y 117
+#define NAV_BAR_HEIGHT 18
+_Static_assert(NAV_BAR_Y + NAV_BAR_HEIGHT == SEEDTOOL_DISPLAY_HEIGHT, "the confirm bar no longer ends at the glass");
 /* Between the lowest body line a paged screen draws (screen4's fourth, ending
- * at 103) and the bar. The small face fits the 14px left over; the 16px one
+ * at 101) and the bar. The small face fits the 11px left over; the body face
  * would not. */
 #define NAV_COUNTER_Y 105
-/* Four left-aligned rows. The heights are inherited from the plain four-line
- * screen this replaced, and kept rather than re-derived: 28 to 88 in steps of
- * 20 fits four 16px lines between the header and the counter with a real gap
- * under each, which is the arithmetic the pixel scan in the self-test holds
- * them to. */
+/* Four left-aligned rows: 26 to 83 in steps of 19 fits four FONT_BODY lines
+ * between the header and the counter with a real gap under each, which is the
+ * arithmetic the pixel scan in the self-test holds them to. The old 28/20 was
+ * the same arithmetic for a 16px body, and the fourth row would now end at 106
+ * - a pixel into the counter. */
 #define NAV_ROWS_SHOWN 4
-#define NAV_ROWS_TOP 28
-#define NAV_ROWS_HEIGHT 20
+#define NAV_ROWS_TOP 26
+#define NAV_ROWS_HEIGHT 19
 
 /* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
  * xpub in one image. Raising it again is a compile error rather than a code
@@ -175,6 +191,18 @@ _Static_assert(STACKBIT_PHYS_GRID_TOP + STACKBIT_PHYS_GRID_HEIGHT <= STACKBIT_PH
 
 extern const unsigned char tft_DefaultFont[];
 extern const unsigned char tft_Ubuntu16[];
+extern const unsigned char tft_Dejavu18[];
+
+/* The three roles a face plays, named after Jade's own two globals so the
+ * policy lives in one place rather than in every call. Jade sets
+ * GUI_TITLE_FONT = Ubuntu16 and GUI_DEFAULT_FONT = DejaVu18 (main/display.c),
+ * which is why its options read heavier than its titles; matching that is the
+ * whole point of carrying the third face. FONT_SMALL has no Jade counterpart -
+ * it is what the footer, the page counter and the narrow column beside a QR
+ * are drawn in, where 18px would truncate text that fits today. */
+#define FONT_TITLE tft_Ubuntu16
+#define FONT_BODY tft_Dejavu18
+#define FONT_SMALL tft_DefaultFont
 
 typedef struct {
     uint8_t y_offset;
@@ -400,7 +428,7 @@ static size_t fit_in_wrapped(const uint8_t* font, const char* text, const size_t
 
 size_t seedtool_render_fit(const char* text, const size_t limit)
 {
-    return fit_in_wrapped(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+    return fit_in_wrapped(FONT_BODY, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
 /* A Bitcoin address is a single unbroken run of base58 or bech32, which is
@@ -480,7 +508,7 @@ static size_t fit_grouped_in(const uint8_t* font, const char* text, const size_t
 
 size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 {
-    return fit_grouped_in(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+    return fit_grouped_in(FONT_BODY, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
 
@@ -510,13 +538,13 @@ static void draw_row(const uint8_t* font, const char* text, const int x, const i
     draw_line_at(font, ROW_ELLIPSIS, strlen(ROW_ELLIPSIS), x + text_width(font, text, shortened), y, ink);
 }
 
-size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
+size_t seedtool_render_fit_row(const char* text) { return fit_in(FONT_BODY, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
 size_t seedtool_render_fit_tail(const char* text)
 {
     const size_t length = strlen(text);
     size_t start = 0;
-    while (start < length && text_width(tft_Ubuntu16, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
+    while (start < length && text_width(FONT_BODY, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
         ++start;
     }
     return length - start;
@@ -555,14 +583,14 @@ void seedtool_render_splash(void)
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 5);
+    draw_centered(FONT_TITLE, title, 5);
     /* The body carries the values that get transcribed, so it takes the larger
      * face. It costs four characters a line and no extra page: this font is 45%
      * taller than the small one but only 18% wider on base58. The footer stays
      * small because 16px there would run off the bottom of the display. */
-    draw_centered(tft_Ubuntu16, line1, 39);
-    draw_centered(tft_Ubuntu16, line2, 65);
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+    draw_centered(FONT_BODY, line1, 39);
+    draw_centered(FONT_BODY, line2, 65);
+    draw_centered(FONT_SMALL, footer, SCREEN_FOOTER_Y);
 }
 
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
@@ -739,7 +767,7 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
     /* Centred between two margins the width of the arrow's box, not across the
      * glass: a title centred over the whole width would read as leaning right
      * against the arrow, and a long one would paint into it. */
-    (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
+    (void)draw_centered_box(FONT_TITLE, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
     /* The rule that closes the header, and with it the bottom of the arrow's
      * box and the tick's - both are drawn with sides and top only, on the
      * understanding that a line underneath would be the fourth edge. On a list
@@ -770,8 +798,8 @@ static void draw_nav_bar(const seedtool_nav_t* nav)
     } else {
         fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, nav->confirm_enabled ? COLOR_WHITE : COLOR_DIM);
     }
-    draw_centered_in(tft_Ubuntu16, nav->confirm, 0, SEEDTOOL_DISPLAY_WIDTH,
-        NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
+    draw_centered_in(FONT_BODY, nav->confirm, 0, SEEDTOOL_DISPLAY_WIDTH,
+        NAV_BAR_Y + (NAV_BAR_HEIGHT - FONT_BODY[1]) / 2, ink);
 }
 
 /* The page counter, in the gap the body leaves above the confirm bar. Small
@@ -779,7 +807,7 @@ static void draw_nav_bar(const seedtool_nav_t* nav)
 static void draw_nav_counter(const seedtool_nav_t* nav)
 {
     if (nav->counter) {
-        draw_centered_in(tft_DefaultFont, nav->counter, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_COUNTER_Y, COLOR_WHITE);
+        draw_centered_in(FONT_SMALL, nav->counter, 0, SEEDTOOL_DISPLAY_WIDTH, NAV_COUNTER_Y, COLOR_WHITE);
     }
 }
 
@@ -808,12 +836,12 @@ void seedtool_render_nav_text(
      * and the heights are theirs unchanged - a screen gaining the chrome
      * should not also move its own text. */
     if (line3) {
-        draw_centered(tft_Ubuntu16, line1, 33);
-        draw_centered(tft_Ubuntu16, line2, 58);
-        draw_centered(tft_Ubuntu16, line3, 83);
+        draw_centered(FONT_BODY, line1, 33);
+        draw_centered(FONT_BODY, line2, 58);
+        draw_centered(FONT_BODY, line3, 83);
     } else {
-        draw_centered(tft_Ubuntu16, line1, 39);
-        draw_centered(tft_Ubuntu16, line2, 65);
+        draw_centered(FONT_BODY, line1, 39);
+        draw_centered(FONT_BODY, line2, 65);
     }
     nav_end(nav);
 }
@@ -829,7 +857,7 @@ void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, c
     for (size_t i = 0; i < count && i < 3; ++i) {
         if (lines[i] && lines[i][0]) {
             draw_grouped_in(
-                tft_Ubuntu16, lines[i], strlen(lines[i]), 0, SEEDTOOL_DISPLAY_WIDTH, y[i], first_group[i]);
+                FONT_BODY, lines[i], strlen(lines[i]), 0, SEEDTOOL_DISPLAY_WIDTH, y[i], first_group[i]);
         }
     }
     nav_end(nav);
@@ -840,7 +868,7 @@ void seedtool_render_nav_rows(
 {
     nav_begin(nav, title);
     for (size_t row = 0; row < NAV_ROWS_SHOWN && row < count; ++row) {
-        draw_left(tft_Ubuntu16, rows[row], SCREEN4_TEXT_X, NAV_ROWS_TOP + (int)row * NAV_ROWS_HEIGHT);
+        draw_left(FONT_BODY, rows[row], SCREEN4_TEXT_X, NAV_ROWS_TOP + (int)row * NAV_ROWS_HEIGHT);
     }
     nav_end(nav);
 }
@@ -867,7 +895,7 @@ void seedtool_render_nav_list(
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
         }
-        draw_row(tft_Ubuntu16, item, LIST_TEXT_X, y + (NAV_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, LIST_TEXT_WIDTH,
+        draw_row(FONT_BODY, item, LIST_TEXT_X, y + (NAV_ROW_HEIGHT - FONT_BODY[1]) / 2, LIST_TEXT_WIDTH,
             highlighted ? COLOR_BLACK : COLOR_WHITE);
     }
     if (count > SEEDTOOL_LIST_ROWS) {
@@ -1055,7 +1083,7 @@ void seedtool_render_value_box(
     const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
+    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
     /* Centred above the quality bar, not the footer: the bar is what shares
      * this screen, whether or not `progress` draws one this time - the box
      * should not jump between runs that grade their entropy and runs that do
@@ -1069,13 +1097,13 @@ void seedtool_render_value_box(
         draw_backspace(x + (VALUE_BOX_WIDTH - BACKSPACE_WIDTH) / 2,
             box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2, COLOR_BLACK, COLOR_HIGHLIGHT);
     } else {
-        draw_centered_in(tft_Ubuntu16, text, x, VALUE_BOX_WIDTH,
-            box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2, COLOR_BLACK);
+        draw_centered_in(FONT_BODY, text, x, VALUE_BOX_WIDTH,
+            box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2, COLOR_BLACK);
     }
     const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
     draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
     draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+    draw_centered(FONT_SMALL, footer, SCREEN_FOOTER_Y);
     if (progress) {
         draw_progress_bar(progress);
     }
@@ -1085,7 +1113,7 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
     const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
+    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
 
     /* Nothing under this field but the footer, so it centres in that whole
      * band rather than sharing the value box's higher placement. */
@@ -1104,9 +1132,9 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
             selected ? COLOR_HIGHLIGHT : set ? COLOR_WHITE : COLOR_DIM);
 
         const char shown = digits[i];
-        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2;
+        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2;
         if (shown == SEEDTOOL_KEY_ACCEPT) {
-            draw_centered_in(tft_Ubuntu16, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
+            draw_centered_in(FONT_BODY, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
             /* The way out of the field rides the same ring as the digits, so
              * the box shows the backspace glyph the keypad already uses for
@@ -1115,7 +1143,7 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
                 COLOR_BLACK, COLOR_HIGHLIGHT);
         } else if (shown && shown != ' ') {
             const char text[2] = { shown, '\0' };
-            draw_centered_in(tft_Ubuntu16, text, x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
+            draw_centered_in(FONT_BODY, text, x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         }
 
         if (selected) {
@@ -1126,7 +1154,7 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
         }
     }
 
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+    draw_centered(FONT_SMALL, footer, SCREEN_FOOTER_Y);
     if (progress) {
         draw_progress_bar(progress);
     }
@@ -1154,8 +1182,8 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
     const size_t selected, const size_t position, const size_t total)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 2);
-    draw_typed(tft_Ubuntu16, text, 32);
+    draw_centered(FONT_TITLE, title, 2);
+    draw_typed(FONT_BODY, text, 32);
     if (total && position) {
         const size_t done = position > total ? total : position - 1;
         const int filled = (int)(DICE_BAR_WIDTH * done / total);
@@ -1182,7 +1210,7 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
              * in a 24px cell and would bleed into the key beside it. */
             const bool worded = row[column] == SEEDTOOL_KEY_PAGE || row[column] == SEEDTOOL_KEY_ACCEPT
                 || row[column] == ' ';
-            const unsigned char* const face = worded ? tft_DefaultFont : tft_Ubuntu16;
+            const unsigned char* const face = worded ? FONT_SMALL : FONT_BODY;
             if (highlighted) {
                 fill_rect(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, COLOR_HIGHLIGHT);
             } else {
@@ -1224,12 +1252,12 @@ void seedtool_render_stackbit_screen(
         }
     }
     for (int row = 0; row < STACKBIT_ROWS; ++row) {
-        const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL + (STACKBIT_CELL - tft_DefaultFont[1]) / 2;
-        draw_line_at(tft_DefaultFont, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
+        const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL + (STACKBIT_CELL - FONT_SMALL[1]) / 2;
+        draw_line_at(FONT_SMALL, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
     }
-    draw_centered_in(tft_Ubuntu16, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
-    draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_DIM);
-    draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
+    draw_centered_in(FONT_BODY, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
+    draw_centered_in(FONT_SMALL, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_DIM);
+    draw_centered(FONT_SMALL, footer, STACKBIT_FOOTER_Y);
 }
 
 void seedtool_render_stackbit_physical_screen(
@@ -1247,7 +1275,7 @@ void seedtool_render_stackbit_physical_screen(
         const unsigned weight = row ? 2u : 1u;
         draw_border(x, y, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
         const char label[2] = { (char)('0' + weight), '\0' };
-        draw_line_at(tft_DefaultFont, label, 1, x + 2, y + 1, COLOR_DIM);
+        draw_line_at(FONT_SMALL, label, 1, x + 2, y + 1, COLOR_DIM);
         if (thousands & weight) {
             fill_rect(x + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
                 y + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
@@ -1266,7 +1294,7 @@ void seedtool_render_stackbit_physical_screen(
                 const unsigned weight = BLOCK_WEIGHTS[row][col];
                 draw_border(cx, cy, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
                 const char label[2] = { (char)('0' + weight), '\0' };
-                draw_line_at(tft_DefaultFont, label, 1, cx + 2, cy + 1, COLOR_DIM);
+                draw_line_at(FONT_SMALL, label, 1, cx + 2, cy + 1, COLOR_DIM);
                 if (value & weight) {
                     fill_rect(cx + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
                         cy + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
@@ -1277,9 +1305,9 @@ void seedtool_render_stackbit_physical_screen(
         x += STACKBIT_PHYS_BLOCK_WIDTH + STACKBIT_PHYS_GAP;
     }
 
-    draw_centered(tft_Ubuntu16, digits, STACKBIT_PHYS_NUMBER_Y);
-    draw_centered(tft_DefaultFont, word, STACKBIT_PHYS_WORD_Y);
-    draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
+    draw_centered(FONT_BODY, digits, STACKBIT_PHYS_NUMBER_Y);
+    draw_centered(FONT_SMALL, word, STACKBIT_PHYS_WORD_Y);
+    draw_centered(FONT_SMALL, footer, STACKBIT_PHYS_FOOTER_Y);
 }
 
 /* Scale/extent/position math shared by every screen that draws a square,
@@ -1426,7 +1454,7 @@ static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_
             }
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_centered_box(FONT_SMALL, title, title_x, title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
@@ -1484,7 +1512,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     }
     const qr_geometry_t g = qr_geometry(17 + 4 * version + 2);
 
-    const int text_top = NAV_BACK_Y + NAV_BACK_HEIGHT + 6 + 2 * tft_DefaultFont[1] + 2;
+    const int text_top = NAV_BACK_Y + NAV_BACK_HEIGHT + 6 + 2 * FONT_SMALL[1] + 2;
     const size_t total = strlen(text);
 
     /* A real grid, not centred lines. The face is proportional, so groups of
@@ -1497,7 +1525,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
         const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
         int width = 0;
         for (size_t j = 0; j < run; ++j) {
-            width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+            width += glyph_advance(FONT_SMALL, (unsigned char)text[i + j]);
         }
         if (width > column) {
             column = width;
@@ -1512,7 +1540,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
      * ended there, and the reader has no way to tell. A taproot address is
      * the case that does not fit - 62 characters against the 48 two columns
      * of four hold in this margin. */
-    const int step = tft_DefaultFont[1] + 2;
+    const int step = FONT_SMALL[1] + 2;
     const size_t lines = (total + QR_ADDRESS_GROUPS * GROUP_LEN - 1) / (QR_ADDRESS_GROUPS * GROUP_LEN);
     if (block_width > g.title_width || text_top + (int)lines * step > SEEDTOOL_DISPLAY_HEIGHT) {
         return false;
@@ -1524,7 +1552,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     int y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
     /* A blank line between the path and the value: they are two different
      * facts, and run together they read as one wrapped string. */
-    y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, y) + tft_DefaultFont[1] + 2;
+    y = draw_centered_box(FONT_SMALL, title, g.title_x, g.title_width, y) + FONT_SMALL[1] + 2;
 
     int left = g.title_x + (g.title_width - block_width) / 2;
     if (left < g.title_x) {
@@ -1543,7 +1571,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
         if (last_line) {
             int width = 0;
             for (size_t j = 0; j < run; ++j) {
-                width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+                width += glyph_advance(FONT_SMALL, (unsigned char)text[i + j]);
             }
             x = left + (block_width - width) / 2;
         } else {
@@ -1551,11 +1579,11 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
         }
         const uint16_t ink = group_ink(i / GROUP_LEN);
         for (size_t j = 0; j < run; ++j) {
-            draw_glyph(tft_DefaultFont, (unsigned char)text[i + j], x, y, ink);
-            x += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
+            draw_glyph(FONT_SMALL, (unsigned char)text[i + j], x, y, ink);
+            x += glyph_advance(FONT_SMALL, (unsigned char)text[i + j]);
         }
         if (slot + 1 == QR_ADDRESS_GROUPS) {
-            y += tft_DefaultFont[1] + 2;
+            y += FONT_SMALL[1] + 2;
         }
     }
     return true;
@@ -1684,12 +1712,12 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
             (void)snprintf(label, sizeof(label), "%c%u", (char)('A' + row), (unsigned)(column + 1));
             const int label_x = code_left + (int)column * block;
             const int label_y = code_top + (int)row * block + 2;
-            const int label_height = tft_DefaultFont[1] + 2;
+            const int label_height = FONT_SMALL[1] + 2;
             fill_rect(label_x + 1, label_y - 1, block - 2, label_height, COLOR_WHITE);
-            draw_centered_in(tft_DefaultFont, label, label_x, block, label_y, COLOR_BLACK);
+            draw_centered_in(FONT_SMALL, label, label_x, block, label_y, COLOR_BLACK);
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_centered_box(FONT_SMALL, title, title_x, title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
@@ -1725,10 +1753,10 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
         fill_rect(g.code_x, top + (int)i * scale, extent, 1, COLOR_DIM);
         fill_rect(g.code_x + (int)i * scale, top, 1, extent, COLOR_DIM);
     }
-    const int label_y = draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    const int label_y = draw_centered_box(FONT_SMALL, title, title_x, title_width, QR_TITLE_Y);
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
-    draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
+    draw_centered_box(FONT_SMALL, label, title_x, title_width, label_y + 4);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }

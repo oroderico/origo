@@ -638,7 +638,11 @@ static int enter_coin_flip(const char* title, const unsigned position, const uns
     char heading[48];
     format_progress_heading(heading, sizeof(heading), title, position, total, progress);
     for (;;) {
-        seedtool_display_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
+        /* Button first, face second: the old "Heads (up)   Tails (down)" was
+         * 247px in the body face and would have wrapped onto the transcript
+         * line below it. Shortening it keeps the two columns lined up with the
+         * two buttons, which is the only thing the line is for. */
+        seedtool_display_dice_screen(heading, "Up heads   Down tails", history, NULL, progress);
         switch (wait_key()) {
         case KEY_SELECT:
             return 0;
@@ -2830,9 +2834,9 @@ static bool review_backup_and_show_wallet(const char* mnemonic, const size_t wor
              * in the firmware build even though the host build lets it pass. */
             char intro[48];
             (void)snprintf(
-                intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
+                intro, sizeof(intro), "Retype %u of %u words", (unsigned)(words / 3), (unsigned)words);
             const int taken
-                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", true, false, NULL);
+                = nav_screen("Confirm backup", intro, "Get your backup ready", "Start quiz", true, false, NULL);
             /* A timeout ends it here rather than stepping back: repainting
              * the whole mnemonic on the way out of an expired session is the
              * one thing this must not do. */
@@ -3004,7 +3008,7 @@ static int collect_entropy(const int source, const size_t words)
          * the longer phrasing wrapped its second line down into the quality
          * bar drawn right below. */
         const char* const hint
-            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
+            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle" : "Red bar = non-random";
         const seedtool_progress_t empty = { 0 };
         if (!nav_dice_confirm(names[source], needed, hint, "Start", false, &empty)) {
             outcome = 0;

@@ -713,12 +713,18 @@ class SeedToolVerifierTests(unittest.TestCase):
             " ledc",
             " driver ",
             "BigFont",
-            "DejaVu",
+            "DejaVuSans24",
             "jade_symbols",
         ):
             self.assertNotIn(forbidden, cmake)
+        # Three faces, and only three. DejaVuSans18 is Jade's own body font
+        # (GUI_DEFAULT_FONT) and was added deliberately so options read at the
+        # weight they do there; the blanket "DejaVu" ban it replaced existed to
+        # keep Jade's font zoo from arriving by drag, which the remaining names
+        # above still do.
         self.assertIn("fonts/DefaultFont.c", cmake)
         self.assertIn("fonts/Ubuntu16.c", cmake)
+        self.assertIn("fonts/DejaVuSans18.c", cmake)
 
     def test_qr_max_version_is_shared_and_unlocked(self):
         # LOCK_VERSION used to pin the encoder to a single fixed version; that

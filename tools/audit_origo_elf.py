@@ -41,7 +41,10 @@ FORBIDDEN_MAP_TEXT = (
     "libbt.a",
     "libnvs_flash.a",
     "BigFont.c.obj",
-    "DejaVuSans",
+    # DejaVuSans18 is deliberately linked - it is Jade's own GUI_DEFAULT_FONT,
+    # carried so body text reads at the weight it does there. Only the sizes
+    # nothing draws in stay forbidden.
+    "DejaVuSans24",
     "jade_symbols_",
 )
 
