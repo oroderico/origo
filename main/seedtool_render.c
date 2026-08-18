@@ -928,11 +928,101 @@ void seedtool_render_nav_list(
 #define HOME_NEXT_WIDTH (SEEDTOOL_DISPLAY_WIDTH - HOME_NEXT_X)
 #define HOME_RULE_Y (HOME_PANEL_Y + HOME_PANEL_HEIGHT + 8)
 #define HOME_FOOTER_Y (HOME_RULE_Y + 9)
-/* The label's own column, inset from both edges of the panel. 128px is enough
- * for every entry name the firmware builds; the widest, "and restart", is
- * 107. */
-#define HOME_LABEL_X 10
-#define HOME_LABEL_INNER (HOME_SELECTED_WIDTH - 2 * HOME_LABEL_X)
+/* The mark's column. The panel is 148 wide and spends 6 + 20 + 6 on padding,
+ * mark and gap, which leaves the label 110 - enough for every entry name the
+ * firmware builds, the widest being "and restart" at 107. A wider mark or a
+ * roomier gap would take that under, and "Derivation" at 103 is a single word
+ * with nowhere to break, so the entries would have to be renamed to fit. */
+#define HOME_ICON 20
+#define HOME_ICON_PAD 6
+#define HOME_LABEL_X (HOME_ICON_PAD + HOME_ICON + HOME_ICON_PAD)
+#define HOME_LABEL_INNER (HOME_SELECTED_WIDTH - HOME_LABEL_X - HOME_ICON_PAD)
+/* The eight marks, each inside a HOME_ICON box at (x, y). Rectangles and one
+ * triangle apiece - no curves, because a curve at this size is a staircase
+ * that reads as a mistake rather than as a curve. */
+static void draw_icon(const seedtool_icon_t icon, const int x, const int y, const uint16_t ink)
+{
+    switch (icon) {
+    case SEEDTOOL_ICON_SEED: {
+        /* A die: the entropy this device offers is dice, coins and cards, so
+         * the mark is the gesture rather than the seed it produces. */
+        draw_border(x + 1, y + 1, 18, 18, ink);
+        static const uint8_t pips[5][2] = { { 5, 5 }, { 13, 5 }, { 9, 9 }, { 5, 13 }, { 13, 13 } };
+        for (size_t i = 0; i < 5; ++i) {
+            fill_rect(x + pips[i][0], y + pips[i][1], 3, 3, ink);
+        }
+        break;
+    }
+    case SEEDTOOL_ICON_RESTORE:
+        /* Into a tray: something arriving from outside, the exact opposite of
+         * what the die does. */
+        fill_rect(x + 8, y + 1, 3, 8, ink);
+        draw_triangle(x + 5, y + 8, 9, 6, TRIANGLE_DOWN, ink);
+        fill_rect(x + 1, y + 14, 2, 5, ink);
+        fill_rect(x + 17, y + 14, 2, 5, ink);
+        fill_rect(x + 1, y + 17, 18, 2, ink);
+        break;
+    case SEEDTOOL_ICON_SETTINGS:
+        /* Sliders, not a cog: what Settings holds are values with a position -
+         * brightness and orientation - rather than machinery. */
+        for (int i = 0; i < 3; ++i) {
+            const int row = y + 3 + i * 6;
+            fill_rect(x + 1, row + 1, 18, 2, ink);
+            fill_rect(x + 3 + i * 6, row - 1, 4, 6, ink);
+        }
+        break;
+    case SEEDTOOL_ICON_BACKUP:
+        /* A written sheet. The backup is paper, so the mark is the thing kept
+         * rather than the act of keeping it. */
+        draw_border(x + 3, y + 1, 14, 18, ink);
+        for (int i = 0; i < 4; ++i) {
+            fill_rect(x + 6, y + 5 + i * 3, i == 3 ? 5 : 8, 1, ink);
+        }
+        break;
+    case SEEDTOOL_ICON_KEY:
+        /* Conventional on purpose: the extended public key is the one entry
+         * whose output another program consumes. */
+        draw_border(x + 1, y + 6, 9, 9, ink);
+        fill_rect(x + 4, y + 9, 3, 3, ink);
+        fill_rect(x + 10, y + 9, 9, 3, ink);
+        fill_rect(x + 14, y + 12, 2, 4, ink);
+        fill_rect(x + 18, y + 12, 2, 3, ink);
+        break;
+    case SEEDTOOL_ICON_PATHS:
+        /* A fork. Derivation is the path opening; two ends because the choice
+         * is between branches, not down a list. */
+        fill_rect(x + 3, y + 2, 2, 16, ink);
+        fill_rect(x + 5, y + 5, 7, 2, ink);
+        fill_rect(x + 5, y + 13, 7, 2, ink);
+        fill_rect(x + 12, y + 3, 5, 5, ink);
+        fill_rect(x + 12, y + 11, 5, 5, ink);
+        break;
+    case SEEDTOOL_ICON_ADDRESSES:
+        /* Finder patterns: addresses leave this device as QR, so the mark is
+         * what the reader is about to be shown. */
+        draw_border(x + 1, y + 1, 8, 8, ink);
+        fill_rect(x + 4, y + 4, 2, 2, ink);
+        draw_border(x + 11, y + 1, 8, 8, ink);
+        fill_rect(x + 14, y + 4, 2, 2, ink);
+        draw_border(x + 1, y + 11, 8, 8, ink);
+        fill_rect(x + 4, y + 14, 2, 2, ink);
+        fill_rect(x + 12, y + 12, 3, 3, ink);
+        fill_rect(x + 16, y + 16, 3, 3, ink);
+        fill_rect(x + 16, y + 12, 2, 2, ink);
+        break;
+    case SEEDTOOL_ICON_ERASE:
+        /* A cross, not a circling arrow: restarting suggests coming back round
+         * to the start, and what happens here is that the seed is gone. */
+        for (int i = 0; i < 15; ++i) {
+            fill_rect(x + 3 + i, y + 3 + i, 3, 2, ink);
+            fill_rect(x + 3 + i, y + 17 - i, 3, 2, ink);
+        }
+        break;
+    case SEEDTOOL_ICON_NONE:
+        break;
+    }
+}
+
 /* Where `label` breaks across the panel: 0 for a label that fits on one line,
  * otherwise the offset of the break. The panel draws at most two lines, so a
  * label that needs a second break has nowhere to put it - which is what
@@ -1007,19 +1097,28 @@ void seedtool_render_home(const seedtool_home_t* home)
         draw_centered_in(FONT_SMALL, home->context, 0, SEEDTOOL_DISPLAY_WIDTH, HOME_CONTEXT_Y, COLOR_WHITE);
     }
 
-    /* A single-line label sits on the same baseline in both panels, so nothing
-     * shifts as an entry moves from the peek into the selection - the one
-     * movement on this screen the reader watches. */
+    /* Both panels place their mark the same way: HOME_ICON_PAD in from their
+     * own left edge, centred on the panel's height. Anything else makes the
+     * mark jump as an entry moves from the peek into the selection, which is
+     * the one movement on this screen the reader watches. */
+    const int icon_y = HOME_PANEL_Y + (HOME_PANEL_HEIGHT - HOME_ICON) / 2;
+    /* And a single-line label sits on the same baseline in both, for the same
+     * reason. A stacked label brackets this line rather than replacing it. */
     const int line_y = HOME_PANEL_Y + (HOME_PANEL_HEIGHT - FONT_BODY[1]) / 2;
 
     fill_rect(HOME_MARGIN, HOME_PANEL_Y, HOME_SELECTED_WIDTH, HOME_PANEL_HEIGHT, COLOR_HIGHLIGHT);
+    draw_icon(home->icon, HOME_MARGIN + HOME_ICON_PAD, icon_y, COLOR_BLACK);
     draw_panel_label(home->selected, HOME_MARGIN, line_y, COLOR_BLACK);
 
-    /* The next panel is a peek, not a cell: its label is cut by the glass on
-     * purpose, which is what says the ring continues rather than ends. */
+    /* The next panel is a peek, not a cell: same mark in the same place, and
+     * the label beside it cut by the glass, which is what says the ring
+     * continues rather than ends. The mark is never cut - a half-word is a
+     * guess, and the mark is what makes the guess unnecessary. */
     if (home->next) {
         fill_rect(HOME_NEXT_X, HOME_PANEL_Y, HOME_NEXT_WIDTH, HOME_PANEL_HEIGHT, COLOR_SLATE);
-        const size_t fit = fit_in(FONT_BODY, home->next, SIZE_MAX, HOME_NEXT_WIDTH - HOME_LABEL_X);
+        draw_icon(home->next_icon, HOME_NEXT_X + HOME_ICON_PAD, icon_y, COLOR_DIM);
+        const size_t fit
+            = fit_in(FONT_BODY, home->next, SIZE_MAX, HOME_NEXT_WIDTH - HOME_LABEL_X);
         draw_line_at(FONT_BODY, home->next, fit, HOME_NEXT_X + HOME_LABEL_X, line_y, COLOR_DIM);
     }
 

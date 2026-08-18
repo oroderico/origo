@@ -208,11 +208,29 @@ void seedtool_render_nav_list(
  * version) or a wallet (and so its fingerprint). `counter` is the position in
  * the ring, needed here and not in a list because only one entry and a sliver
  * of the next are ever on screen. */
+/* The mark beside an entry. Drawn in rectangles and triangles rather than set
+ * from a symbol font: Jade has a 24px symbol face for this, Origo has none,
+ * and carrying one for eight glyphs was refused on the same grounds the back
+ * arrow and the tick were drawn as shapes. */
+typedef enum {
+    SEEDTOOL_ICON_NONE,
+    SEEDTOOL_ICON_SEED,
+    SEEDTOOL_ICON_RESTORE,
+    SEEDTOOL_ICON_SETTINGS,
+    SEEDTOOL_ICON_BACKUP,
+    SEEDTOOL_ICON_KEY,
+    SEEDTOOL_ICON_PATHS,
+    SEEDTOOL_ICON_ADDRESSES,
+    SEEDTOOL_ICON_ERASE,
+} seedtool_icon_t;
+
 typedef struct {
     const char* context;
     const char* selected;
+    seedtool_icon_t icon;
     /* NULL draws no peek panel, for a top level with a single entry. */
     const char* next;
+    seedtool_icon_t next_icon;
     const char* status;
     const char* counter;
 } seedtool_home_t;

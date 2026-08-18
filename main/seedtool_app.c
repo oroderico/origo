@@ -413,8 +413,8 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
  *
  * `context`, `status` and `held` are the home's two labels; see
  * seedtool_home_t. Returns the chosen index, or NAV_TIMEOUT. */
-static int choose_home(
-    const char* context, const char* status, const char* const* items, const size_t count, size_t* const cursor)
+static int choose_home(const char* context, const char* status, const char* const* items,
+    const seedtool_icon_t* icons, const size_t count, size_t* const cursor)
 {
     if (*cursor >= count) {
         *cursor = 0;
@@ -425,10 +425,12 @@ static int choose_home(
         const seedtool_home_t home = {
             .context = context,
             .selected = items[*cursor],
+            .icon = icons[*cursor],
             /* A single-entry home has nothing to peek at, and drawing the one
              * entry again as its own next would say the ring is longer than
              * it is. */
             .next = count > 1 ? items[(*cursor + 1) % count] : NULL,
+            .next_icon = icons[(*cursor + 1) % count],
             .status = status,
             .counter = count > 1 ? counter : NULL,
         };
@@ -2727,11 +2729,14 @@ static void show_wallet_data(const char* mnemonic)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
+        static const seedtool_icon_t marks[] = { SEEDTOOL_ICON_BACKUP, SEEDTOOL_ICON_KEY, SEEDTOOL_ICON_PATHS,
+            SEEDTOOL_ICON_ADDRESSES, SEEDTOOL_ICON_ERASE };
+        _Static_assert(sizeof(marks) / sizeof(marks[0]) == 5, "a wallet entry gained or lost its mark");
         /* The home, not a list: there is no level above a loaded wallet, and
          * its only exit erases the session. That stays an entry the reader
          * travels to rather than a control one press from anywhere. */
         const int selected
-            = choose_home(wallet_path, wallet_status, menu, sizeof(menu) / sizeof(menu[0]), &cursor);
+            = choose_home(wallet_path, wallet_status, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
         /* Both ways out of a wallet session reboot: the row, and the timeout
          * that means the reader walked away from a device with a seed on it.
          * Unwinding instead would leave every buffer between here and the main
@@ -3823,6 +3828,9 @@ void seedtool_run(void)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
+        static const seedtool_icon_t marks[]
+            = { SEEDTOOL_ICON_SEED, SEEDTOOL_ICON_RESTORE, SEEDTOOL_ICON_SETTINGS };
+        _Static_assert(sizeof(marks) / sizeof(marks[0]) == 3, "a home entry gained or lost its mark");
         /* The same home a loaded wallet wears, with the two labels saying what
          * an empty device has to say instead: the product name above, and the
          * firmware version where a wallet would put its fingerprint. The
@@ -3831,7 +3839,7 @@ void seedtool_run(void)
          * other question worth a fixed corner, which is which build is
          * running. No padlock: nothing is being held. */
         const int selected
-            = choose_home("ORIGO", ORIGO_VERSION, menu, sizeof(menu) / sizeof(menu[0]), &cursor);
+            = choose_home("ORIGO", ORIGO_VERSION, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {
