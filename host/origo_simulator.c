@@ -1523,6 +1523,57 @@ static bool backup_confirm_screen_lines_do_not_wrap(void)
     return true;
 }
 
+/* The home packs a panel, a rule and a footer into 135 pixels, and its panel
+ * label wraps rather than clips - so an entry name one word longer would grow
+ * out of the fill and into the gap below it, exactly the failure the nav
+ * bands above exist for. The band checked is between the panel's bottom edge
+ * and the rule that closes it (HOME_PANEL_Y + HOME_PANEL_HEIGHT .. HOME_RULE_Y
+ * in seedtool_render.c, kept in sync with the numbers here).
+ *
+ * Every entry both homes build is checked, in both roles: as the selected
+ * label, which wraps, and as the next-up label, which is cut. Strings copied
+ * from run_menu and show_wallet_data in seedtool_app.c, the same way the dice
+ * hints above are. */
+static bool home_labels_stay_in_their_panels(void)
+{
+    static const char* const entries[] = { "New Seed", "Restore Seed", "Settings", "Backup",
+        "Extended public key", "Derivation", "Addresses", "Erase and restart" };
+    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) {
+        const seedtool_home_t home = {
+            .context = "m/84'/0'/0'",
+            .selected = entries[i],
+            .next = entries[(i + 1) % (sizeof(entries) / sizeof(entries[0]))],
+            .status = "@73c5da0a",
+            .counter = "1 of 5",
+        };
+        /* The label is the check that matters: the panel gives it two lines,
+         * so a third word or an unbreakable long one is dropped or clipped
+         * with nothing on the glass to say so. */
+        if (!seedtool_render_home_label_fits(entries[i])) {
+            return false;
+        }
+        seedtool_render_home(&home);
+        const uint16_t* const pixels = seedtool_render_pixels();
+        for (int y = 92; y < 100; ++y) {
+            for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+                if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                    return false;
+                }
+            }
+        }
+        /* And nothing below the footer's own line, which is the last thing the
+         * screen draws - a status string too tall or too low would land here. */
+        for (int y = 122; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+            for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
+                if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 /* Lit rows of the nav chrome, scanned band by band. The chrome packs a title
  * bar, three list rows and a confirm bar into 135 pixels with single-digit
  * gaps between them, and draw_centered_box wraps rather than clips - so a
@@ -2585,6 +2636,10 @@ static int self_test(void)
     }
     if (!qr_shade_moves_only_the_light_field()) {
         fputs("Origo QR shade self-test failed\n", stderr);
+        return 1;
+    }
+    if (!home_labels_stay_in_their_panels()) {
+        fputs("Origo home panel self-test failed\n", stderr);
         return 1;
     }
     if (!nav_chrome_bands_do_not_collide()) {

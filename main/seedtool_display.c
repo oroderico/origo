@@ -242,6 +242,12 @@ void seedtool_display_nav_list(
     flush();
 }
 
+void seedtool_display_home(const seedtool_home_t* home)
+{
+    seedtool_render_home(home);
+    flush();
+}
+
 void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
     const seedtool_progress_t* progress)
 {

@@ -12,6 +12,12 @@
 #include "seedtool_render.h"
 #include "seedtool_wordlist.h"
 
+/* Shown on the home of a device holding no seed. A placeholder: the project
+ * does not tag releases yet, so this is not derived from anything and does not
+ * move on its own. When versioning starts, this is the one place to change,
+ * and it should start being generated rather than typed. */
+#define ORIGO_VERSION "v0.1"
+
 #define SESSION_TIMEOUT_MS (10 * 60 * 1000)
 #define WARNING_TIMEOUT_MS (60 * 1000)
 /* Minimum roll counts hardly ever land exactly on the bit minimum; this keeps
@@ -387,6 +393,54 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             break;
         case KEY_NEXT:
             *cursor = nav_selection((position + 1) % ring, count, back);
+            break;
+        case KEY_REDRAW:
+            break;
+        default:
+            return NAV_TIMEOUT;
+        }
+    }
+}
+
+/* The top level. A plain ring over `items` with no arrow and no confirm: there
+ * is no level above the home, and an entry is taken rather than agreed to.
+ *
+ * Separate from choose_nav rather than a flag on it because almost nothing is
+ * shared - no scroll window, no back, no bar, and a wrap that is a wrap rather
+ * than a walk to a control at either end. What it does share is the contract:
+ * the cursor is the caller's, so returning to the home leaves the reader where
+ * they were.
+ *
+ * `context`, `status` and `held` are the home's two labels; see
+ * seedtool_home_t. Returns the chosen index, or NAV_TIMEOUT. */
+static int choose_home(
+    const char* context, const char* status, const char* const* items, const size_t count, size_t* const cursor)
+{
+    if (*cursor >= count) {
+        *cursor = 0;
+    }
+    for (;;) {
+        char counter[16];
+        (void)snprintf(counter, sizeof(counter), "%u of %u", (unsigned)(*cursor + 1), (unsigned)count);
+        const seedtool_home_t home = {
+            .context = context,
+            .selected = items[*cursor],
+            /* A single-entry home has nothing to peek at, and drawing the one
+             * entry again as its own next would say the ring is longer than
+             * it is. */
+            .next = count > 1 ? items[(*cursor + 1) % count] : NULL,
+            .status = status,
+            .counter = count > 1 ? counter : NULL,
+        };
+        seedtool_display_home(&home);
+        switch (wait_key()) {
+        case KEY_SELECT:
+            return (int)*cursor;
+        case KEY_PREV:
+            *cursor = (*cursor + count - 1) % count;
+            break;
+        case KEY_NEXT:
+            *cursor = (*cursor + 1) % count;
             break;
         case KEY_REDRAW:
             break;
@@ -2650,26 +2704,34 @@ static void show_wallet_data(const char* mnemonic)
      * the fingerprint in the title, which is always the root's. */
     uint32_t account = 0;
     seedtool_address_type_t type = SEEDTOOL_BIP84;
-    /* The fingerprint names this menu rather than sitting on a row of it: it
-     * is an identity, not an action, and a row that only displayed it was a
-     * screen entered to read one value and left again. In the title it is read
-     * without being asked for, which is what makes it the check it is for -
-     * it is a function of the passphrase in force and moves the moment that
-     * does, so a reader who knows their wallet's fingerprint can see at a
-     * glance whether the device is deriving that wallet. Whether a passphrase
-     * is set at all is said in full on Derivation's own row. */
-    char wallet_title[sizeof("Wallet @") + 8];
-    _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
-        "the wallet title must hold its label and all eight fingerprint hex digits");
-    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+    /* The fingerprint labels this menu rather than sitting on an entry of it:
+     * it is an identity, not an action, and an entry that only displayed it
+     * was a screen entered to read one value and left again. On the home's
+     * status line it is read without being asked for, which is what makes it
+     * the check it is for - it is a function of the passphrase in force and
+     * moves the moment that does, so a reader who knows their wallet's
+     * fingerprint can see at a glance whether the device is deriving that
+     * wallet. Whether a passphrase is set at all is said in full on
+     * Derivation's own entry.
+     *
+     * The path above the entries is the other half of the same question. The
+     * fingerprint says which wallet; the path says which of its branches
+     * every address below is coming from. Both move together when Derivation
+     * does, so both are rebuilt after it returns. */
+    char wallet_status[sizeof("@") + 8];
+    _Static_assert(sizeof(wallet_status) >= sizeof("@") + 8,
+        "the wallet status must hold its marker and all eight fingerprint hex digits");
+    (void)snprintf(wallet_status, sizeof(wallet_status), "@%s", fphex);
+    char wallet_path[sizeof("m/86'/0'/999'")];
+    (void)snprintf(wallet_path, sizeof(wallet_path), "m/%u'/0'/%u'", (unsigned)type, (unsigned)account);
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
-        /* The chrome without an arrow: there is no level above a loaded
-         * wallet, and its only exit erases the session. That stays a row the
-         * reader travels to rather than a control one press from anywhere. */
+        /* The home, not a list: there is no level above a loaded wallet, and
+         * its only exit erases the session. That stays an entry the reader
+         * travels to rather than a control one press from anywhere. */
         const int selected
-            = choose_nav(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
+            = choose_home(wallet_path, wallet_status, menu, sizeof(menu) / sizeof(menu[0]), &cursor);
         /* Both ways out of a wallet session reboot: the row, and the timeout
          * that means the reader walked away from a device with a seed on it.
          * Unwinding instead would leave every buffer between here and the main
@@ -2699,8 +2761,10 @@ static void show_wallet_data(const char* mnemonic)
         case 2:
             show_derivation_menu(mnemonic, &account, &type, passphrase, fp, fphex);
             /* The passphrase may have changed under it, and with it the
-             * fingerprint this title states. */
-            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+             * fingerprint the status line states; the account and type may
+             * have changed too, and with them the path above the entries. */
+            (void)snprintf(wallet_status, sizeof(wallet_status), "@%s", fphex);
+            (void)snprintf(wallet_path, sizeof(wallet_path), "m/%u'/0'/%u'", (unsigned)type, (unsigned)account);
             break;
         default:
             show_addresses(mnemonic, passphrase, type, account);
@@ -3759,12 +3823,15 @@ void seedtool_run(void)
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
-        /* No arrow: this is the top, and the only way past it is the board's
-         * own reset. It never carried the chord hint either - it is the first
-         * screen after the splash, and teaching two things at once was already
-         * ruled out - so wearing the chrome costs it nothing it had. */
+        /* The same home a loaded wallet wears, with the two labels saying what
+         * an empty device has to say instead: the product name above, and the
+         * firmware version where a wallet would put its fingerprint. The
+         * status line is the answer to "what is this device holding", and on
+         * an empty one there is no wallet to name - so it answers the only
+         * other question worth a fixed corner, which is which build is
+         * running. No padlock: nothing is being held. */
         const int selected
-            = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
+            = choose_home("ORIGO", ORIGO_VERSION, menu, sizeof(menu) / sizeof(menu[0]), &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {

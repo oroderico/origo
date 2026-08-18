@@ -197,6 +197,34 @@ void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, cons
 void seedtool_render_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 
+/* The top level, in whichever of its two states the device is in. There is one
+ * home screen, not a menu screen and a wallet screen: an empty device and a
+ * loaded wallet differ in what the entries say and in the two labels that
+ * bracket them, never in where anything sits.
+ *
+ * `context` is what the entries are entries *of* - the product name with no
+ * seed held, the derivation path in force with one. `status` is the other half
+ * of that: what the device is holding, which is nothing (and so a firmware
+ * version) or a wallet (and so its fingerprint). `counter` is the position in
+ * the ring, needed here and not in a list because only one entry and a sliver
+ * of the next are ever on screen. */
+typedef struct {
+    const char* context;
+    const char* selected;
+    /* NULL draws no peek panel, for a top level with a single entry. */
+    const char* next;
+    const char* status;
+    const char* counter;
+} seedtool_home_t;
+
+void seedtool_render_home(const seedtool_home_t* home);
+
+/* Whether `label` is drawn whole on the selected panel. The panel gives a
+ * label two lines and no more, so a three-word entry, or a single word wider
+ * than the panel, would be silently cut - this is what the self-test holds
+ * every entry name to, since the failure is invisible on the glass. */
+bool seedtool_render_home_label_fits(const char* label);
+
 /* Two body lines with the dice/coin quality bar drawn in, for the screens that
  * bracket an entropy run: the one before it showing the bar empty, and the one
  * after showing it full. */

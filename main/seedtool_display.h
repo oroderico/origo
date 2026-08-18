@@ -38,6 +38,8 @@ void seedtool_display_nav_grouped(const seedtool_nav_t* nav, const char* title, 
 void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
 void seedtool_display_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
+/* The top level, empty or loaded - see seedtool_home_t. */
+void seedtool_display_home(const seedtool_home_t* home);
 void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
     const seedtool_progress_t* progress);
 void seedtool_display_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,

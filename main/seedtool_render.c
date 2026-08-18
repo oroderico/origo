@@ -11,6 +11,10 @@
 #define COLOR_BLACK UINT16_C(0x0000)
 #define COLOR_WHITE UINT16_C(0xffff)
 #define COLOR_DIM UINT16_C(0x39e7)
+/* A fill, not an ink: the home's next-up panel, which has to read as a panel
+ * rather than as bare glass without competing with the selected one beside it.
+ * Dark enough that white text on it is still clearly the unselected half. */
+#define COLOR_SLATE UINT16_C(0x2124)
 /* Bitcoin orange, warmed. #F7931A encodes to 0xf483 and read cold on the panel,
  * so the hue is walked toward red: red to full, green down, blue trimmed, which
  * lands at 27.4 degrees against the brand's 32.8. Neighbours on the same ramp,
@@ -904,6 +908,130 @@ void seedtool_render_nav_list(
         fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
     }
     nav_end(nav);
+}
+
+/* The home, in both the states it has. One screen rather than two: what a
+ * loaded wallet changes is the entries and the two labels around them, never
+ * the geometry - so a reader who has learned where to look on an empty device
+ * has learned it for a loaded one too.
+ *
+ * The panels take the whole width between them: the selected one wide enough
+ * to carry two words of the body face, the next one narrow and cut off at the
+ * glass, which is what says the list continues rather than ends. */
+#define HOME_CONTEXT_Y 4
+#define HOME_PANEL_Y 18
+#define HOME_PANEL_HEIGHT 74
+#define HOME_PANEL_GAP 2
+#define HOME_MARGIN 4
+#define HOME_SELECTED_WIDTH 148
+#define HOME_NEXT_X (HOME_MARGIN + HOME_SELECTED_WIDTH + HOME_PANEL_GAP)
+#define HOME_NEXT_WIDTH (SEEDTOOL_DISPLAY_WIDTH - HOME_NEXT_X)
+#define HOME_RULE_Y (HOME_PANEL_Y + HOME_PANEL_HEIGHT + 8)
+#define HOME_FOOTER_Y (HOME_RULE_Y + 9)
+/* The label's own column, inset from both edges of the panel. 128px is enough
+ * for every entry name the firmware builds; the widest, "and restart", is
+ * 107. */
+#define HOME_LABEL_X 10
+#define HOME_LABEL_INNER (HOME_SELECTED_WIDTH - 2 * HOME_LABEL_X)
+/* Where `label` breaks across the panel: 0 for a label that fits on one line,
+ * otherwise the offset of the break. The panel draws at most two lines, so a
+ * label that needs a second break has nowhere to put it - which is what
+ * seedtool_render_home_label_fits below exists to catch before it ships. */
+/* A two-word entry stacks even when it would fit on one line. The panel is
+ * taller than it is wordy, and a single line floating in it reads as a caption
+ * rather than as the block of colour the selection is meant to be - so the
+ * break is the default and one line is what a single word falls back to. */
+static size_t home_label_split(const char* label, const size_t length)
+{
+    const char* const space = strchr(label, ' ');
+    if (space) {
+        const size_t at = (size_t)(space - label);
+        if (text_width(FONT_BODY, label, at) <= HOME_LABEL_INNER
+            && text_width(FONT_BODY, space + 1, length - at - 1) <= HOME_LABEL_INNER) {
+            return at;
+        }
+    }
+    if (text_width(FONT_BODY, label, length) <= HOME_LABEL_INNER) {
+        return 0;
+    }
+    const size_t fit = fit_in_wrapped(FONT_BODY, label, length, HOME_LABEL_INNER);
+    return fit < length ? fit : 0;
+}
+
+bool seedtool_render_home_label_fits(const char* label)
+{
+    const size_t length = strlen(label);
+    const size_t split = home_label_split(label, length);
+    if (!split) {
+        /* Either it fits on one line, or it is a single word too wide to break
+         * at all - fit_in_wrapped returns the whole string for that, and the
+         * panel would clip it. */
+        return text_width(FONT_BODY, label, length) <= HOME_LABEL_INNER;
+    }
+    size_t rest = split;
+    while (label[rest] == ' ') {
+        ++rest;
+    }
+    return text_width(FONT_BODY, label + rest, length - rest) <= HOME_LABEL_INNER;
+}
+
+/* Splits `label` across the panel at its last space, or centres it on one line
+ * when it fits whole. Two short words read better stacked in a block this
+ * shape than set in one long line with the panel empty above and below. */
+static void draw_panel_label(const char* label, const int x, const int line_y, const uint16_t ink)
+{
+    const size_t length = strlen(label);
+    const size_t split = home_label_split(label, length);
+    if (!split) {
+        draw_line_at(FONT_BODY, label, length, x + HOME_LABEL_X, line_y, ink);
+        return;
+    }
+    /* Two lines straddle the one a single-line label would have sat on. */
+    draw_line_at(FONT_BODY, label, split, x + HOME_LABEL_X, line_y - 11, ink);
+    size_t rest = split;
+    while (label[rest] == ' ') {
+        ++rest;
+    }
+    draw_line_at(FONT_BODY, label + rest, length - rest, x + HOME_LABEL_X, line_y + 11, ink);
+}
+
+void seedtool_render_home(const seedtool_home_t* home)
+{
+    seedtool_render_clear();
+    if (home->context) {
+        /* Every label bracketing the panels is white, in both states. The
+         * strip and the footer are the screen's fixed text, and grading them
+         * by how much each one matters put four values of grey on two lines
+         * for a reader to decode; one ink says "this is the frame" and lets
+         * the fill be the only thing that means anything. */
+        draw_centered_in(FONT_SMALL, home->context, 0, SEEDTOOL_DISPLAY_WIDTH, HOME_CONTEXT_Y, COLOR_WHITE);
+    }
+
+    /* A single-line label sits on the same baseline in both panels, so nothing
+     * shifts as an entry moves from the peek into the selection - the one
+     * movement on this screen the reader watches. */
+    const int line_y = HOME_PANEL_Y + (HOME_PANEL_HEIGHT - FONT_BODY[1]) / 2;
+
+    fill_rect(HOME_MARGIN, HOME_PANEL_Y, HOME_SELECTED_WIDTH, HOME_PANEL_HEIGHT, COLOR_HIGHLIGHT);
+    draw_panel_label(home->selected, HOME_MARGIN, line_y, COLOR_BLACK);
+
+    /* The next panel is a peek, not a cell: its label is cut by the glass on
+     * purpose, which is what says the ring continues rather than ends. */
+    if (home->next) {
+        fill_rect(HOME_NEXT_X, HOME_PANEL_Y, HOME_NEXT_WIDTH, HOME_PANEL_HEIGHT, COLOR_SLATE);
+        const size_t fit = fit_in(FONT_BODY, home->next, SIZE_MAX, HOME_NEXT_WIDTH - HOME_LABEL_X);
+        draw_line_at(FONT_BODY, home->next, fit, HOME_NEXT_X + HOME_LABEL_X, line_y, COLOR_DIM);
+    }
+
+    fill_rect(HOME_MARGIN, HOME_RULE_Y, SEEDTOOL_DISPLAY_WIDTH - 2 * HOME_MARGIN, 1, COLOR_DIM);
+    if (home->status) {
+        draw_line_at(FONT_SMALL, home->status, strlen(home->status), HOME_MARGIN + 2, HOME_FOOTER_Y, COLOR_WHITE);
+    }
+    if (home->counter) {
+        const int width = text_width(FONT_SMALL, home->counter, strlen(home->counter));
+        draw_line_at(FONT_SMALL, home->counter, strlen(home->counter),
+            SEEDTOOL_DISPLAY_WIDTH - HOME_MARGIN - 2 - width, HOME_FOOTER_Y, COLOR_WHITE);
+    }
 }
 
 /* One past the last key of the row starting at `row`. */
