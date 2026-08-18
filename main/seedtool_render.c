@@ -1048,6 +1048,20 @@ static size_t home_label_split(const char* label, const size_t length)
     return fit < length ? fit : 0;
 }
 
+/* Whether the two ends of the context strip clear each other. The gap between
+ * them is what absorbs growth, so this is the invariant the anchored layout
+ * rests on - and the failure is invisible, since two labels drawn over each
+ * other still look like text. HOME_STRIP_GAP is the least space that still
+ * reads as two things rather than one run-on line. */
+#define HOME_STRIP_GAP 8
+
+bool seedtool_render_home_strip_fits(const char* context, const char* aside)
+{
+    const int left = text_width(FONT_SMALL, context, strlen(context));
+    const int right = aside ? text_width(FONT_SMALL, aside, strlen(aside)) : 0;
+    return left + right + HOME_STRIP_GAP <= SEEDTOOL_DISPLAY_WIDTH - 2 * (HOME_MARGIN + 2);
+}
+
 bool seedtool_render_home_label_fits(const char* label)
 {
     const size_t length = strlen(label);
@@ -1094,7 +1108,15 @@ void seedtool_render_home(const seedtool_home_t* home)
          * by how much each one matters put four values of grey on two lines
          * for a reader to decode; one ink says "this is the frame" and lets
          * the fill be the only thing that means anything. */
-        draw_centered_in(FONT_SMALL, home->context, 0, SEEDTOOL_DISPLAY_WIDTH, HOME_CONTEXT_Y, COLOR_WHITE);
+        const uint16_t ink = COLOR_WHITE;
+        if (home->aside) {
+            draw_line_at(FONT_SMALL, home->context, strlen(home->context), HOME_MARGIN + 2, HOME_CONTEXT_Y, ink);
+            const int width = text_width(FONT_SMALL, home->aside, strlen(home->aside));
+            draw_line_at(FONT_SMALL, home->aside, strlen(home->aside),
+                SEEDTOOL_DISPLAY_WIDTH - HOME_MARGIN - 2 - width, HOME_CONTEXT_Y, ink);
+        } else {
+            draw_centered_in(FONT_SMALL, home->context, 0, SEEDTOOL_DISPLAY_WIDTH, HOME_CONTEXT_Y, ink);
+        }
     }
 
     /* Both panels place their mark the same way: HOME_ICON_PAD in from their

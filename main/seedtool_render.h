@@ -226,6 +226,17 @@ typedef enum {
 
 typedef struct {
     const char* context;
+    /* A second label for the context strip, anchored to the right edge while
+     * `context` moves to the left one. NULL centres `context` instead, which
+     * is what a strip carrying only a product name wants.
+     *
+     * Anchored rather than run together as one centred line because both ends
+     * are then fixed: the gap between them is what closes as the text grows,
+     * so nothing shifts when the account index goes from one digit to three.
+     * The pair has to hold the widest the firmware can build - "m/86'/0'/999'"
+     * beside "with passphrase" - which is why the strip takes the short form
+     * of the passphrase state and the Derivation screen keeps the long one. */
+    const char* aside;
     const char* selected;
     seedtool_icon_t icon;
     /* NULL draws no peek panel, for a top level with a single entry. */
@@ -242,6 +253,12 @@ void seedtool_render_home(const seedtool_home_t* home);
  * than the panel, would be silently cut - this is what the self-test holds
  * every entry name to, since the failure is invisible on the glass. */
 bool seedtool_render_home_label_fits(const char* label);
+
+/* Whether `context` and `aside` clear each other on the strip. Anchoring them
+ * to opposite edges means neither is ever clipped by the glass - they collide
+ * in the middle instead, which looks like text and so says nothing. The
+ * self-test holds the widest pair the firmware can build to this. */
+bool seedtool_render_home_strip_fits(const char* context, const char* aside);
 
 /* Two body lines with the dice/coin quality bar drawn in, for the screens that
  * bracket an entropy run: the one before it showing the bar empty, and the one

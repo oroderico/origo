@@ -1571,6 +1571,49 @@ static bool home_labels_stay_in_their_panels(void)
             }
         }
     }
+    /* The anchored strip is the whole reason that layout was chosen: both ends
+     * are fixed and the gap between them is what closes as the text grows. So
+     * the check is that the gap still exists at the widest the firmware can
+     * build - account 999 on BIP86, with a passphrase set - and that neither
+     * label has run off its own margin. A collision here would draw the two
+     * over each other with nothing to say so. */
+    {
+        const seedtool_home_t widest = {
+            .context = "m/86'/0'/999'",
+            .aside = "with passphrase",
+            .selected = "Extended public key",
+            .icon = SEEDTOOL_ICON_KEY,
+            .next = "Derivation",
+            .next_icon = SEEDTOOL_ICON_PATHS,
+            .status = "@73c5da0a",
+            .counter = "2 of 5",
+        };
+        if (!seedtool_render_home_strip_fits(widest.context, widest.aside)) {
+            return false;
+        }
+        /* The empty home's own pair, which shares the slot: the product name
+         * against the wordlist in force. Narrower than the wallet's today, and
+         * checked anyway so a longer language name cannot arrive unnoticed.
+         * Strings copied from run_menu in seedtool_app.c. */
+        if (!seedtool_render_home_strip_fits("ORIGO", "BIP39 English")) {
+            return false;
+        }
+        /* And the drawing agrees with the measurement: nothing outside the
+         * margins the two labels are anchored to. A pixel scan cannot prove
+         * they clear each other - the spaces inside "with passphrase" are gaps
+         * too - which is why the check above is a measurement and this one
+         * only guards the edges. HOME_MARGIN + 2 in seedtool_render.c. */
+        seedtool_render_home(&widest);
+        const uint16_t* const pixels = seedtool_render_pixels();
+        for (int y = 0; y < 16; ++y) {
+            for (int x = 0; x < 6; ++x) {
+                if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000
+                    || pixels[y * SEEDTOOL_DISPLAY_WIDTH + (SEEDTOOL_DISPLAY_WIDTH - 1 - x)] != 0x0000) {
+                    return false;
+                }
+            }
+        }
+    }
     return true;
 }
 

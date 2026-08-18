@@ -18,6 +18,13 @@
  * and it should start being generated rather than typed. */
 #define ORIGO_VERSION "v0.1"
 
+/* The wordlist in force, on the strip where a loaded wallet puts its passphrase
+ * state - both answer "which convention governs what you are about to read".
+ * A constant only because there is one list: when a second language arrives,
+ * this becomes a lookup and the corner starts moving on its own, which is what
+ * earns it a fixed slot rather than being a label. */
+#define ORIGO_WORDLIST "BIP39 English"
+
 #define SESSION_TIMEOUT_MS (10 * 60 * 1000)
 #define WARNING_TIMEOUT_MS (60 * 1000)
 /* Minimum roll counts hardly ever land exactly on the bit minimum; this keeps
@@ -413,7 +420,7 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
  *
  * `context`, `status` and `held` are the home's two labels; see
  * seedtool_home_t. Returns the chosen index, or NAV_TIMEOUT. */
-static int choose_home(const char* context, const char* status, const char* const* items,
+static int choose_home(const char* context, const char* aside, const char* status, const char* const* items,
     const seedtool_icon_t* icons, const size_t count, size_t* const cursor)
 {
     if (*cursor >= count) {
@@ -424,6 +431,7 @@ static int choose_home(const char* context, const char* status, const char* cons
         (void)snprintf(counter, sizeof(counter), "%u of %u", (unsigned)(*cursor + 1), (unsigned)count);
         const seedtool_home_t home = {
             .context = context,
+            .aside = aside,
             .selected = items[*cursor],
             .icon = icons[*cursor],
             /* A single-entry home has nothing to peek at, and drawing the one
@@ -2735,8 +2743,12 @@ static void show_wallet_data(const char* mnemonic)
         /* The home, not a list: there is no level above a loaded wallet, and
          * its only exit erases the session. That stays an entry the reader
          * travels to rather than a control one press from anywhere. */
-        const int selected
-            = choose_home(wallet_path, wallet_status, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
+        /* The short form of what Derivation's own entry says in full. The
+         * strip has to hold this beside the widest path the firmware builds,
+         * and "Passphrase: session only" at 184px would not fit there. */
+        const char* const aside = passphrase[0] ? "with passphrase" : "no passphrase";
+        const int selected = choose_home(
+            wallet_path, aside, wallet_status, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
         /* Both ways out of a wallet session reboot: the row, and the timeout
          * that means the reader walked away from a device with a seed on it.
          * Unwinding instead would leave every buffer between here and the main
@@ -3839,7 +3851,8 @@ void seedtool_run(void)
          * other question worth a fixed corner, which is which build is
          * running. No padlock: nothing is being held. */
         const int selected
-            = choose_home("ORIGO", ORIGO_VERSION, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
+            = choose_home(
+                "ORIGO", ORIGO_WORDLIST, ORIGO_VERSION, menu, marks, sizeof(menu) / sizeof(menu[0]), &cursor);
         if (selected < 0) {
             seedtool_platform_restart();
         } else if (selected == 0) {
