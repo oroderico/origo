@@ -920,14 +920,26 @@ void seedtool_render_nav_list(
  * glass, which is what says the list continues rather than ends. */
 #define HOME_CONTEXT_Y 4
 #define HOME_PANEL_Y 18
-#define HOME_PANEL_HEIGHT 74
+/* The panels run edge to edge and the footer sits on the glass. Both were
+ * inset before, which left the whole composition floating in the top 119px of
+ * a 135px display - sixteen dead pixels along the bottom against four along
+ * the top, which read as a screen that had stopped early rather than as one
+ * that had been laid out. The height that reclaims goes to the panels. */
+#define HOME_PANEL_HEIGHT 85
 #define HOME_PANEL_GAP 2
-#define HOME_MARGIN 4
-#define HOME_SELECTED_WIDTH 148
-#define HOME_NEXT_X (HOME_MARGIN + HOME_SELECTED_WIDTH + HOME_PANEL_GAP)
+#define HOME_CARD_X 0
+#define HOME_SELECTED_WIDTH 152
+#define HOME_NEXT_X (HOME_CARD_X + HOME_SELECTED_WIDTH + HOME_PANEL_GAP)
 #define HOME_NEXT_WIDTH (SEEDTOOL_DISPLAY_WIDTH - HOME_NEXT_X)
+/* The strip and the footer keep an inset the panels do not: text against the
+ * bezel reads as clipped, a filled panel against it does not. */
+#define HOME_TEXT_MARGIN 6
 #define HOME_RULE_Y (HOME_PANEL_Y + HOME_PANEL_HEIGHT + 8)
-#define HOME_FOOTER_Y (HOME_RULE_Y + 9)
+#define HOME_FOOTER_Y (HOME_RULE_Y + 8)
+/* Twelve, not eleven: the small face draws a descender a row below its own
+ * stated height, so a footer sized by font[1] alone would touch the bezel. */
+_Static_assert(HOME_FOOTER_Y + 12 <= SEEDTOOL_DISPLAY_HEIGHT - HOME_CONTEXT_Y,
+    "the home's footer no longer leaves the margin its strip has");
 /* The mark's column. The panel is 148 wide and spends 6 + 20 + 6 on padding,
  * mark and gap, which leaves the label 110 - enough for every entry name the
  * firmware builds, the widest being "and restart" at 107. A wider mark or a
@@ -937,6 +949,7 @@ void seedtool_render_nav_list(
 #define HOME_ICON_PAD 6
 #define HOME_LABEL_X (HOME_ICON_PAD + HOME_ICON + HOME_ICON_PAD)
 #define HOME_LABEL_INNER (HOME_SELECTED_WIDTH - HOME_LABEL_X - HOME_ICON_PAD)
+_Static_assert(HOME_LABEL_INNER >= 110, "an entry name no longer has the width it was measured against");
 /* The eight marks, each inside a HOME_ICON box at (x, y). Rectangles and one
  * triangle apiece - no curves, because a curve at this size is a staircase
  * that reads as a mistake rather than as a curve. */
@@ -1059,7 +1072,7 @@ bool seedtool_render_home_strip_fits(const char* context, const char* aside)
 {
     const int left = text_width(FONT_SMALL, context, strlen(context));
     const int right = aside ? text_width(FONT_SMALL, aside, strlen(aside)) : 0;
-    return left + right + HOME_STRIP_GAP <= SEEDTOOL_DISPLAY_WIDTH - 2 * (HOME_MARGIN + 2);
+    return left + right + HOME_STRIP_GAP <= SEEDTOOL_DISPLAY_WIDTH - 2 * HOME_TEXT_MARGIN;
 }
 
 bool seedtool_render_home_label_fits(const char* label)
@@ -1110,10 +1123,10 @@ void seedtool_render_home(const seedtool_home_t* home)
          * the fill be the only thing that means anything. */
         const uint16_t ink = COLOR_WHITE;
         if (home->aside) {
-            draw_line_at(FONT_SMALL, home->context, strlen(home->context), HOME_MARGIN + 2, HOME_CONTEXT_Y, ink);
+            draw_line_at(FONT_SMALL, home->context, strlen(home->context), HOME_TEXT_MARGIN, HOME_CONTEXT_Y, ink);
             const int width = text_width(FONT_SMALL, home->aside, strlen(home->aside));
             draw_line_at(FONT_SMALL, home->aside, strlen(home->aside),
-                SEEDTOOL_DISPLAY_WIDTH - HOME_MARGIN - 2 - width, HOME_CONTEXT_Y, ink);
+                SEEDTOOL_DISPLAY_WIDTH - HOME_TEXT_MARGIN - width, HOME_CONTEXT_Y, ink);
         } else {
             draw_centered_in(FONT_SMALL, home->context, 0, SEEDTOOL_DISPLAY_WIDTH, HOME_CONTEXT_Y, ink);
         }
@@ -1128,9 +1141,9 @@ void seedtool_render_home(const seedtool_home_t* home)
      * reason. A stacked label brackets this line rather than replacing it. */
     const int line_y = HOME_PANEL_Y + (HOME_PANEL_HEIGHT - FONT_BODY[1]) / 2;
 
-    fill_rect(HOME_MARGIN, HOME_PANEL_Y, HOME_SELECTED_WIDTH, HOME_PANEL_HEIGHT, COLOR_HIGHLIGHT);
-    draw_icon(home->icon, HOME_MARGIN + HOME_ICON_PAD, icon_y, COLOR_BLACK);
-    draw_panel_label(home->selected, HOME_MARGIN, line_y, COLOR_BLACK);
+    fill_rect(HOME_CARD_X, HOME_PANEL_Y, HOME_SELECTED_WIDTH, HOME_PANEL_HEIGHT, COLOR_HIGHLIGHT);
+    draw_icon(home->icon, HOME_CARD_X + HOME_ICON_PAD, icon_y, COLOR_BLACK);
+    draw_panel_label(home->selected, HOME_CARD_X, line_y, COLOR_BLACK);
 
     /* The next panel is a peek, not a cell: same mark in the same place, and
      * the label beside it cut by the glass, which is what says the ring
@@ -1144,14 +1157,14 @@ void seedtool_render_home(const seedtool_home_t* home)
         draw_line_at(FONT_BODY, home->next, fit, HOME_NEXT_X + HOME_LABEL_X, line_y, COLOR_DIM);
     }
 
-    fill_rect(HOME_MARGIN, HOME_RULE_Y, SEEDTOOL_DISPLAY_WIDTH - 2 * HOME_MARGIN, 1, COLOR_DIM);
+    fill_rect(0, HOME_RULE_Y, SEEDTOOL_DISPLAY_WIDTH, 1, COLOR_DIM);
     if (home->status) {
-        draw_line_at(FONT_SMALL, home->status, strlen(home->status), HOME_MARGIN + 2, HOME_FOOTER_Y, COLOR_WHITE);
+        draw_line_at(FONT_SMALL, home->status, strlen(home->status), HOME_TEXT_MARGIN, HOME_FOOTER_Y, COLOR_WHITE);
     }
     if (home->counter) {
         const int width = text_width(FONT_SMALL, home->counter, strlen(home->counter));
         draw_line_at(FONT_SMALL, home->counter, strlen(home->counter),
-            SEEDTOOL_DISPLAY_WIDTH - HOME_MARGIN - 2 - width, HOME_FOOTER_Y, COLOR_WHITE);
+            SEEDTOOL_DISPLAY_WIDTH - HOME_TEXT_MARGIN - width, HOME_FOOTER_Y, COLOR_WHITE);
     }
 }
 

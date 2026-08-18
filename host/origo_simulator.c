@@ -1554,7 +1554,7 @@ static bool home_labels_stay_in_their_panels(void)
         }
         seedtool_render_home(&home);
         const uint16_t* const pixels = seedtool_render_pixels();
-        for (int y = 92; y < 100; ++y) {
+        for (int y = 103; y < 111; ++y) {
             for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
                 if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
                     return false;
@@ -1562,8 +1562,10 @@ static bool home_labels_stay_in_their_panels(void)
             }
         }
         /* And nothing below the footer's own line, which is the last thing the
-         * screen draws - a status string too tall or too low would land here. */
-        for (int y = 122; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
+         * screen draws. The margin left under it is deliberately small now -
+         * four pixels, matching the top - so this band is what catches a
+         * footer that has grown past the glass. */
+        for (int y = 131; y < SEEDTOOL_DISPLAY_HEIGHT; ++y) {
             for (int x = 0; x < SEEDTOOL_DISPLAY_WIDTH; ++x) {
                 if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {
                     return false;
