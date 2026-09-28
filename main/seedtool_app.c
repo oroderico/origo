@@ -109,9 +109,20 @@ static void seedtool_require(const bool condition)
     }
 }
 
+/* Shows what a seedtool_render_qr* call drew. Nothing is drawn, and nothing
+ * shown, when the payload does not fit. */
+static bool show_qr(const bool drawn)
+{
+    if (drawn) {
+        seedtool_display_flush();
+    }
+    return drawn;
+}
+
 static void screen_text(const char* title, const char* line1, const char* line2, const char* footer)
 {
-    seedtool_display_screen(title, line1, line2, footer);
+    seedtool_render_screen(title, line1, line2, footer);
+    seedtool_display_flush();
 }
 
 /* A flipped orientation means the case, and the buttons wired to it, are
@@ -258,10 +269,11 @@ static int nav_screen(const char* title, const char* one, const char* two, const
     };
     for (;;) {
         if (progress) {
-            seedtool_display_nav_dice(&nav, title, one, two, progress);
+            seedtool_render_nav_dice(&nav, title, one, two, progress);
         } else {
-            seedtool_display_nav_text(&nav, title, one, two, NULL);
+            seedtool_render_nav_text(&nav, title, one, two, NULL);
         }
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             return nav.selected == SEEDTOOL_NAV_BACK ? NAV_BACK : NAV_CONFIRM;
@@ -358,7 +370,8 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
             .confirm_enabled = confirm_enabled,
             .back = back,
         };
-        seedtool_display_nav_list(&nav, title, items, count, top);
+        seedtool_render_nav_list(&nav, title, items, count, top);
+        seedtool_display_flush();
         const size_t ring = nav_ring_size(count, confirm_enabled, back);
         size_t position = nav_position(*cursor, count, back);
         switch (wait_key()) {
@@ -540,14 +553,14 @@ static int enter_value(const char* title, const unsigned position, const unsigne
          * wide for a box and stays on the text screen, where the running
          * transcript sits under it. */
         if (!format) {
-            seedtool_display_value_box(
-                heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
+            seedtool_render_value_box(heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
         } else if (progress) {
-            seedtool_display_dice_screen(
+            seedtool_render_dice_screen(
                 heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
         } else {
-            screen_text(heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER);
+            seedtool_render_screen(heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER);
         }
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             if (on_back) {
@@ -615,7 +628,8 @@ static int enter_coin_flip(const char* title, const unsigned position, const uns
     char heading[48];
     format_progress_heading(heading, sizeof(heading), title, position, total, progress);
     for (;;) {
-        seedtool_display_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
+        seedtool_render_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             return 0;
@@ -763,10 +777,11 @@ static bool page_text_impl(const char* title, const char* text, const bool confi
             const size_t first_group[] = { start[first] / SEEDTOOL_GROUP_LEN,
                 (first + 1 < lines ? start[first + 1] : 0) / SEEDTOOL_GROUP_LEN,
                 (first + 2 < lines ? start[first + 2] : 0) / SEEDTOOL_GROUP_LEN };
-            seedtool_display_nav_grouped(&nav, title, shown, first_group, 3);
+            seedtool_render_nav_grouped(&nav, title, shown, first_group, 3);
         } else {
-            seedtool_display_nav_text(&nav, title, line1, line2, line3);
+            seedtool_render_nav_text(&nav, title, line1, line2, line3);
         }
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             if (!position) {
@@ -866,8 +881,7 @@ static void page_read(const char* title, const char* text)
  * support (src/krux/bbqr.py, src/krux/qr.py FORMAT_BBQR) is the reference
  * this follows for the wire format; there is no deflate library here to use
  * its "Z" compressed encoding, so this always sends "2" (plain base32).
- * Returns the key that ended the animation, exactly what a single
- * seedtool_display_qr call would have handed back. */
+ * Returns the key that ended the animation. */
 static seedtool_key_t show_bbqr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
@@ -894,7 +908,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             (void)snprintf(frame_title, sizeof(frame_title), "%.20s", title);
         }
         const bool ok = seedtool_bbqr_part((const uint8_t*)value, len, '2', 'U', part, parts, frame, sizeof(frame))
-            && seedtool_display_qr(frame_title, frame, selected);
+            && show_qr(seedtool_render_qr(frame_title, frame, selected));
         seedtool_zero(frame, sizeof(frame));
         if (!ok) {
             notice("Too long for a QR", title, "Read it as text instead");
@@ -1061,7 +1075,8 @@ static int enter_word(
             selected = nearest_enabled(enabled, WORD_KEYS, selected);
             bool picked = false;
             while (!picked) {
-                seedtool_display_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected, position, total);
+                seedtool_render_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected, position, total);
+                seedtool_display_flush();
                 switch (wait_key()) {
                 case KEY_SELECT:
                     picked = true;
@@ -1177,7 +1192,8 @@ static int enter_word_number(
         for (size_t i = at + 1; i < SEEDTOOL_MAX_WORD_DIGITS; ++i) {
             shown[i] = ' ';
         }
-        seedtool_display_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
+        seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
+        seedtool_display_flush();
 
         seedtool_key_t key = wait_key();
         if (key == KEY_REDRAW) {
@@ -1291,8 +1307,9 @@ static int enter_account(uint32_t* value)
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_display_keyboard(
+            seedtool_render_keyboard(
                 "Account", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            seedtool_display_flush();
             switch (wait_key()) {
             case KEY_SELECT:
                 picked = true;
@@ -1357,8 +1374,9 @@ static int enter_address_index(uint32_t* value)
                                                      : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_display_keyboard(
+            seedtool_render_keyboard(
                 "Go to index", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            seedtool_display_flush();
             switch (wait_key()) {
             case KEY_SELECT:
                 picked = true;
@@ -1747,7 +1765,8 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
             selected = seedtool_layout_center(layout);
         }
         const char* const tail = used > PASSPHRASE_TAIL ? output + used - PASSPHRASE_TAIL : output;
-        seedtool_display_keyboard("BIP39 passphrase", tail, layout, NULL, selected, 0, 0);
+        seedtool_render_keyboard("BIP39 passphrase", tail, layout, NULL, selected, 0, 0);
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_PREV:
             selected = (selected + keys - 1) % keys;
@@ -1912,7 +1931,7 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
  * path and the address itself share one screen rather than two.
  *
  * Not every address fits beside its code: a taproot address is 62 characters
- * against the 48 the margin holds. seedtool_display_qr_address refuses those
+ * against the 48 the margin holds. seedtool_render_qr_address refuses those
  * rather than drawing as far as it reaches - an address cut off mid-value
  * looks exactly like one that ended there - and they fall back to the code
  * alone, then the paged text, which has the width for them. */
@@ -1931,7 +1950,7 @@ static void show_address_qr(const char* title, const char* address)
     size_t selected = SEEDTOOL_NAV_BACK;
     size_t fallback = SEEDTOOL_NAV_BACK;
     for (;;) {
-        if (seedtool_display_qr_address(title, address, selected)) {
+        if (show_qr(seedtool_render_qr_address(title, address, selected))) {
             const seedtool_key_t key = wait_key();
             if (key == KEY_PREV || key == KEY_NEXT) {
                 selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
@@ -1946,7 +1965,7 @@ static void show_address_qr(const char* title, const char* address)
             }
             return;
         }
-        if (!seedtool_display_qr(title, address, fallback)) {
+        if (!show_qr(seedtool_render_qr(title, address, fallback))) {
             notice("Too long for a QR", title, "Read it as text instead");
             return;
         }
@@ -2296,10 +2315,11 @@ static void show_stackbit(const char* mnemonic)
         const char* const word = seedtool_word(numbers[selected] - 1);
         const seedtool_nav_t nav = page_nav(position, count, NULL, false, SEEDTOOL_CONFIRM_TICK);
         if (layout == 0) {
-            seedtool_display_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
+            seedtool_render_stackbit_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         } else {
-            seedtool_display_stackbit_physical_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
+            seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         }
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             /* On the arrow the chord leaves; on a word it reads on, the same
@@ -2391,7 +2411,8 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
         const seedtool_nav_t nav = page_nav(cursor, pages, footer, confirmable, SEEDTOOL_CONFIRM_TICK);
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
-        seedtool_display_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
+        seedtool_render_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             if (!cursor) {
@@ -2470,10 +2491,9 @@ static void export_seed_qr(const char* mnemonic)
         size_t view = 0;
         for (;;) {
             const size_t chrome = cursor < views ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_SHADE;
-            const bool ok = view == 0
-                ? seedtool_display_qr_bytes("Compact SeedQR", entropy, len, chrome)
-                : view == 1 ? seedtool_display_qr_bytes_map("Compact SeedQR", entropy, len, chrome)
-                            : seedtool_display_qr_bytes_region("Compact SeedQR", entropy, len, view - 2, chrome);
+            const bool ok = show_qr(view == 0 ? seedtool_render_qr_bytes("Compact SeedQR", entropy, len, chrome)
+                    : view == 1 ? seedtool_render_qr_bytes_map("Compact SeedQR", entropy, len, chrome)
+                                : seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, view - 2, chrome));
             if (!ok) {
                 notice("Too long for a QR", "Compact SeedQR", "Read it as text instead");
                 break;
@@ -3701,7 +3721,8 @@ void seedtool_run(void)
      * own. Every press is discarded meanwhile: this is where the user is still
      * learning that both buttons together mean select, and a screen that offers
      * no choice must not turn a stray press into one. */
-    seedtool_display_splash();
+    seedtool_render_splash();
+    seedtool_display_flush();
     for (const uint64_t deadline = seedtool_platform_milliseconds() + SPLASH_MS;;) {
         const uint64_t now = seedtool_platform_milliseconds();
         if (now >= deadline) {

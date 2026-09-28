@@ -688,7 +688,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # every test passing and the device showing blue where orange belongs.
         display = (Path(__file__).parents[1] / "main/seedtool_display.c").read_text()
         self.assertIn("seedtool_render_wire_rows", display)
-        flush = display.split("static void flush(void)", 1)[1].split("\n}", 1)[0]
+        flush = display.split("void seedtool_display_flush(void)", 1)[1].split("\n}", 1)[0]
         self.assertIn("transmit_pixels()", flush)
         self.assertNotIn("seedtool_render_pixels()", flush)
 
