@@ -55,8 +55,9 @@ _Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
 
 typedef enum {
     SEEDTOOL_OK = 0,
+    /* Bad input: arguments, a value out of range, an invalid mnemonic. */
     SEEDTOOL_EINVAL = -1,
-    SEEDTOOL_ERANGE = -2,
+    /* libwally failed on input it should have accepted. */
     SEEDTOOL_ECRYPTO = -3,
     SEEDTOOL_ENOSPACE = -4,
 } seedtool_result_t;
@@ -229,19 +230,10 @@ seedtool_result_t seedtool_master_fingerprint(
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t account, seedtool_key_format_t format, char* output, size_t output_len);
 
-/* One mainnet address at m/type'/0'/account'/chain/index. `chain` selects the
- * receive or change branch; anything outside seedtool_chain_t is EINVAL rather
- * than a path component taken on trust. */
-seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
-    uint32_t account, seedtool_chain_t chain, uint32_t index, char* output, size_t output_len);
-
-/* Same addresses seedtool_mainnet_address would compute on the same branch at
- * each index 0..count-1, but the mnemonic-to-seed PBKDF2 and the account-level
- * derivation run once instead of once per address: repeating them a hundred
- * times, as browsing the address list does, is slow enough on hardware with no
- * EC acceleration to look like a hang. The chain step sits below the account
- * node, so switching branch re-runs only the cheap part of this.
- * `addresses` must hold at least `count` rows. */
+/* Mainnet addresses at m/type'/0'/account'/chain/0..count-1. PBKDF2 and the
+ * hardened account derivation run once rather than per address, which would
+ * be slow enough on the ESP32 to look like a hang. `chain` outside
+ * seedtool_chain_t is EINVAL. `addresses` must hold `count` rows. */
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
     seedtool_address_type_t type, uint32_t account, seedtool_chain_t chain, uint32_t count,
     char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);

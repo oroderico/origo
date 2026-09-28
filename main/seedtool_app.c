@@ -260,18 +260,9 @@ static int nav_screen(const char* title, const char* one, const char* two, const
          * the arrow whatever the caller asked for - the condition is derived
          * here rather than left as an unwritten rule the callers must keep. */
         .selected = back && (start_on_back || !label) ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
-        .confirm = label,
+        .confirm = label ? SEEDTOOL_CONFIRM_TICK : SEEDTOOL_CONFIRM_NONE,
         .confirm_enabled = true,
         .back = back,
-        /* A screen the reader takes or leaves has two controls, and one the
-         * reader can only take in has just the arrow; either way they sit
-         * where Jade puts them: leave on the left of the title bar, take on
-         * the right, nothing along the bottom. The label stays in the struct
-         * for the width checks even though no bar draws it - the title is what
-         * tells the reader what taking it does, on every screen here but the
-         * two entropy verdicts, which pass no title and say it in the body
-         * instead for the reason given at their call. */
-        .confirm_style = SEEDTOOL_CONFIRM_TICK,
     };
     for (;;) {
         if (progress) {
@@ -371,18 +362,9 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
         }
         const seedtool_nav_t nav = {
             .selected = *cursor,
-            .confirm = confirm,
+            .confirm = confirm ? SEEDTOOL_CONFIRM_TICK : SEEDTOOL_CONFIRM_NONE,
             .confirm_enabled = confirm_enabled,
             .back = back,
-            /* The tick here too, so there is one confirm control in the
-             * firmware and it is always in the same corner. Reading the ring
-             * as a walk down the screen breaks at exactly one point either
-             * way: with a bar, moving down off it wrapped to the arrow at the
-             * top; with the tick, the last row wraps to the corner instead. A
-             * ring has one discontinuity wherever it is put, and putting it
-             * here sets the two ways out of a screen side by side rather than
-             * at opposite ends of the glass. */
-            .confirm_style = SEEDTOOL_CONFIRM_TICK,
         };
         seedtool_display_nav_list(&nav, title, items, count, top);
         const size_t ring = nav_ring_size(count, confirm_enabled, back);
@@ -446,19 +428,11 @@ static seedtool_nav_t page_nav(const size_t position, const size_t pages, const 
 {
     const seedtool_nav_t nav = {
         .selected = page_selection(position, pages),
-        /* No label is what removes the control, the same way a menu removes
-         * it: the reading screens have nothing for the reader to agree to or
-         * to go on to, so the corner is left empty rather than given a meaning
-         * the caller then discards. */
-        .confirm = confirmable ? "Continue" : NULL,
+        /* Reading screens have nothing to agree to, so no control. */
+        .confirm = confirmable ? style : SEEDTOOL_CONFIRM_NONE,
         .confirm_enabled = true,
         .back = true,
         .counter = counter,
-        /* On a paged screen the ring is the reading order - arrow, page 1..N,
-         * then the corner - so the confirm being a corner rather than a bar
-         * changes where the cursor lands after the last page and nothing about
-         * how the pages are read. */
-        .confirm_style = style,
     };
     return nav;
 }
@@ -2089,12 +2063,8 @@ static int browse_addresses(
             if (result == 0) {
                 continue;
             }
-            /* The keypad cannot type a value this high while ADDRESS_INDEX_DIGITS
-             * and SEEDTOOL_MAX_ADDRESS_INDEX agree, and a _Static_assert holds
-             * them together - but `index` addresses a static array here rather
-             * than going through seedtool_mainnet_address, which is where that
-             * range is otherwise checked. Verified rather than inherited: back
-             * to the list instead of off the end of the cache. */
+            /* `index` addresses the static cache directly, so it is checked
+             * here even though the keypad cannot type past it. */
             if (index > SEEDTOOL_MAX_ADDRESS_INDEX) {
                 continue;
             }

@@ -78,12 +78,6 @@ size_t seedtool_words_with_prefix_in(const seedtool_wordset_t* allowed, const ch
     return matches;
 }
 
-size_t seedtool_words_with_prefix(
-    const char* prefix, const size_t prefix_len, uint16_t* output, const size_t output_len)
-{
-    return seedtool_words_with_prefix_in(NULL, prefix, prefix_len, output, output_len);
-}
-
 /* The digits read as a plain integer, whether or not it is a word number. At
  * most four digits, so 9999 is the largest value this can produce. */
 static bool digits_value(const char* digits, const size_t digits_len, unsigned* value)
@@ -110,11 +104,6 @@ unsigned seedtool_word_number_in(const seedtool_wordset_t* allowed, const char* 
     }
     /* One-based on the way in, zero-based in the set. */
     return seedtool_wordset_has(allowed, value - 1) ? value : 0;
-}
-
-unsigned seedtool_word_number(const char* digits, const size_t digits_len)
-{
-    return seedtool_word_number_in(NULL, digits, digits_len);
 }
 
 /* Whether any word number in [low, high] is in `allowed`, with the range
@@ -172,11 +161,6 @@ size_t seedtool_next_digits_in(
     return count;
 }
 
-size_t seedtool_next_digits(const char* digits, const size_t digits_len, bool enabled[SEEDTOOL_DIGITS])
-{
-    return seedtool_next_digits_in(NULL, digits, digits_len, enabled);
-}
-
 size_t seedtool_next_letters_in(
     const seedtool_wordset_t* allowed, const char* prefix, const size_t prefix_len, bool enabled[SEEDTOOL_LETTERS])
 {
@@ -208,9 +192,4 @@ size_t seedtool_next_letters_in(
         }
     }
     return count;
-}
-
-size_t seedtool_next_letters(const char* prefix, const size_t prefix_len, bool enabled[SEEDTOOL_LETTERS])
-{
-    return seedtool_next_letters_in(NULL, prefix, prefix_len, enabled);
 }

@@ -138,7 +138,7 @@ seedtool_result_t seedtool_dice_entropy_bits(
     unsigned counts[DICE_SOURCE_MAX_SIDES] = { 0 };
     for (size_t i = 0; i < values_len; ++i) {
         if (values[i] < 1 || values[i] > sides) {
-            return SEEDTOOL_ERANGE;
+            return SEEDTOOL_EINVAL;
         }
         ++counts[values[i] - 1];
     }
@@ -200,7 +200,7 @@ seedtool_result_t seedtool_dice_pattern_detected(
     }
     for (size_t i = 0; i < values_len; ++i) {
         if (values[i] < 1 || values[i] > sides) {
-            return SEEDTOOL_ERANGE;
+            return SEEDTOOL_EINVAL;
         }
     }
     *detected_out = derivative_pattern_detected(values, values_len, sides);
@@ -248,7 +248,7 @@ seedtool_result_t seedtool_card_pattern_detected(
     uint8_t ranks[52];
     for (size_t i = 0; i < values_len; ++i) {
         if (values[i] >= 52) {
-            return SEEDTOOL_ERANGE;
+            return SEEDTOOL_EINVAL;
         }
         ranks[i] = (uint8_t)(values[i] % 13 + 1);
     }
@@ -289,27 +289,27 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
         switch (source) {
         case SEEDTOOL_D6:
             if (values[i] < 1 || values[i] > 6) {
-                return SEEDTOOL_ERANGE;
+                return SEEDTOOL_EINVAL;
             }
             item[0] = (char)('0' + values[i]);
             item[1] = '\0';
             break;
         case SEEDTOOL_D20:
             if (values[i] < 1 || values[i] > 20) {
-                return SEEDTOOL_ERANGE;
+                return SEEDTOOL_EINVAL;
             }
             (void)snprintf(item, sizeof(item), i ? "-%u" : "%u", values[i]);
             break;
         case SEEDTOOL_COIN:
             if (values[i] > 1) {
-                return SEEDTOOL_ERANGE;
+                return SEEDTOOL_EINVAL;
             }
             item[0] = values[i] ? '1' : '0';
             item[1] = '\0';
             break;
         case SEEDTOOL_CARDS:
             if (values[i] >= 52 || seen[values[i]]) {
-                return SEEDTOOL_ERANGE;
+                return SEEDTOOL_EINVAL;
             }
             seen[values[i]] = true;
             item[0] = ranks[values[i] % 13];
@@ -320,7 +320,7 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
             /* Drawn with replacement: unlike SEEDTOOL_CARDS, a repeat is
              * expected and valid, not a data-integrity error. */
             if (values[i] >= 52) {
-                return SEEDTOOL_ERANGE;
+                return SEEDTOOL_EINVAL;
             }
             item[0] = ranks[values[i] % 13];
             item[1] = suits[values[i] / 13];
@@ -390,7 +390,7 @@ static seedtool_result_t mnemonic_indices(const char* mnemonic, uint16_t* indice
     for (char* word = strtok_r(copy, " ", &save); word; word = strtok_r(NULL, " ", &save)) {
         if (*count >= capacity) {
             seedtool_zero(copy, sizeof(copy));
-            return SEEDTOOL_ERANGE;
+            return SEEDTOOL_EINVAL;
         }
         size_t i = 0;
         for (; i < 2048; ++i) {
@@ -430,7 +430,7 @@ seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const 
     }
     for (size_t i = 0; i < required_bits; ++i, ++bitpos) {
         if (coin_bits[i] > 1) {
-            ret = SEEDTOOL_ERANGE;
+            ret = SEEDTOOL_EINVAL;
             goto done;
         }
         entropy[bitpos / 8] |= coin_bits[i] << (7 - (bitpos % 8));
@@ -594,8 +594,10 @@ static seedtool_result_t root_from_mnemonic(
 {
     size_t written = 0;
     if (!root || !seed || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
-        || seedtool_validate_passphrase(passphrase) != SEEDTOOL_OK
-        || bip39_mnemonic_to_seed(mnemonic, passphrase, seed, 64, &written) != WALLY_OK || written != 64
+        || seedtool_validate_passphrase(passphrase) != SEEDTOOL_OK) {
+        return SEEDTOOL_EINVAL;
+    }
+    if (bip39_mnemonic_to_seed(mnemonic, passphrase, seed, 64, &written) != WALLY_OK || written != 64
         || bip32_key_from_seed(seed, written, BIP32_VER_MAIN_PRIVATE, 0, root) != WALLY_OK) {
         return SEEDTOOL_ECRYPTO;
     }
@@ -631,8 +633,10 @@ seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passph
     char* base58 = NULL;
     const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
     seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
-    if (ret != SEEDTOOL_OK
-        || bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &account)
+    if (ret != SEEDTOOL_OK) {
+        goto done;
+    }
+    if (bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &account)
             != WALLY_OK
         || bip32_key_serialize(&account, BIP32_FLAG_KEY_PUBLIC, bytes, sizeof(bytes)) != WALLY_OK) {
         ret = SEEDTOOL_ECRYPTO;
@@ -662,15 +666,8 @@ done:
     return ret;
 }
 
-/* The script and address for one branch and index under an already-derived
- * account node (m/type'/0'/account'). Both seedtool_mainnet_address and
- * seedtool_mainnet_addresses share this: only the account derivation above it
- * differs in cost, this part
- * — the chain and index steps, both non-hardened and both from a public key,
- * no seed or private key involved
- * — is cheap enough to repeat per address either way. That is also why a
- * receive/change switch costs nothing above the account node: the branch is
- * chosen here, below everything expensive. */
+/* Address at chain/index below an account node: public, non-hardened
+ * derivation only, cheap enough to repeat per address. */
 static seedtool_result_t address_from_account(const struct ext_key* account, const seedtool_address_type_t type,
     const seedtool_chain_t chain, const uint32_t index, char* output, const size_t output_len)
 {
@@ -728,24 +725,6 @@ static seedtool_result_t account_from_mnemonic(const char* mnemonic, const char*
     }
     seedtool_zero(seed, sizeof(seed));
     seedtool_zero(&root, sizeof(root));
-    return ret;
-}
-
-seedtool_result_t seedtool_mainnet_address(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, const uint32_t account_index, const seedtool_chain_t chain,
-    const uint32_t index, char* output, const size_t output_len)
-{
-    if (!output || !output_len || index > SEEDTOOL_MAX_ADDRESS_INDEX || account_index > SEEDTOOL_MAX_ACCOUNT_INDEX
-        || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)
-        || (chain != SEEDTOOL_RECEIVE && chain != SEEDTOOL_CHANGE)) {
-        return SEEDTOOL_EINVAL;
-    }
-    struct ext_key account;
-    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, account_index, &account);
-    if (ret == SEEDTOOL_OK) {
-        ret = address_from_account(&account, type, chain, index, output, output_len);
-    }
-    seedtool_zero(&account, sizeof(account));
     return ret;
 }
 

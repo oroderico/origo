@@ -121,13 +121,15 @@ seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
  * Passed as one struct rather than four parameters so that a screen names its
  * controls once, and so a screen type added later inherits them without every
  * renderer growing a signature. Every field is meant to be set explicitly:
- * the zero value of `confirm_enabled` dims a bar and the zero value of `back`
+ * the zero value of `confirm_enabled` dims the confirm and that of `back`
  * removes an arrow, neither of which is what a screen usually wants. The app
  * builds these in its own few nav helpers, not at each call site. */
-/* BAR is the zero value, so a struct that names no style keeps the behaviour
- * it had before there was one to name. */
+/* The confirm control in the title bar's right slot, opposite the back arrow
+ * (Jade's ui/confirm_address.c layout). A tick accepts what the title names; a
+ * forward arrow hands off to another screen without accepting anything. NONE,
+ * the zero value, is a menu: its rows are its actions. */
 typedef enum {
-    SEEDTOOL_CONFIRM_BAR,
+    SEEDTOOL_CONFIRM_NONE,
     SEEDTOOL_CONFIRM_TICK,
     SEEDTOOL_CONFIRM_FORWARD,
 } seedtool_confirm_t;
@@ -135,10 +137,8 @@ typedef enum {
 typedef struct {
     /* An item index, or one of the three sentinels above. */
     size_t selected;
-    /* Label on the confirm bar. NULL draws no bar at all: a menu's rows are
-     * its actions, and there is nothing left to confirm once one is picked. */
-    const char* confirm;
-    /* False draws the bar dimmed and unselectable - for a screen where
+    seedtool_confirm_t confirm;
+    /* False draws the confirm dimmed and unselectable - for a screen where
      * confirming is not yet possible and the reader should still see where
      * the control will be. */
     bool confirm_enabled;
@@ -146,24 +146,8 @@ typedef struct {
      * one there would restate as a control the same false promise the old
      * "Up/Down back" footer was making. */
     bool back;
-    /* Page counter, drawn small in the gap above the bar. NULL draws none. */
+    /* Page counter, drawn small at the bottom. NULL draws none. */
     const char* counter;
-    /* What the confirm looks like. The title bar's right slot is already held
-     * open - the title is centred between two margins the width of the arrow's
-     * box - which is how Jade lays out a screen the reader takes or leaves:
-     * reject on the left, accept on the right, nothing along the bottom
-     * (ui/confirm_address.c).
-     *
-     * TICK and FORWARD both live in that slot and differ in what they claim. A
-     * tick says "yes, this one" and suits a screen whose title already names
-     * what confirming does. A forward arrow says "there is more this way" and
-     * suits a screen that hands off to another rather than accepting anything -
-     * an address before its QR code, say, where a tick would be agreeing to
-     * something nobody asked.
-     *
-     * `confirm` stays the label the screen would have used either way, kept for
-     * the self-test's width checks. */
-    seedtool_confirm_t confirm_style;
 } seedtool_nav_t;
 
 /* Two or three centred body lines - three when `line3` is given, which picks
