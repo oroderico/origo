@@ -146,49 +146,60 @@ static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
     return key;
 }
 
-static seedtool_key_t wait_key(void)
+/* Anything but an extension ends the session by restarting, wherever it was:
+ * unwinding back to the menu would repaint every screen on the way, secrets
+ * included. The restart is the erase (see scrub_free_heap). An extended
+ * session returns KEY_REDRAW, because the warning replaced the caller's
+ * screen. */
+static seedtool_key_t session_timeout(void)
+{
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
+    /* A press begun before this screen existed cannot be an answer to it. */
+    seedtool_platform_flush_keys();
+    if (wait_key_raw(WARNING_TIMEOUT_MS) != KEY_SELECT) {
+        seedtool_platform_restart();
+    }
+    return KEY_REDRAW;
+}
+
+static uint32_t idle_ms(void)
 {
     const uint64_t elapsed = seedtool_platform_milliseconds() - last_action;
-    const uint32_t idle_ms = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
-    if (idle_ms < SESSION_TIMEOUT_MS) {
-        const seedtool_key_t key = wait_key_raw(SESSION_TIMEOUT_MS - idle_ms);
+    return elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
+}
+
+/* Never returns KEY_TIMEOUT. */
+static seedtool_key_t wait_key(void)
+{
+    const uint32_t idle = idle_ms();
+    if (idle < SESSION_TIMEOUT_MS) {
+        const seedtool_key_t key = wait_key_raw(SESSION_TIMEOUT_MS - idle);
         if (key != KEY_TIMEOUT) {
             return key;
         }
     }
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
-    /* Erasing is one of the two answers this screen accepts, and the user cannot
-     * have meant it with a press begun before the screen existed. */
-    seedtool_platform_flush_keys();
-    /* The warning has replaced the caller's screen, so an extended session must
-     * repaint it rather than let the next press act on what is no longer shown. */
-    return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
+    return session_timeout();
 }
 
-/* Same idle/session-timeout accounting as wait_key, but for a screen that
- * redraws itself on a timer rather than only on a press: returns KEY_TIMEOUT
- * (with *ticked set) every frame_ms with no key down, instead of only after
- * the whole session-timeout warning dance. *ticked is left false for every
- * other return, including the genuine KEY_TIMEOUT the warning screen itself
- * produces when its extension offer is declined -- that one still means
- * leave, exactly as it does for wait_key's callers. */
+/* wait_key for a screen that redraws on a timer: returns KEY_TIMEOUT, with
+ * *ticked set, every frame_ms with no key down. */
 static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const ticked)
 {
     *ticked = false;
-    const uint64_t elapsed = seedtool_platform_milliseconds() - last_action;
-    const uint32_t idle_ms = elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed;
-    if (idle_ms < SESSION_TIMEOUT_MS) {
-        const uint32_t remaining = SESSION_TIMEOUT_MS - idle_ms;
+    const uint32_t idle = idle_ms();
+    if (idle < SESSION_TIMEOUT_MS) {
+        const uint32_t remaining = SESSION_TIMEOUT_MS - idle;
         const uint32_t wait_ms = frame_ms < remaining ? frame_ms : remaining;
         const seedtool_key_t key = wait_key_raw(wait_ms);
-        if (key == KEY_TIMEOUT && wait_ms == frame_ms) {
-            *ticked = true;
+        if (key != KEY_TIMEOUT) {
+            return key;
         }
-        return key;
+        if (wait_ms == frame_ms) {
+            *ticked = true;
+            return KEY_TIMEOUT;
+        }
     }
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
-    seedtool_platform_flush_keys();
-    return wait_key_raw(WARNING_TIMEOUT_MS) == KEY_SELECT ? KEY_REDRAW : KEY_TIMEOUT;
+    return session_timeout();
 }
 
 
@@ -2666,19 +2677,9 @@ static void show_wallet_data(const char* mnemonic)
          * reader travels to rather than a control one press from anywhere. */
         const int selected
             = choose_nav(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
-        /* Both ways out of a wallet session reboot: the row, and the timeout
-         * that means the reader walked away from a device with a seed on it.
-         * Unwinding instead would leave every buffer between here and the main
-         * menu holding what it last held, wiped only where someone remembered
-         * to wipe it. A restart re-runs C startup, which zeroes .bss - the
-         * address cache and the review rows live there - and leaves nothing on
-         * a stack that is about to be reused from the top. The explicit wipes
-         * below still run first: the reboot is the belt, not a reason to drop
-         * the braces.
-         *
-         * The cost is the display settings, which are RAM-only by design and
-         * so go back to their defaults. That is the trade this makes
-         * deliberately: brightness is a preference, and the seed is not. */
+        /* The only way out of a wallet session is a restart: C startup zeroes
+         * .bss, and scrub_free_heap zeroes the old stacks, which a reset
+         * alone leaves in DRAM. Display settings go back to their defaults. */
         if (selected < 0 || selected == 4) {
             seedtool_zero(fp, sizeof(fp));
             seedtool_zero(fphex, sizeof(fphex));

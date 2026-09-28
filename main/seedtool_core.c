@@ -275,6 +275,9 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
     static const char suits[] = "CDHS";
     size_t used = 0;
     bool seen[52] = { false };
+    if (!output || !output_len || (values_len && !values)) {
+        return SEEDTOOL_EINVAL;
+    }
     output[0] = '\0';
 
     const bool is_cards = source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE;
@@ -337,12 +340,15 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
 seedtool_result_t seedtool_generate(const seedtool_source_t source, const size_t words, const uint8_t* values,
     const size_t values_len, seedtool_generated_t* output)
 {
-    if (!values || !output || values_len != seedtool_required_events(source, words)) {
+    /* A zero count is an unsupported source or word count, not an empty run. */
+    const size_t required = seedtool_required_events(source, words);
+    if (!values || !output || !required || values_len != required) {
         return SEEDTOOL_EINVAL;
     }
     memset(output, 0, sizeof(*output));
     seedtool_result_t ret = seedtool_transcript(source, values, values_len, output->transcript, sizeof(output->transcript));
     if (ret != SEEDTOOL_OK) {
+        seedtool_zero(output, sizeof(*output));
         return ret;
     }
     if (wally_sha256((const uint8_t*)output->transcript, strlen(output->transcript), output->hash,

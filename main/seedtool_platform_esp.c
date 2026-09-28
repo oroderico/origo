@@ -4,11 +4,13 @@
 
 #include <driver/gpio.h>
 #include <esp_check.h>
+#include <esp_heap_caps.h>
 #include <esp_random.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <stdbool.h>
+#include <string.h>
 
 /* These are read against a 100 Hz FreeRTOS tick (CONFIG_FREERTOS_HZ), so every
  * delay below rounds down to a whole 10 ms tick: POLL_MS actually polls every
@@ -37,8 +39,39 @@ static bool discarding;
 
 static bool pressed(const gpio_num_t pin) { return gpio_get_level(pin) == 0; }
 
+/* A software reset does not clear DRAM, and the previous session's stacks were
+ * heap memory. FreeRTOS fills every new task stack on creation, so what can
+ * still hold a seed from before the reset is whatever is free now: claim all
+ * of it, zero it, and give it back. */
+static void scrub_free_heap(void)
+{
+    void* head = NULL;
+    for (;;) {
+        const size_t size = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        if (size < sizeof(void*)) {
+            break;
+        }
+        void** block = heap_caps_malloc(size, MALLOC_CAP_8BIT);
+        if (!block) {
+            break;
+        }
+        memset(block, 0, size);
+        /* Keeps the memset from being dropped as a dead store before free. */
+        __asm__ __volatile__("" : : "r"(block) : "memory");
+        *block = head;
+        head = block;
+    }
+    while (head) {
+        void** const block = head;
+        head = *block;
+        *block = NULL;
+        heap_caps_free(block);
+    }
+}
+
 void seedtool_platform_init(void)
 {
+    scrub_free_heap();
     /* Both buttons are wired to ground, so an idle pin has to be held high from
      * somewhere. GPIO0 is a strapping pin: the ROM leaves its internal pull-up
      * on, which is why boot and the splash are fine, but configuring the pin
