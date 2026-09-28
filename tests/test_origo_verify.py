@@ -644,8 +644,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertGreaterEqual(seen, 4, f"the warning-text scan found only {seen} screens; it has stopped matching")
 
     def test_passphrase_keyboards_cover_printable_ascii(self):
-        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
-        layouts = source.split("passphrase_layouts[PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]
+        source = (Path(__file__).parents[1] / "main/seedtool_render.c").read_text()
+        layouts = source.split("passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES] = {", 1)[1].split("};", 1)[0]
         covered = set()
         for line in layouts.splitlines():
             line = line.strip()

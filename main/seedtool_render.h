@@ -88,7 +88,7 @@ size_t seedtool_list_top(size_t count, size_t selected, size_t previous_top);
 
 /* Scrollbar thumb inside a track of `track` pixels: `height` is how much of the
  * list is on screen, `offset` is how far into it. Pure, like the scroll position
- * itself, so the self-test can prove the thumb never leaves its track. */
+ * itself, so the tests can prove the thumb never leaves its track. */
 typedef struct {
     int offset;
     int height;
@@ -218,6 +218,21 @@ void seedtool_render_value_box(
 
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
+
+/* Keyboard layouts: the key characters row by row, rows separated by '\n' and at
+ * most ten keys per row. Public so the tests can prove they cover what they
+ * must: a layout that dropped a character would leave a passphrase impossible
+ * to retype. */
+#define SEEDTOOL_WORD_LAYOUT "qwertyuiop\nasdfghjkl\nzxcvbnm\b"
+/* Accept before Backspace, not after: nearest_enabled (seedtool_app.c) walks
+ * the keyboard as a circular ring, so whichever of the two sits closer to the
+ * digit row is what a disabled key's cursor snaps to first. Backspace is
+ * always enabled and would otherwise almost always win that race - it
+ * follows the last digit directly - stranding the cursor one step short of
+ * the accept key a completed number should usually land on. */
+#define SEEDTOOL_WORD_NUMBER_LAYOUT "1234567890\n\r\b"
+#define SEEDTOOL_PASSPHRASE_PAGES 4
+extern const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES];
 
 /* Layout geometry, kept here so the string is read the same way everywhere it is
  * drawn, walked or measured. */

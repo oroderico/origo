@@ -26,37 +26,30 @@ sections — this just lists what a pull request is expected to pass, which is
 exactly what CI (`.github/workflows/build.yml`) checks:
 
 ```sh
-# Compiled-core self-test: address/xpub vectors, keyboard reachability,
-# paging, Stackbit grids, Compact SeedQR payloads, and more.
-./tools/run-simulator.sh --self-test
+# The C tests (tests/test_*.c): published vectors, exhaustive wordlist and
+# keyboard properties, entropy statistics, and what the screens draw.
+cmake -S host -B build-host -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-host --parallel
+ctest --test-dir build-host --output-on-failure
+
+# The same tests instrumented: the out-of-bounds access and the undefined
+# behaviour that reading the code did not think to look for.
+cmake -S host -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DORIGO_SANITIZE=ON
+cmake --build build-sanitize --parallel
+ctest --test-dir build-sanitize --output-on-failure
 
 # Independent Python re-implementation of the mnemonic/entropy math,
 # plus the RNG-absence and pure-function checks.
 python3 -m unittest discover -s tests -v
 
-# QR encoder, built standalone with warnings as errors. No -DLOCK_VERSION:
-# the firmware does not define it either, so qrcode.h's version guards are
-# preprocessed out here exactly as they are there.
-cc -std=c11 -Wall -Wextra -Werror -Imain \
-  main/qrcode.c tests/qrcode_smoke.c -o /tmp/origo-qrcode-smoke
-/tmp/origo-qrcode-smoke
-
-# The same self-test again, instrumented: the out-of-bounds access and the
-# undefined behaviour that reading the code did not think to look for.
-cmake -S host -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_C_COMPILER=clang -DORIGO_SANITIZE=ON
-cmake --build build-sanitize --parallel
-./build-sanitize/origo-simulator --self-test
-
 # Firmware build, twice, independently audited and then compared
 # byte-for-byte: a non-reproducible build is treated as a failure.
 idf.py -B build-a -D SDKCONFIG=build-a/sdkconfig build
 idf.py -B build-b -D SDKCONFIG=build-b/sdkconfig build
+cmp build-a/origo.bin build-b/origo.bin
 python3 tools/audit_origo_elf.py build-a/origo.elf --map build-a/origo.map \
   --bin build-a/origo.bin --nm xtensa-esp32-elf-nm
-python3 tools/audit_origo_elf.py build-b/origo.elf --map build-b/origo.map \
-  --bin build-b/origo.bin --nm xtensa-esp32-elf-nm
-cmp build-a/origo.bin build-b/origo.bin
 ```
 
 A change that only touches host-testable code (most of `main/seedtool_core.c`,

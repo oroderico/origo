@@ -84,15 +84,7 @@ _Static_assert(ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99,
 _Static_assert(SEEDTOOL_MAX_WORD_DIGITS <= SEEDTOOL_DIGIT_BOXES_MAX,
     "a word number has more digits than the digit field can draw boxes for");
 
-/* Every key is found by its character rather than by where it sits, so the
- * layouts are QWERTY, or anything else, purely by changing the strings above. */
 #define PASSPHRASE_PAGES SEEDTOOL_PASSPHRASE_PAGES
-const char* const seedtool_passphrase_layouts[PASSPHRASE_PAGES] = {
-    "qwertyuiop\nasdfghjkl \nzxcvbnm\b\t\r",
-    "QWERTYUIOP\nASDFGHJKL \nZXCVBNM\b\t\r",
-    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
-    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
-};
 
 typedef void (*format_fn)(unsigned value, char* output, size_t output_len);
 
