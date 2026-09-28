@@ -22,10 +22,8 @@
 #define LCD_GAP_X 40
 #define LCD_GAP_Y 53
 
-/* Backlight dimming: real PWM through LEDC rather than the plain GPIO on/off
- * this pin used to be. Timer/channel/resolution/frequency match Jade's TTGO
- * T-Display driver (jade/main/power/tdisplay.inc), which this board's pin
- * assignment (GPIO4) was already taken from. */
+/* Backlight PWM through LEDC, with the timer, channel, resolution and
+ * frequency of Jade's T-Display driver (jade/main/power/tdisplay.inc). */
 #define LCD_BL_LEDC_TIMER LEDC_TIMER_0
 #define LCD_BL_LEDC_MODE LEDC_LOW_SPEED_MODE
 #define LCD_BL_LEDC_CHANNEL LEDC_CHANNEL_0

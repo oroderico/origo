@@ -12,16 +12,10 @@
 #include <stdbool.h>
 #include <string.h>
 
-/* These are read against a 100 Hz FreeRTOS tick (CONFIG_FREERTOS_HZ), so every
- * delay below rounds down to a whole 10 ms tick: POLL_MS actually polls every
- * 10 ms, which leaves the release settling in 10 ms rather than the 15 it reads
- * as. The hold values are multiples of 10 and so come out exact. The short
- * settle is left alone deliberately, since bounce cannot double-fire here: the
- * press latch below is only cleared once a release has been committed, so a
- * contact dropping back mid-release just restarts the settle. Anyone raising
- * the tick rate, or tuning these against a stopwatch, should know the two do
- * not currently agree. */
-#define POLL_MS 15
+/* Read against the 100 Hz FreeRTOS tick (CONFIG_FREERTOS_HZ), so each is a
+ * whole number of 10 ms ticks. A button bouncing mid-release only restarts the
+ * settle: the press latch clears once a release is committed. */
+#define POLL_MS 10
 #define SETTLE_POLLS 2
 #define HOLD_DELAY_MS 500
 #define HOLD_REPEAT_MS 140
