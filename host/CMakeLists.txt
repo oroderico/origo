@@ -76,6 +76,12 @@ add_executable(test_qrcode "${ORIGO_ROOT}/tests/test_qrcode.c" "${ORIGO_ROOT}/ma
 origo_target(test_qrcode)
 add_test(NAME qrcode COMMAND test_qrcode)
 
+# The app replayed from a key script, for checking that a change to it leaves
+# every screen as it was (see origo_replay.c).
+add_executable(origo-replay origo_replay.c "${ORIGO_ROOT}/main/seedtool_app.c" ${CORE_SOURCES} ${RENDER_SOURCES})
+origo_target(origo-replay)
+target_link_libraries(origo-replay PRIVATE wally_host m)
+
 # The simulator runs the firmware's app against an SDL window. The tests above
 # do not need it, so a machine without SDL still builds and runs them.
 pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
