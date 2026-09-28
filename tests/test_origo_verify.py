@@ -11,7 +11,7 @@ SPEC.loader.exec_module(verify)
 
 
 
-APP_SOURCES = ("seedtool_app.c", "app_ui.c", "app_words.c", "app_wallet.c", "app_seed.c")
+APP_SOURCES = ("app_internal.h", "seedtool_app.c", "app_ui.c", "app_words.c", "app_wallet.c", "app_seed.c")
 
 
 def app_source():

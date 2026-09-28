@@ -57,7 +57,11 @@ set(CORE_SOURCES
     "${ORIGO_ROOT}/main/seedtool_core.c"
     "${ORIGO_ROOT}/main/seedtool_wordlist.c")
 set(APP_SOURCES
-    "${ORIGO_ROOT}/main/seedtool_app.c")
+    "${ORIGO_ROOT}/main/seedtool_app.c"
+    "${ORIGO_ROOT}/main/app_seed.c"
+    "${ORIGO_ROOT}/main/app_ui.c"
+    "${ORIGO_ROOT}/main/app_wallet.c"
+    "${ORIGO_ROOT}/main/app_words.c")
 set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/seedtool_render.c"
     "${ORIGO_ROOT}/main/seedtool_logo.c"
