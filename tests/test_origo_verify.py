@@ -10,6 +10,15 @@ verify = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(verify)
 
 
+
+APP_SOURCES = ("seedtool_app.c", "app_ui.c", "app_words.c", "app_wallet.c", "app_seed.c")
+
+
+def app_source():
+    """The firmware app's C source, all of its modules joined."""
+    main = Path(__file__).parents[1] / "main"
+    return "\n".join((main / name).read_text() for name in APP_SOURCES if (main / name).exists())
+
 class SeedToolVerifierTests(unittest.TestCase):
     MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
     MNEMONIC_24 = " ".join(["abandon"] * 23 + ["art"])
@@ -442,7 +451,7 @@ class SeedToolVerifierTests(unittest.TestCase):
 
     def test_firmware_uses_rng_only_for_secp_blinding(self):
         root = Path(__file__).parents[1]
-        app = (root / "main/seedtool_app.c").read_text()
+        app = app_source()
         platform = (root / "main/seedtool_platform_esp.c").read_text()
         self.assertEqual(app.count("seedtool_platform_random"), 1)
         self.assertEqual(platform.count("esp_fill_random"), 1)
@@ -499,7 +508,9 @@ class SeedToolVerifierTests(unittest.TestCase):
         pattern = re.compile(
             r"^\s+(?:char|uint8_t|uint16_t)\s+(\w+)\s*\[", re.M)
         unwiped = []
-        for name in ("main/seedtool_app.c", "main/seedtool_core.c"):
+        for name in (*(f"main/{n}" for n in APP_SOURCES), "main/seedtool_core.c"):
+            if not (root / name).exists():
+                continue
             source = (root / name).read_text()
             for func, body in self._c_functions(source):
                 for buf in pattern.findall(body):
@@ -516,8 +527,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # it must fail on one that is not wiped.
         found = [
             buf
-            for func, body in self._c_functions(
-                (Path(__file__).parents[1] / "main/seedtool_app.c").read_text())
+            for func, body in self._c_functions(app_source())
             for buf in re.findall(r"^\s+(?:char|uint8_t)\s+(\w+)\s*\[", body, re.M)
             if buf in self.SECRET_BUFFER_NAMES
         ]
@@ -557,13 +567,14 @@ class SeedToolVerifierTests(unittest.TestCase):
         # runtime reject can be deleted with the build still passing, so it is
         # pinned here instead.
         root = Path(__file__).parents[1]
-        app = (root / "main/seedtool_app.c").read_text()
+        app = app_source()
         self.assertIn("index > SEEDTOOL_MAX_ADDRESS_INDEX", app)
         self.assertIn("ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS", app)
         self.assertIn("ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99", app)
         # The keypad's own cap is what the assertion above is asserting about;
         # if it stops bounding the digits, the pair being pinned means nothing.
-        self.assertIn("digits_len < ADDRESS_INDEX_DIGITS", app)
+        self.assertIn("digits_len < max_digits", app)
+        self.assertIn('enter_number("Go to index", ADDRESS_INDEX_DIGITS', app)
 
     def test_firmware_emits_the_branch_it_is_tested_for(self):
         # Everything else about the chain level is tested through the core
@@ -577,7 +588,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # is the whole 2000-line file, and unittest prints the haystack on
         # failure - a hundred kilobytes of C around the one line that matters.
         root = Path(__file__).parents[1]
-        app = (root / "main/seedtool_app.c").read_text()
+        app = app_source()
         for fragment, why in (
             ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
             ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
@@ -605,8 +616,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         # stopped calling still works perfectly.
         #
         # That is not hypothetical: it is what a rewrite of this screen did.
-        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
-        start = source.index("static int enter_word_number(")
+        source = app_source()
+        start = source.index("bool enter_word_number(")
         body = source[start : source.index("\n}\n", start)]
         self.assertIn("const seedtool_wordset_t* allowed", body, "enter_word_number no longer takes the allowed set")
         for narrowed in ("seedtool_next_digits_in(allowed", "seedtool_word_number_in(allowed"):
@@ -623,7 +634,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # nav_acknowledge's last argument is that choice. Matched by the text
         # the screen shows rather than by a list of call sites, so a new screen
         # making one of these claims is covered the day it is written.
-        source = (Path(__file__).parents[1] / "main/seedtool_app.c").read_text()
+        source = app_source()
         warnings = (
             "A photo reveals every address",
             "A photo = total loss of funds",
@@ -694,7 +705,7 @@ class SeedToolVerifierTests(unittest.TestCase):
 
     def test_host_simulator_reuses_firmware_logic_and_renderer(self):
         cmake = (Path(__file__).parents[1] / "host/CMakeLists.txt").read_text()
-        for shared in ("seedtool_app.c", "seedtool_core.c", "seedtool_render.c", "qrcode.c"):
+        for shared in ("APP_SOURCES", "seedtool_core.c", "seedtool_render.c", "qrcode.c"):
             self.assertIn(shared, cmake)
         self.assertNotIn("origo_verify.py", cmake)
 

@@ -56,6 +56,8 @@ set(CORE_SOURCES
     "${ORIGO_ROOT}/main/seedtool_bbqr.c"
     "${ORIGO_ROOT}/main/seedtool_core.c"
     "${ORIGO_ROOT}/main/seedtool_wordlist.c")
+set(APP_SOURCES
+    "${ORIGO_ROOT}/main/seedtool_app.c")
 set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/seedtool_render.c"
     "${ORIGO_ROOT}/main/seedtool_logo.c"
@@ -78,7 +80,7 @@ add_test(NAME qrcode COMMAND test_qrcode)
 
 # The app replayed from a key script, for checking that a change to it leaves
 # every screen as it was (see origo_replay.c).
-add_executable(origo-replay origo_replay.c "${ORIGO_ROOT}/main/seedtool_app.c" ${CORE_SOURCES} ${RENDER_SOURCES})
+add_executable(origo-replay origo_replay.c ${APP_SOURCES} ${CORE_SOURCES} ${RENDER_SOURCES})
 origo_target(origo-replay)
 target_link_libraries(origo-replay PRIVATE wally_host m)
 
@@ -86,7 +88,7 @@ target_link_libraries(origo-replay PRIVATE wally_host m)
 # do not need it, so a machine without SDL still builds and runs them.
 pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
 if(SDL2_FOUND)
-    add_executable(origo-simulator origo_sdl.c "${ORIGO_ROOT}/main/seedtool_app.c" ${CORE_SOURCES} ${RENDER_SOURCES})
+    add_executable(origo-simulator origo_sdl.c ${APP_SOURCES} ${CORE_SOURCES} ${RENDER_SOURCES})
     origo_target(origo-simulator)
     target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
 endif()

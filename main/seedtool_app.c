@@ -56,6 +56,8 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
 #define ADDRESS_INDEX_DIGITS 2
 _Static_assert(ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99,
     "the address-index keypad width and the derived address range must be changed together");
+/* enter_number's buffer is sized for the wider of the two. */
+_Static_assert(ADDRESS_INDEX_DIGITS <= ACCOUNT_DIGITS, "enter_number holds ACCOUNT_DIGITS digits");
 
 /* The word-number field draws one box per digit, and the renderer bounds how
  * many of those fit across the display. Widening a word number without the
@@ -178,7 +180,6 @@ static seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const tick
 
 
 /* choose_nav's outcomes other than an item index. */
-#define NAV_TIMEOUT (-1)
 #define NAV_BACK (-2)
 #define NAV_CONFIRM (-3)
 
@@ -208,18 +209,18 @@ static size_t nav_selection(const size_t position, const size_t count, const boo
 }
 
 /* The loop behind every screen whose only controls are the arrow and the
- * confirm. `progress` adds the entropy bar; `back` false removes the arrow.
- * Returns NAV_BACK, NAV_CONFIRM or NAV_TIMEOUT. */
-static int nav_screen(const char* title, const char* one, const char* two, const char* label, const bool back,
+ * confirm. `label` NULL leaves out the confirm; `progress` adds the entropy
+ * bar. Returns NAV_BACK or NAV_CONFIRM. */
+static int nav_screen(const char* title, const char* one, const char* two, const char* label,
     const bool start_on_back, const seedtool_progress_t* progress)
 {
     seedtool_nav_t nav = {
         /* A screen with no confirm opens on the arrow, whatever the caller
          * asked. */
-        .selected = back && (start_on_back || !label) ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
+        .selected = start_on_back || !label ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
         .confirm = label ? SEEDTOOL_CONFIRM_TICK : SEEDTOOL_CONFIRM_NONE,
         .confirm_enabled = true,
-        .back = back,
+        .back = true,
     };
     for (;;) {
         if (progress) {
@@ -235,14 +236,12 @@ static int nav_screen(const char* title, const char* one, const char* two, const
         case KEY_NEXT:
             /* With both controls either key moves to the other; with one there
              * is nowhere to move. */
-            if (back && label) {
+            if (label) {
                 nav.selected = nav.selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_CONFIRM : SEEDTOOL_NAV_BACK;
             }
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            return NAV_TIMEOUT;
+            break;
         }
     }
 }
@@ -253,20 +252,20 @@ static int nav_screen(const char* title, const char* one, const char* two, const
 static bool nav_acknowledge(
     const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
 {
-    return nav_screen(title, one, two, label, true, start_on_back, NULL) == NAV_CONFIRM;
+    return nav_screen(title, one, two, label, start_on_back, NULL) == NAV_CONFIRM;
 }
 
 /* The same with the entropy quality bar drawn in. */
 static bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label,
     const bool start_on_back, const seedtool_progress_t* progress)
 {
-    return nav_screen(title, one, two, label, true, start_on_back, progress) == NAV_CONFIRM;
+    return nav_screen(title, one, two, label, start_on_back, progress) == NAV_CONFIRM;
 }
 
 /* A notice: the reader reads it and leaves, so the arrow is its only control. */
 static void notice(const char* title, const char* one, const char* two)
 {
-    (void)nav_screen(title, one, two, NULL, true, true, NULL);
+    (void)nav_screen(title, one, two, NULL, true, NULL);
 }
 
 /* A list under the nav chrome. `cursor` carries the selection in and out, so a
@@ -313,10 +312,8 @@ static int choose_nav(const char* title, const char* const* items, const size_t 
         case KEY_NEXT:
             *cursor = nav_selection((position + 1) % ring, count, back);
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            return NAV_TIMEOUT;
+            break;
         }
     }
 }
@@ -366,10 +363,7 @@ static seedtool_nav_t page_nav(const size_t position, const size_t pages, const 
 static int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
     const int selected = choose_nav(title, items, count, NULL, false, true, cursor);
-    if (selected == NAV_BACK) {
-        return (int)count;
-    }
-    return selected == NAV_TIMEOUT ? -1 : selected;
+    return selected == NAV_BACK ? (int)count : selected;
 }
 
 static int choose_menu(const char* title, const char* const* items, const size_t count)
@@ -404,13 +398,11 @@ static void format_progress_heading(char* heading, const size_t heading_len, con
     }
 }
 
-/* Numeric carousel. `allowed` is optional and indexed from `min`; disallowed
- * values (cards already drawn) are skipped. A `total` of zero is a one-off
- * value rather than one of a run.
- *
- * Returns 1 with `*value` set, 0 when the reader took `[back]`, or -1 on
- * timeout. `[back]` is a stop on the ring because both keys change the value. */
-static int enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
+/* Entry `position` of `total` in a run, on a numeric carousel. `allowed` is
+ * optional and indexed from `min`; disallowed values (cards already drawn) are
+ * skipped. Returns true with `*value` set, or false when the reader took
+ * `[back]`, a stop on the ring since both keys change the value. */
+static bool enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
     const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history,
     const seedtool_progress_t* progress)
 {
@@ -422,11 +414,7 @@ static int enter_value(const char* title, const unsigned position, const unsigne
 
     for (;;) {
         char heading[48], shown[48];
-        if (total) {
-            format_progress_heading(heading, sizeof(heading), title, position, total, progress);
-        } else {
-            (void)snprintf(heading, sizeof(heading), "%s  %u-%u", title, min, max);
-        }
+        format_progress_heading(heading, sizeof(heading), title, position, total, progress);
         if (format) {
             format(current, shown, sizeof(shown));
         } else {
@@ -437,20 +425,18 @@ static int enter_value(const char* title, const unsigned position, const unsigne
          * transcript under it so a mis-keyed entry is caught against the paper. */
         if (!format) {
             seedtool_render_value_box(heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
-        } else if (progress) {
+        } else {
             seedtool_render_dice_screen(
                 heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
-        } else {
-            seedtool_render_screen(heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER);
         }
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
             if (on_back) {
-                return 0;
+                return false;
             }
             *value = current;
-            return 1;
+            return true;
         /* KEY_PREV, the physical "up" button, raises the value, as on a
          * spinner. */
         case KEY_PREV:
@@ -473,18 +459,16 @@ static int enter_value(const char* title, const unsigned position, const unsigne
                 current = step_value(current, min, max, false, allowed);
             }
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            return -1;
+            break;
         }
     }
 }
 
 /* One coin flip: KEY_PREV ("up") is heads, KEY_NEXT tails, and the chord undoes
- * the last flip. One press per flip, for runs of 128 or 256. Returns 1 with
- * `*bit` set, 0 to step back, -1 on timeout. */
-static int enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
+ * the last flip. One press per flip, for runs of 128 or 256. Returns true with
+ * `*bit` set, or false to step back. */
+static bool enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
     const char* history, const seedtool_progress_t* progress)
 {
     char heading[48];
@@ -494,17 +478,15 @@ static int enter_coin_flip(const char* title, const unsigned position, const uns
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
-            return 0;
+            return false;
         case KEY_PREV:
             *bit = 1;
-            return 1;
+            return true;
         case KEY_NEXT:
             *bit = 0;
-            return 1;
-        case KEY_REDRAW:
-            break;
+            return true;
         default:
-            return -1;
+            break;
         }
     }
 }
@@ -526,7 +508,7 @@ static void format_suit(const unsigned value, char* output, const size_t output_
  * 26 through one 52-way ring. Backing out of the rank returns to the suit;
  * backing out of the suit undoes the card. Same contract as enter_value. */
 /* `available` NULL means every card can be drawn (with replacement). */
-static int enter_card(const unsigned position, const unsigned total, unsigned* value, const bool* available,
+static bool enter_card(const unsigned position, const unsigned total, unsigned* value, const bool* available,
     const char* history, const seedtool_progress_t* progress)
 {
     for (;;) {
@@ -541,10 +523,8 @@ static int enter_card(const unsigned position, const unsigned total, unsigned* v
             }
         }
         unsigned suit = 0;
-        const int suit_result
-            = enter_value("Suit", position, total, 0, 3, &suit, format_suit, suit_allowed, history, progress);
-        if (suit_result <= 0) {
-            return suit_result;
+        if (!enter_value("Suit", position, total, 0, 3, &suit, format_suit, suit_allowed, history, progress)) {
+            return false;
         }
 
         bool rank_allowed[13];
@@ -552,16 +532,11 @@ static int enter_card(const unsigned position, const unsigned total, unsigned* v
             rank_allowed[r] = !available || available[suit * 13 + r];
         }
         unsigned rank = 0;
-        const int rank_result = enter_value(
-            CARD_SUIT_NAMES[suit], position, total, 0, 12, &rank, format_rank, rank_allowed, history, progress);
-        if (rank_result < 0) {
-            return -1;
+        if (enter_value(
+                CARD_SUIT_NAMES[suit], position, total, 0, 12, &rank, format_rank, rank_allowed, history, progress)) {
+            *value = suit * 13 + rank;
+            return true;
         }
-        if (rank_result == 0) {
-            continue;
-        }
-        *value = suit * 13 + rank;
-        return 1;
     }
 }
 
@@ -649,11 +624,8 @@ static bool page_text_impl(const char* title, const char* text, const bool confi
         case KEY_PREV:
             position = page_step(position, pages, false, confirmable);
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            advanced = false;
-            goto done;
+            break;
         }
     }
 done:
@@ -688,7 +660,7 @@ static void page_read(const char* title, const char* text)
  * used. */
 #define DESCRIPTOR_LEN (sizeof("wpkh([00000000/84'/0'/999']/<0;1>/*)#12345678") + SEEDTOOL_MAX_XPUB_LEN)
 
-/* The longest value ever handed to show_bbqr: the descriptor. */
+/* The longest value ever handed to show_account_key_qr: the descriptor. */
 #define BBQR_MAX_VALUE_LEN ((ACCOUNT_KEY_LEN > DESCRIPTOR_LEN ? ACCOUNT_KEY_LEN : DESCRIPTOR_LEN) - 1)
 #define BBQR_FRAME_LEN (SEEDTOOL_BBQR_HEADER_LEN + (BBQR_MAX_VALUE_LEN * 8 + 4) / 5 + 1)
 
@@ -702,17 +674,17 @@ static void page_read(const char* title, const char* text)
 #define BBQR_FRAME_MAX_VERSION 3
 
 /* An account key or descriptor as animated BBQr parts
- * (github.com/coinkite/BBQr), the wire format Krux reads (src/krux/bbqr.py).
- * Always the plain base32 "2" encoding: there is no deflate here. Returns the
- * key that ended the animation. */
-static seedtool_key_t show_bbqr(const char* title, const char* value)
+ * (github.com/coinkite/BBQr), the wire format Krux reads (src/krux/bbqr.py):
+ * too long for a legible single frame. Always the plain base32 "2" encoding,
+ * since there is no deflate here. Returns when the reader leaves. */
+static void show_account_key_qr(const char* title, const char* value)
 {
     const size_t len = strlen(value);
     const size_t frame_chars = seedtool_render_qr_alphanumeric_capacity(BBQR_FRAME_MAX_VERSION);
     const size_t parts = seedtool_bbqr_part_count(len, frame_chars);
     if (!parts) {
         notice("Too long for a QR", title, "Read it as text instead");
-        return KEY_SELECT;
+        return;
     }
     size_t part = 0;
     size_t selected = SEEDTOOL_NAV_BACK;
@@ -732,7 +704,7 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
         seedtool_zero(frame, sizeof(frame));
         if (!ok) {
             notice("Too long for a QR", title, "Read it as text instead");
-            return KEY_SELECT;
+            return;
         }
         /* A single part has nothing to advance to, so it waits like the still
          * screen it is rather than redrawing the same code every second. */
@@ -750,23 +722,11 @@ static seedtool_key_t show_bbqr(const char* title, const char* value)
             selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
             continue;
         }
-        if (key == KEY_SELECT && selected == SEEDTOOL_NAV_SHADE) {
+        if (selected == SEEDTOOL_NAV_SHADE) {
             seedtool_render_qr_cycle_shade();
             continue;
         }
-        return key;
-    }
-}
-
-/* An account key's QR, always through show_bbqr: it is too long for a legible
- * single frame. */
-static void show_account_key_qr(const char* title, const char* value)
-{
-    for (;;) {
-        const seedtool_key_t key = show_bbqr(title, value);
-        if (key != KEY_REDRAW) {
-            return;
-        }
+        return;
     }
 }
 
@@ -814,14 +774,14 @@ static size_t layout_key_index(const char* layout, const char target)
     return count;
 }
 
-/* One BIP39 word. Returns 1 when a word was chosen, 0 when the reader deleted
- * back out of it, -1 on timeout or overflow. Only letters that still lead to a
- * word are enabled, and ten or fewer candidates are listed outright.
+/* One BIP39 word into `output`. Returns false when the reader deleted back out
+ * of it. Only letters that still lead to a word are enabled, and ten or fewer
+ * candidates are listed outright.
  *
  * `allowed` narrows the words, NULL for all of them. Every enabled letter leads
  * to an allowed word, so the stem never runs out of candidates. */
-static int enter_word(
-    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
+static bool enter_word(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
+    char output[SEEDTOOL_MAX_WORD_LEN + 1])
 {
     char stem[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
     size_t stem_len = 0;
@@ -836,12 +796,7 @@ static int enter_word(
         const size_t matches
             = seedtool_words_with_prefix_in(allowed, stem, stem_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
         bool erase = false;
-
-        if (!matches) {
-            seedtool_zero(stem, sizeof(stem));
-            seedtool_zero(candidates, sizeof(candidates));
-            return -1;
-        }
+        seedtool_require(matches > 0);
         if (matches <= SEEDTOOL_MAX_WORD_CHOICES) {
             /* Ten or fewer candidates: list them, with the stem in the title. */
             const char* items[SEEDTOOL_MAX_WORD_CHOICES + 1];
@@ -854,20 +809,11 @@ static int enter_word(
             (void)snprintf(listing, sizeof(listing), "%s  %s", title, stem_len ? stem : "-");
             const int chosen = choose_menu(listing, items, matches);
             seedtool_zero(listing, sizeof(listing));
-            if (chosen < 0) {
-                seedtool_zero(stem, sizeof(stem));
-                seedtool_zero(candidates, sizeof(candidates));
-                return -1;
-            }
             if ((size_t)chosen < matches) {
-                const char* const word = items[chosen];
-                const int result = strlen(word) + 1 > output_len ? -1 : 1;
-                if (result == 1) {
-                    strcpy(output, word);
-                }
+                strcpy(output, items[chosen]);
                 seedtool_zero(stem, sizeof(stem));
                 seedtool_zero(candidates, sizeof(candidates));
-                return result;
+                return true;
             }
             erase = true;
         } else {
@@ -894,12 +840,8 @@ static int enter_word(
                 case KEY_NEXT:
                     selected = step_key(enabled, WORD_KEYS, selected, true);
                     break;
-                case KEY_REDRAW:
-                    break;
                 default:
-                    seedtool_zero(stem, sizeof(stem));
-                    seedtool_zero(candidates, sizeof(candidates));
-                    return -1;
+                    break;
                 }
             }
             const char key = seedtool_layout_key(WORD_LAYOUT, selected);
@@ -915,7 +857,7 @@ static int enter_word(
             if (!stem_len) {
                 seedtool_zero(stem, sizeof(stem));
                 seedtool_zero(candidates, sizeof(candidates));
-                return 0;
+                return false;
             }
             stem[--stem_len] = '\0';
         }
@@ -931,8 +873,8 @@ static int enter_word(
  * that still lead to a word number, then OK once the digits already name one,
  * then backspace, so a number ends where the reader says: 240 is three digits,
  * not 0240. */
-static int enter_word_number(
-    const size_t position, const size_t total, const seedtool_wordset_t* allowed, char* output, const size_t output_len)
+static bool enter_word_number(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
+    char output[SEEDTOOL_MAX_WORD_LEN + 1])
 {
     char digits[SEEDTOOL_MAX_WORD_DIGITS + 1] = { 0 };
     /* What each box shows, including the one being scrolled. */
@@ -976,14 +918,9 @@ static int enter_word_number(
         seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
         seedtool_display_flush();
 
-        seedtool_key_t key = wait_key();
+        const seedtool_key_t key = wait_key();
         if (key == KEY_REDRAW) {
             continue;
-        }
-        if (key == KEY_TIMEOUT) {
-            seedtool_zero(digits, sizeof(digits));
-            seedtool_zero(shown, sizeof(shown));
-            return -1;
         }
         if (key == KEY_PREV) {
             on = on ? on - 1 : ring_len - 1;
@@ -999,7 +936,7 @@ static int enter_word_number(
             if (!at) {
                 seedtool_zero(digits, sizeof(digits));
                 seedtool_zero(shown, sizeof(shown));
-                return 0;
+                return false;
             }
             digits[--at] = '\0';
             rebuild = true;
@@ -1026,21 +963,13 @@ static int enter_word_number(
         (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
         /* The number just typed is what is being checked, so the bar names
          * it rather than saying "Continue". */
-        const int answer = word ? nav_screen(title, word, counted, "Use this word", true, false, NULL) : NAV_BACK;
+        const int answer = word ? nav_screen(title, word, counted, "Use this word", false, NULL) : NAV_BACK;
         seedtool_zero(counted, sizeof(counted));
         if (answer == NAV_CONFIRM) {
-            const int result = strlen(word) + 1 > output_len ? -1 : 1;
-            if (result == 1) {
-                strcpy(output, word);
-            }
+            strcpy(output, word);
             seedtool_zero(digits, sizeof(digits));
             seedtool_zero(shown, sizeof(shown));
-            return result;
-        }
-        if (answer == NAV_TIMEOUT) {
-            seedtool_zero(digits, sizeof(digits));
-            seedtool_zero(shown, sizeof(shown));
-            return -1;
+            return true;
         }
         /* Back from the confirmation: a number completed by its fourth digit
          * reopens that digit; one ended with OK returns to the field as it was. */
@@ -1051,10 +980,11 @@ static int enter_word_number(
     }
 }
 
-/* The account index, on the word-number keypad. Every digit is reachable up to
- * ACCOUNT_DIGITS, so nothing is pruned. Returns 1 with `*value` set, 0 when the
- * reader backed out of the first digit, -1 on timeout. */
-static int enter_account(uint32_t* value)
+/* A number of up to `max_digits` digits on the word-number keypad, every digit
+ * reachable at any length, since every prefix is already in range. Returns true
+ * with `*value` set on Accept, false when the reader backed out of the first
+ * digit. */
+static bool enter_number(const char* title, const size_t max_digits, uint32_t* value)
 {
     char digits[ACCOUNT_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
@@ -1067,15 +997,14 @@ static int enter_account(uint32_t* value)
             const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
             enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
                 : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0
-                                                       : digits_len < ACCOUNT_DIGITS;
+                                                       : digits_len < max_digits;
         }
         /* With the digits full, the cursor goes to Accept. */
         selected
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_render_keyboard(
-                "Account", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            seedtool_render_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
             seedtool_display_flush();
             switch (wait_key()) {
             case KEY_SELECT:
@@ -1087,11 +1016,8 @@ static int enter_account(uint32_t* value)
             case KEY_NEXT:
                 selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
                 break;
-            case KEY_REDRAW:
-                break;
             default:
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
+                break;
             }
         }
         const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
@@ -1102,78 +1028,15 @@ static int enter_account(uint32_t* value)
             }
             seedtool_zero(digits, sizeof(digits));
             *value = number;
-            return 1;
+            return true;
         }
         if (pressed == SEEDTOOL_KEY_BACKSPACE) {
             if (!digits_len) {
                 seedtool_zero(digits, sizeof(digits));
-                return 0;
+                return false;
             }
             digits[--digits_len] = '\0';
-        } else if (digits_len < ACCOUNT_DIGITS) {
-            digits[digits_len++] = pressed;
-            digits[digits_len] = '\0';
-        }
-    }
-}
-
-/* enter_account for "Go to index", ADDRESS_INDEX_DIGITS wide. */
-static int enter_address_index(uint32_t* value)
-{
-    char digits[ADDRESS_INDEX_DIGITS + 1] = { 0 };
-    size_t digits_len = 0;
-    size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
-    const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
-
-    for (;;) {
-        bool enabled[WORD_NUMBER_KEYS] = { false };
-        for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
-            const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
-            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
-                : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0
-                                                       : digits_len < ADDRESS_INDEX_DIGITS;
-        }
-        selected = !enabled[selected] && digits_len ? accept_index
-                                                     : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
-        bool picked = false;
-        while (!picked) {
-            seedtool_render_keyboard(
-                "Go to index", digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
-            seedtool_display_flush();
-            switch (wait_key()) {
-            case KEY_SELECT:
-                picked = true;
-                break;
-            case KEY_PREV:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
-                break;
-            case KEY_NEXT:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
-                break;
-            case KEY_REDRAW:
-                break;
-            default:
-                seedtool_zero(digits, sizeof(digits));
-                return -1;
-            }
-        }
-        const char pressed = seedtool_layout_key(WORD_NUMBER_LAYOUT, selected);
-        if (pressed == SEEDTOOL_KEY_ACCEPT) {
-            uint32_t number = 0;
-            for (size_t i = 0; i < digits_len; ++i) {
-                number = number * 10 + (uint32_t)(digits[i] - '0');
-            }
-            seedtool_zero(digits, sizeof(digits));
-            *value = number;
-            return 1;
-        }
-        if (pressed == SEEDTOOL_KEY_BACKSPACE) {
-            if (!digits_len) {
-                seedtool_zero(digits, sizeof(digits));
-                return 0;
-            }
-            digits[--digits_len] = '\0';
-        } else if (digits_len < ADDRESS_INDEX_DIGITS) {
+        } else if (digits_len < max_digits) {
             digits[digits_len++] = pressed;
             digits[digits_len] = '\0';
         }
@@ -1201,25 +1064,20 @@ static bool join_words(
     return true;
 }
 
-/* Returns 1 when a whole mnemonic was entered, 0 when the reader backed out of
- * the first word or the method menu, -1 on timeout or overflow. `by_number`, if
- * not NULL, reports the entry method, which re-entering a word during review
- * reuses. */
-static int enter_mnemonic_words(
-    const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
+/* Fills `words` and returns true when a whole mnemonic was entered, false when
+ * the reader backed out of the first word or the method menu. `by_number`, if
+ * not NULL, reports the entry method, which re-entering a word reuses. */
+static bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
 {
     const char* methods[] = { "Type the letters", "Enter word numbers" };
     const int method = choose_menu("Word entry", methods, 2);
-    if (method < 0) {
-        return -1;
-    }
     if (method == 2) {
-        return 0;
+        return false;
     }
     if (by_number) {
         *by_number = method != 0;
     }
-    int outcome = 1;
+    bool entered = true;
     size_t index = 0;
     seedtool_wordset_t allowed;
     while (index < count) {
@@ -1231,64 +1089,55 @@ static int enter_mnemonic_words(
         const seedtool_wordset_t* filter = NULL;
         if (last_of_whole) {
             char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
-            if (!join_words(words, count - 1, prefix, sizeof(prefix))
-                || seedtool_final_word_candidates(prefix, &allowed) != SEEDTOOL_OK) {
-                seedtool_zero(prefix, sizeof(prefix));
-                outcome = -1;
-                break;
-            }
+            seedtool_require(join_words(words, count - 1, prefix, sizeof(prefix))
+                && seedtool_final_word_candidates(prefix, &allowed) == SEEDTOOL_OK);
             seedtool_zero(prefix, sizeof(prefix));
             filter = &allowed;
         }
-        const int result = method
-            ? enter_word_number(index + 1, count, filter, words[index], sizeof(words[index]))
-            : enter_word(index + 1, count, filter, words[index], sizeof(words[index]));
-        if (result < 0) {
-            outcome = -1;
-            break;
-        }
-        if (result == 0) {
-            /* Deleting past the start of a word steps back to the previous one,
-             * and past the first word returns to the method menu. */
-            if (!index) {
-                outcome = 0;
-                break;
-            }
-            words[--index][0] = '\0';
+        if (method ? enter_word_number(index + 1, count, filter, words[index])
+                   : enter_word(index + 1, count, filter, words[index])) {
+            ++index;
             continue;
         }
-        ++index;
+        /* Deleting past the start of a word steps back to the previous one,
+         * and past the first word returns to the method menu. */
+        if (!index) {
+            entered = false;
+            break;
+        }
+        words[--index][0] = '\0';
     }
     /* The set says something about the words before it. */
     seedtool_zero(&allowed, sizeof(allowed));
-    return outcome;
+    return entered;
 }
-
 
 static char review_labels[24][32];
 static const char* review_items[24];
 
 /* The entered words as a list, so any one can be fixed without retyping the
- * rest. Shown after every entry, not only a failed one. `mnemonic` is rejoined
- * after each edit, so the checksum is always graded on the current words.
- * Returns 1 on Continue with a valid checksum, 0 on Back, -1 on timeout or
- * overflow. */
-static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number,
+ * rest. Returns true on Continue, false on Back.
+ *
+ * With `mnemonic`, the words are a whole mnemonic: they are rejoined into it
+ * after each edit, Continue is dim while the checksum fails, and the last word
+ * re-enters under its checksum filter. Without, they are complete_checksum's
+ * 11 or 23 words, which no checksum applies to yet. */
+static bool review_words(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number,
     char* mnemonic, const size_t mnemonic_len)
 {
-    /* The confirm bar by default, as every nav screen opens: the reader who
-     * has just typed twelve words is far more often done than not. */
+    /* Opens on the confirm: after typing the words the reader is more often
+     * done than not. */
     size_t cursor = SEEDTOOL_NAV_CONFIRM;
-    int outcome;
+    bool confirmed;
     /* The rows are the mnemonic, in .bss: cleared on the way in, so a 12-word
      * restore shows none of an earlier 24-word one, and on the way out. */
     seedtool_zero(review_labels, sizeof(review_labels));
     for (;;) {
-        if (!join_words(words, count, mnemonic, mnemonic_len)) {
-            outcome = -1;
-            goto done;
+        bool valid = true;
+        if (mnemonic) {
+            seedtool_require(join_words(words, count, mnemonic, mnemonic_len));
+            valid = seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK;
         }
-        const bool valid = seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK;
         for (size_t i = 0; i < count; ++i) {
             /* %.*s: GCC's format-truncation analysis loses the bound on
              * words[i] through the parameter. */
@@ -1300,25 +1149,17 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
          * carries the verdict. */
         const int selected = choose_nav(
             valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, true, &cursor);
-        if (selected == NAV_TIMEOUT) {
-            outcome = -1;
-            goto done;
-        }
-        if (selected == NAV_BACK) {
-            outcome = 0;
-            goto done;
-        }
-        if (selected == NAV_CONFIRM) {
-            outcome = 1;
-            goto done;
+        if (selected == NAV_BACK || selected == NAV_CONFIRM) {
+            confirmed = selected == NAV_CONFIRM;
+            break;
         }
         char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        /* Re-entering the last word narrows it to what can end the current
-         * words. If the set cannot be built the word is entered unnarrowed:
-         * this screen must never block a fix. */
+        /* The last word of a whole mnemonic re-enters narrowed to what can end
+         * the current words. If the set cannot be built it is entered
+         * unnarrowed: this screen must never block a fix. */
         seedtool_wordset_t allowed;
         const seedtool_wordset_t* filter = NULL;
-        if ((size_t)selected + 1 == count) {
+        if (mnemonic && (size_t)selected + 1 == count) {
             char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
             if (join_words(words, count - 1, prefix, sizeof(prefix))
                 && seedtool_final_word_candidates(prefix, &allowed) == SEEDTOOL_OK) {
@@ -1326,107 +1167,47 @@ static int review_and_confirm(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const siz
             }
             seedtool_zero(prefix, sizeof(prefix));
         }
-        const int result = by_number ? enter_word_number(selected + 1, count, filter, word, sizeof(word))
-                                      : enter_word(selected + 1, count, filter, word, sizeof(word));
+        /* Backing out of the word leaves it as it was. */
+        if (by_number ? enter_word_number(selected + 1, count, filter, word)
+                      : enter_word(selected + 1, count, filter, word)) {
+            strcpy(words[selected], word);
+        }
         seedtool_zero(&allowed, sizeof(allowed));
-        if (result == 1) {
-            strcpy(words[selected], word);
-        } else if (result < 0) {
-            seedtool_zero(word, sizeof(word));
-            outcome = -1;
-            goto done;
-        }
-        /* result == 0: backed out of re-entering this word, so it is left
-         * exactly as it was and the list is simply shown again. */
         seedtool_zero(word, sizeof(word));
     }
-done:
     seedtool_zero(review_labels, sizeof(review_labels));
-    return outcome;
-}
-
-/* complete_checksum's 11 or 23 words, shown again when the reader steps back
- * from the flips: review_and_confirm without the checksum gate, which a prefix
- * can never pass. */
-static int review_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, const bool by_number)
-{
-    size_t cursor = SEEDTOOL_NAV_CONFIRM;
-    int outcome;
-    seedtool_zero(review_labels, sizeof(review_labels));
-    for (;;) {
-        for (size_t i = 0; i < count; ++i) {
-            (void)snprintf(review_labels[i], sizeof(review_labels[i]), "%02u. %.*s", (unsigned)(i + 1),
-                (int)SEEDTOOL_MAX_WORD_LEN, words[i]);
-            review_items[i] = review_labels[i];
-        }
-        const int selected = choose_nav("Review words", review_items, count, "Continue", true, true, &cursor);
-        if (selected == NAV_TIMEOUT) {
-            outcome = -1;
-            goto done;
-        }
-        if (selected == NAV_BACK) {
-            outcome = 0;
-            goto done;
-        }
-        if (selected == NAV_CONFIRM) {
-            outcome = 1;
-            goto done;
-        }
-        char word[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
-        /* No filter: none of these words carries the checksum. */
-        const int result = by_number ? enter_word_number(selected + 1, count, NULL, word, sizeof(word))
-                                     : enter_word(selected + 1, count, NULL, word, sizeof(word));
-        if (result == 1) {
-            strcpy(words[selected], word);
-        } else if (result < 0) {
-            seedtool_zero(word, sizeof(word));
-            outcome = -1;
-            goto done;
-        }
-        seedtool_zero(word, sizeof(word));
-    }
-done:
-    seedtool_zero(review_labels, sizeof(review_labels));
-    return outcome;
+    return confirmed;
 }
 
 /* The words stage of a checksum completion: the list with the entry screen
- * behind it, so back steps one screen at a time. Returns 1 once the reader
- * comes forward, 0 when they step back past entry, -1 on timeout. */
-static int revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number)
+ * behind it, so back steps one screen at a time. Returns true once the reader
+ * comes forward, false when they step back past entry. */
+static bool revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number)
 {
     for (;;) {
-        const int reviewed = review_prefix(words, count, *by_number);
-        if (reviewed != 0) {
-            return reviewed;
+        if (review_words(words, count, *by_number, NULL, 0)) {
+            return true;
         }
-        const int entered = enter_mnemonic_words(count, words, by_number);
-        if (entered != 1) {
-            return entered;
+        if (!enter_mnemonic_words(count, words, by_number)) {
+            return false;
         }
     }
 }
 
-/* Entry then review, for a mnemonic meant to be whole (complete_checksum's
- * partial one uses review_prefix). The last word is entered under its checksum
- * filter, so a completed entry always validates; the review still gates
- * Continue on it. */
-static int restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number,
+/* Entry then review, for a mnemonic meant to be whole. The last word is entered
+ * under its checksum filter, so a completed entry always validates; the review
+ * still gates Continue on it. The review's arrow reopens entry; `resume`
+ * starts on the review, for a caller handing the words back. */
+static bool restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number,
     char* mnemonic, const size_t mnemonic_len, bool resume)
 {
-    /* The review's arrow reopens entry rather than the length menu. `resume`
-     * starts on the review, for a caller handing the words back. */
     for (;;) {
-        if (!resume) {
-            const int entered = enter_mnemonic_words(count, words, by_number);
-            if (entered != 1) {
-                return entered;
-            }
+        if (!resume && !enter_mnemonic_words(count, words, by_number)) {
+            return false;
         }
         resume = false;
-        const int reviewed = review_and_confirm(words, count, *by_number, mnemonic, mnemonic_len);
-        if (reviewed != 0) {
-            return reviewed;
+        if (review_words(words, count, *by_number, mnemonic, mnemonic_len)) {
+            return true;
         }
     }
 }
@@ -1454,10 +1235,8 @@ static bool enter_passphrase_once(char* output, const size_t output_len)
             continue;
         case KEY_SELECT:
             break;
-        case KEY_REDRAW:
-            continue;
         default:
-            return false;
+            continue;
         }
         const char pressed = seedtool_layout_key(layout, selected);
         if (pressed == SEEDTOOL_KEY_ACCEPT) {
@@ -1486,7 +1265,7 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
 {
     const char* options[] = { "No passphrase", "Enter passphrase" };
     const int selected = choose_menu("Passphrase", options, 2);
-    if (selected < 0 || selected == 2) {
+    if (selected == 2) {
         return false;
     }
     if (selected == 0) {
@@ -1662,7 +1441,7 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
 }
 
 /* Browses the cache. Returns the chosen index with its address in address_out,
- * or -1 on Back or timeout. `cursor` is where the list opens and where it is
+ * or -1 on Back. `cursor` is where the list opens and where it is
  * left; Go to index moves it only within the shown rows. */
 static int browse_addresses(
     const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
@@ -1671,11 +1450,7 @@ static int browse_addresses(
         const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
-            const int result = enter_address_index(&index);
-            if (result < 0) {
-                return -1;
-            }
-            if (result == 0) {
+            if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, &index)) {
                 continue;
             }
             /* `index` addresses the static cache directly, so it is checked
@@ -1696,7 +1471,7 @@ static int browse_addresses(
             (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
                 addresses[selected]);
         }
-        return selected < 0 || selected == (int)ADDRESS_SHOWN_ROWS + 1 ? -1 : selected;
+        return selected == (int)ADDRESS_SHOWN_ROWS + 1 ? -1 : selected;
     }
 }
 
@@ -1739,7 +1514,7 @@ static bool choose_address_type(seedtool_address_type_t* type)
         }
     }
     const int selected = choose_menu_at("Type", items, ADDRESS_TYPE_COUNT, &current);
-    if (selected < 0 || (size_t)selected >= ADDRESS_TYPE_COUNT) {
+    if ((size_t)selected >= ADDRESS_TYPE_COUNT) {
         return false;
     }
     *type = ADDRESS_TYPES[selected].type;
@@ -1781,7 +1556,7 @@ static void show_extended_keys(const char* mnemonic, const char* passphrase, con
         items[count++] = "Descriptor";
         const int selected = choose_menu_at("Extended public key", items, count, &cursor);
         /* The arrow returns `count`, one past the last row. */
-        if (selected < 0 || (size_t)selected == count) {
+        if ((size_t)selected == count) {
             return;
         }
         if (selected == 0) {
@@ -1802,7 +1577,7 @@ static void show_addresses(
     /* Which branch, asked before the list, as xpub/zpub is. */
     const char* const branches[] = { "Receive", "Change" };
     const int branch = choose_menu("Addresses", branches, 2);
-    if (branch < 0 || branch == 2) {
+    if (branch == 2) {
         return;
     }
     const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
@@ -1850,7 +1625,7 @@ static void show_stackbit(const char* mnemonic)
     }
     const char* const layouts[] = { "Simple grid", "Physical layout" };
     const int layout = choose_menu("Stackbit 1248", layouts, 2);
-    if (layout < 0 || layout == 2) {
+    if (layout == 2) {
         seedtool_zero(numbers, sizeof(numbers));
         return;
     }
@@ -1885,11 +1660,8 @@ static void show_stackbit(const char* mnemonic)
         case KEY_PREV:
             position = page_step(position, count, false, false);
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            seedtool_zero(numbers, sizeof(numbers));
-            return;
+            break;
         }
     }
 }
@@ -1954,11 +1726,8 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
         case KEY_PREV:
             cursor = page_step(cursor, pages, false, confirmable);
             break;
-        case KEY_REDRAW:
-            break;
         default:
-            advanced = false;
-            goto done;
+            break;
         }
     }
 done:
@@ -2046,7 +1815,7 @@ static void show_backup_menu(const char* mnemonic)
     for (;;) {
         const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR" };
         const int selected = choose_menu_at("Backup", items, 4, &cursor);
-        if (selected < 0 || selected == 4) {
+        if (selected == 4) {
             return;
         }
         if (selected == 0) {
@@ -2079,7 +1848,7 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
          * the path, the account a branch of it. */
         const char* items[] = { passphrase_item, type_item, account_item };
         const int selected = choose_menu_at("Derivation", items, 3, &cursor);
-        if (selected < 0 || selected == 3) {
+        if (selected == 3) {
             return;
         }
         if (selected == 0) {
@@ -2094,7 +1863,7 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
             (void)choose_address_type(type);
         } else {
             uint32_t chosen = *account;
-            if (enter_account(&chosen) == 1) {
+            if (enter_number("Account", ACCOUNT_DIGITS, &chosen)) {
                 *account = chosen;
             }
         }
@@ -2134,7 +1903,7 @@ static void show_wallet_data(const char* mnemonic)
         /* The only way out of a wallet session is a restart: C startup zeroes
          * .bss, and scrub_free_heap zeroes the old stacks, which a reset
          * alone leaves in DRAM. Display settings go back to their defaults. */
-        if (selected < 0 || selected == 4) {
+        if (selected == 4) {
             seedtool_zero(fp, sizeof(fp));
             seedtool_zero(fphex, sizeof(fphex));
             seedtool_zero(passphrase, sizeof(passphrase));
@@ -2168,16 +1937,14 @@ done:
  * every three, as Jade does (process/mnemonic.c): 4 checks for 12 words, 8 for
  * 24. The middle rather than a random word, since no screen here uses the RNG.
  * A wrong word restarts the quiz; backing out of a word steps to the previous
- * one, and out of the first leaves. Returns 1 once a pass matches, 0 on giving
- * up, -1 on timeout. */
-static int confirm_backup(const char* mnemonic, const size_t count)
+ * one, and out of the first leaves. Returns true once a pass matches, false on
+ * giving up. */
+static bool confirm_backup(const char* mnemonic, const size_t count)
 {
     /* The canonical parser, which validates every word. */
     uint16_t numbers[24];
     size_t total = 0;
-    if (seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &total) != SEEDTOOL_OK) {
-        return -1;
-    }
+    seedtool_require(seedtool_mnemonic_word_numbers(mnemonic, numbers, 24, &total) == SEEDTOOL_OK);
     const size_t checks = count / 3;
     for (;;) {
         bool wrong = false;
@@ -2188,17 +1955,11 @@ static int confirm_backup(const char* mnemonic, const size_t count)
             char typed[SEEDTOOL_MAX_WORD_LEN + 1] = { 0 };
             /* Unnarrowed on purpose: the quiz asks what the reader wrote down,
              * and the words it asks for are never the last one anyway. */
-            const int result = enter_word(index + 1, count, NULL, typed, sizeof(typed));
-            if (result < 0) {
-                seedtool_zero(typed, sizeof(typed));
-                seedtool_zero(numbers, sizeof(numbers));
-                return -1;
-            }
-            if (result == 0) {
+            if (!enter_word(index + 1, count, NULL, typed)) {
                 seedtool_zero(typed, sizeof(typed));
                 if (!n) {
                     seedtool_zero(numbers, sizeof(numbers));
-                    return 0;
+                    return false;
                 }
                 --n;
                 continue;
@@ -2214,11 +1975,11 @@ static int confirm_backup(const char* mnemonic, const size_t count)
         if (!wrong) {
             seedtool_zero(numbers, sizeof(numbers));
             notice("Backup confirmed", "Words matched", NULL);
-            return 1;
+            return true;
         }
         if (!nav_acknowledge("Word doesn't match", "Check your backup", NULL, "Try again", false)) {
             seedtool_zero(numbers, sizeof(numbers));
-            return 0;
+            return false;
         }
     }
 }
@@ -2249,21 +2010,18 @@ static bool review_backup_and_show_wallet(const char* mnemonic, const size_t wor
             (void)snprintf(
                 intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
             const int taken
-                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", true, false, NULL);
-            /* A timeout ends it rather than repainting the mnemonic on the way
-             * out. */
-            stage = taken == NAV_TIMEOUT ? STAGE_DONE : taken == NAV_CONFIRM ? STAGE_QUIZ : STAGE_WORDS;
+                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", false, NULL);
+            stage = taken == NAV_CONFIRM ? STAGE_QUIZ : STAGE_WORDS;
             break;
         }
         case STAGE_QUIZ: {
-            const int outcome = confirm_backup(mnemonic, words);
-            if (outcome == 1) {
+            if (confirm_backup(mnemonic, words)) {
                 show_wallet_data(mnemonic);
                 stage = STAGE_DONE;
             } else {
                 /* Backing out of the quiz's first word lands on the intro,
                  * one stage, as everywhere else. */
-                stage = outcome < 0 ? STAGE_DONE : STAGE_INTRO;
+                stage = STAGE_INTRO;
             }
             break;
         }
@@ -2361,9 +2119,9 @@ static seedtool_progress_t entropy_progress(const seedtool_source_t source, cons
     return progress;
 }
 
-/* Collects the whole transcript and generates from it. Returns 1 when a seed was
- * produced, 0 when the user backed out of the first entry, -1 on timeout. */
-static int collect_entropy(const int source, const size_t words)
+/* Collects the whole transcript and generates from it. Returns false only when
+ * the reader backed out before the first entry. */
+static bool collect_entropy(const int source, const size_t words)
 {
     /* "Coins", not "Coin flips": the longest name with the longest counter did
      * not fit the title. */
@@ -2377,7 +2135,7 @@ static int collect_entropy(const int source, const size_t words)
     bool available[52];
     char history[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1] = { 0 };
     seedtool_generated_t generated;
-    int outcome = 1;
+    bool started = true;
     size_t i = 0;
     memset(available, 1, sizeof(available));
     memset(&generated, 0, sizeof(generated));
@@ -2392,12 +2150,10 @@ static int collect_entropy(const int source, const size_t words)
         const char* const hint
             = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
         const seedtool_progress_t empty = { 0 };
-        if (!nav_dice_confirm(names[source], needed, hint, "Start", false, &empty)) {
-            outcome = 0;
-        }
+        started = nav_dice_confirm(names[source], needed, hint, "Start", false, &empty);
     }
 
-    for (; outcome == 1;) {
+    while (started) {
         while (i < required) {
             unsigned value = 0;
             /* Rebuilt from the values each time, so a step back unwrites the
@@ -2409,25 +2165,21 @@ static int collect_entropy(const int source, const size_t words)
             const seedtool_progress_t progress
                 = entropy_progress((seedtool_source_t)source, values, i, required, min_bits);
             const char* const label = names[source];
-            int result;
+            bool entered;
             if (source == SEEDTOOL_COIN) {
-                result = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history + shown,
+                entered = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history + shown,
                     &progress);
             } else if (source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE) {
                 /* With replacement nothing is excluded. */
-                result = enter_card((unsigned)(i + 1), (unsigned)required, &value,
+                entered = enter_card((unsigned)(i + 1), (unsigned)required, &value,
                     source == SEEDTOOL_CARDS ? available : NULL, history + shown, &progress);
             } else {
-                result = enter_value(label, (unsigned)(i + 1), (unsigned)required, 1, max, &value, NULL, NULL,
+                entered = enter_value(label, (unsigned)(i + 1), (unsigned)required, 1, max, &value, NULL, NULL,
                     history + shown, &progress);
             }
-            if (result < 0) {
-                outcome = -1;
-                break;
-            }
-            if (result == 0) {
+            if (!entered) {
                 if (!i) {
-                    outcome = 0;
+                    started = false;
                     break;
                 }
                 --i;
@@ -2444,7 +2196,7 @@ static int collect_entropy(const int source, const size_t words)
             }
             ++i;
         }
-        if (outcome != 1) {
+        if (!started) {
             break;
         }
         /* The run is fixed-length: declining steps back into the entry at the
@@ -2494,7 +2246,7 @@ static int collect_entropy(const int source, const size_t words)
     seedtool_zero(available, sizeof(available));
     seedtool_zero(history, sizeof(history));
     seedtool_zero(&generated, sizeof(generated));
-    return outcome;
+    return started;
 }
 
 /* 2048 words: eleven flips name one, every word equally likely. Most
@@ -2508,41 +2260,44 @@ static int collect_entropy(const int source, const size_t words)
 static size_t coin_flipped_words(const size_t words) { return words == 12 ? 11 : 23; }
 static size_t coin_tail_bits(const size_t words) { return words == 12 ? 7 : 3; }
 
-/* One word's worth of flips. Returns 1 with `*index_out` set, 0 when the reader
- * backed out of its first flip, -1 on timeout. Backing out of a later flip
- * undoes that flip only. */
-static int enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
+/* Flips bits[from..count) one coin at a time, the flips so far shown under
+ * `title`. Backing out of a flip undoes the one before it; returns false when
+ * the reader backs out of the first. */
+static bool flip_bits(const char* title, uint8_t* bits, const size_t count, const size_t from)
 {
-    uint8_t bits[COIN_WORD_BITS] = { 0 };
-    /* Sized for ten-digit counts, for -Wformat-truncation. */
-    char title[48];
-    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
-    int outcome = 1;
-    size_t i = 0;
-    while (i < COIN_WORD_BITS) {
+    size_t i = from;
+    while (i < count) {
         /* Rebuilt per flip, so only what is on screen is held. */
         char history[COIN_WORD_BITS + 1] = { 0 };
         for (size_t f = 0; f < i; ++f) {
             history[f] = (char)('0' + bits[f]);
         }
         unsigned bit = 0;
-        const int result = enter_coin_flip(title, (unsigned)(i + 1), COIN_WORD_BITS, &bit, history, NULL);
+        const bool flipped = enter_coin_flip(title, (unsigned)(i + 1), (unsigned)count, &bit, history, NULL);
         seedtool_zero(history, sizeof(history));
-        if (result < 0) {
-            outcome = -1;
-            break;
-        }
-        if (result == 0) {
+        if (!flipped) {
             if (!i) {
-                outcome = 0;
-                break;
+                return false;
             }
             --i;
             continue;
         }
         bits[i++] = (uint8_t)bit;
     }
-    if (outcome == 1) {
+    return true;
+}
+
+/* One word's worth of flips. Returns true with `*index_out` set, or false when
+ * the reader backed out of its first flip. Backing out of a later flip undoes
+ * that flip only. */
+static bool enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
+{
+    uint8_t bits[COIN_WORD_BITS] = { 0 };
+    /* Sized for ten-digit counts, for -Wformat-truncation. */
+    char title[48];
+    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    const bool flipped_all = flip_bits(title, bits, COIN_WORD_BITS, 0);
+    if (flipped_all) {
         uint16_t index = 0;
         for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
             index = (uint16_t)((index << 1) | bits[b]);
@@ -2550,13 +2305,13 @@ static int enter_flipped_word(const unsigned position, const unsigned total, uin
         *index_out = index;
     }
     seedtool_zero(bits, sizeof(bits));
-    return outcome;
+    return flipped_all;
 }
 
 /* The flips, the one-based number they spell and the word, checkable against a
  * printed wordlist. Going back discards eleven flips, so it is asked rather
- * than done. Returns 1 to accept, 0 to flip the word again, -1 on timeout. */
-static int confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
+ * than done. Returns true to accept, false to flip the word again. */
+static bool confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
 {
     char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
     (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
@@ -2566,17 +2321,12 @@ static int confirm_flipped_word(const unsigned position, const unsigned total, c
     (void)snprintf(number, sizeof(number), "%04u", (unsigned)index + 1u);
     char named[48];
     (void)snprintf(named, sizeof(named), "%s  %s", number, seedtool_word(index));
-    int outcome;
+    bool accepted;
     for (;;) {
         /* Number and word on one line, so both body lines carry what is
          * checked. */
-        const int key = nav_screen(title, bitline, named, "Use this word", true, false, NULL);
-        if (key == NAV_TIMEOUT) {
-            outcome = -1;
-            break;
-        }
-        if (key == NAV_CONFIRM) {
-            outcome = 1;
+        if (nav_screen(title, bitline, named, "Use this word", false, NULL) == NAV_CONFIRM) {
+            accepted = true;
             break;
         }
         /* The question names the word it would discard. */
@@ -2584,29 +2334,24 @@ static int confirm_flipped_word(const unsigned position, const unsigned total, c
         (void)snprintf(question, sizeof(question), "Flip word %u again?", position);
         (void)snprintf(subject, sizeof(subject), "%s  %s", number, seedtool_word(index));
         /* Opens on the arrow: the bar throws eleven flips away. */
-        const int answer = nav_screen(question, subject, "These flips are lost", "Flip again", true, true, NULL);
+        const int answer = nav_screen(question, subject, "These flips are lost", "Flip again", true, NULL);
         seedtool_zero(subject, sizeof(subject));
-        if (answer == NAV_TIMEOUT) {
-            outcome = -1;
-            break;
-        }
         if (answer == NAV_CONFIRM) {
-            outcome = 0;
+            accepted = false;
             break;
         }
         /* Declined: back to the word, unchanged. */
     }
     seedtool_zero(bitline, sizeof(bitline));
     seedtool_zero(number, sizeof(number));
-    return outcome;
+    return accepted;
 }
 
 /* Coins packed straight into the entropy rather than hashed: eleven flips per
  * word, then 7 or 3 loose bits, and BIP39's checksum finishes the last word,
  * through the same seedtool_complete_checksum complete_checksum uses. No
- * quality gate: eleven flips are eleven bits. Returns true once a mnemonic
- * reached the wallet or the session timed out, false for backing out before any
- * flip. */
+ * quality gate: eleven flips are eleven bits. Returns false only when the
+ * reader backed out before any flip. */
 static bool flip_words(const size_t words)
 {
     const size_t word_count = coin_flipped_words(words);
@@ -2615,8 +2360,7 @@ static bool flip_words(const size_t words)
     uint8_t tail[7] = { 0 };
     char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
     char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
-    bool reached_wallet = false;
-    int outcome = 1;
+    bool started = true;
     size_t w = 0;
 
     /* Set when the run steps back onto a flipped word, which then reopens at
@@ -2628,69 +2372,30 @@ static bool flip_words(const size_t words)
             uint16_t index = indices[w];
             if (reopen) {
                 reopen = false;
-            } else {
-                outcome = enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index);
-                if (outcome < 0) {
+            } else if (!enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index)) {
+                /* Back from a word's first flip reopens the word before it;
+                 * only the very first flip leaves the run. */
+                if (!w) {
+                    started = false;
                     break;
                 }
-                if (outcome == 0) {
-                    /* Back from a word's first flip reopens the word before it;
-                     * only the very first flip leaves the run. */
-                    if (!w) {
-                        break;
-                    }
-                    --w;
-                    reopen = true;
-                    outcome = 1;
-                    continue;
-                }
+                --w;
+                reopen = true;
+                continue;
             }
-            outcome = confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index);
-            if (outcome < 0) {
-                break;
-            }
-            if (outcome == 0) {
-                /* Declined at the confirmation: flip this same word again. */
-                outcome = 1;
+            /* Declined at the confirmation: flip this same word again. */
+            if (!confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index)) {
                 continue;
             }
             indices[w++] = index;
         }
-        if (outcome != 1) {
+        if (!started) {
             break;
         }
 
-        /* The loose bits; backing out of the first returns to the last word. */
-        bool back_to_words = false;
-        size_t t = 0;
-        while (t < tail_count) {
-            char history[8] = { 0 };
-            for (size_t f = 0; f < t; ++f) {
-                history[f] = (char)('0' + tail[f]);
-            }
-            unsigned bit = 0;
-            const int result
-                = enter_coin_flip("Final bits", (unsigned)(t + 1), (unsigned)tail_count, &bit, history, NULL);
-            seedtool_zero(history, sizeof(history));
-            if (result < 0) {
-                outcome = -1;
-                break;
-            }
-            if (result == 0) {
-                if (!t) {
-                    back_to_words = true;
-                    break;
-                }
-                --t;
-                continue;
-            }
-            tail[t++] = (uint8_t)bit;
-        }
-        if (outcome != 1) {
-            break;
-        }
-        if (back_to_words) {
-            /* Reopened at its confirmation, like every step back. */
+        /* The loose bits; backing out of the first returns to the last word,
+         * reopened at its confirmation like every step back. */
+        if (!flip_bits("Final bits", tail, tail_count, 0)) {
             w = word_count - 1;
             reopen = true;
             continue;
@@ -2702,10 +2407,7 @@ static bool flip_words(const size_t words)
             const char* const word = seedtool_word(indices[i]);
             const size_t len = strlen(word);
             /* Checked, not assumed: a truncated prefix would be a wrong seed. */
-            if (used + len + (i ? 1 : 0) >= sizeof(prefix)) {
-                outcome = -1;
-                break;
-            }
+            seedtool_require(used + len + (i ? 1 : 0) < sizeof(prefix));
             if (i) {
                 prefix[used++] = ' ';
             }
@@ -2713,16 +2415,12 @@ static bool flip_words(const size_t words)
             used += len;
             prefix[used] = '\0';
         }
-        if (outcome != 1) {
-            break;
-        }
 
         if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
             notice("Error", "Could not complete", "the mnemonic");
             break;
         }
         review_backup_and_show_wallet(completed, words);
-        reached_wallet = true;
         break;
     }
 
@@ -2730,9 +2428,7 @@ static bool flip_words(const size_t words)
     seedtool_zero(tail, sizeof(tail));
     seedtool_zero(prefix, sizeof(prefix));
     seedtool_zero(completed, sizeof(completed));
-    /* Backing out of the very first flip is the one exit that has produced
-     * nothing, and the only one that should leave the caller's menu open. */
-    return reached_wallet || outcome != 0;
+    return started;
 }
 
 /* Flipped words or hashed flips. Only coins get this choice: theirs is the one
@@ -2742,8 +2438,12 @@ static int choose_coin_method(void)
 {
     const char* methods[] = { "Flip each word", "Flip and hash" };
     const int selected = choose_menu("Coin method", methods, 2);
-    return selected < 0 || selected == 2 ? -1 : selected;
+    return selected == 2 ? -1 : selected;
 }
+
+/* The "Entropy source" menu's rows are the sources, in enum order. */
+_Static_assert(SEEDTOOL_D6 == 0 && SEEDTOOL_D20 == 1 && SEEDTOOL_COIN == 2 && SEEDTOOL_CARDS == 3,
+    "the entropy source menu is indexed by seedtool_source_t");
 
 /* Returns whether a seed was generated, rather than the reader backing out of a
  * picker. Leaving the wallet reboots, so true only comes back when the wallet
@@ -2754,15 +2454,12 @@ static bool create_seed(void)
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
         const int source = choose_menu_at("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), &cursor);
-        if (source < 0 || source == 4) {
+        if (source == 4) {
             return false;
         }
         for (;;) {
             const char* lengths[] = { "12 words", "24 words" };
             const int length = choose_menu("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]));
-            if (length < 0) {
-                return false;
-            }
             if (length == 2) {
                 break;
             }
@@ -2789,7 +2486,7 @@ static bool create_seed(void)
             }
             /* 24-word cards draw with replacement (see SEEDTOOL_CARDS_REPLACE). */
             const int collect_source = length && source == SEEDTOOL_CARDS ? SEEDTOOL_CARDS_REPLACE : source;
-            if (collect_entropy(collect_source, words) != 0) {
+            if (collect_entropy(collect_source, words)) {
                 return true;
             }
         }
@@ -2803,7 +2500,7 @@ static bool complete_checksum(void)
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins" };
         const int selected = choose_menu_at("Complete checksum", lengths, 2, &cursor);
-        if (selected < 0 || selected == 2) {
+        if (selected == 2) {
             return false;
         }
         const size_t count = selected ? 23 : 11;
@@ -2815,42 +2512,22 @@ static bool complete_checksum(void)
          * the method they were typed by. */
         char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
         bool by_number = false;
-        int outcome = enter_mnemonic_words(count, words, &by_number);
-        if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
-            outcome = -1;
+        bool entered = enter_mnemonic_words(count, words, &by_number);
+        if (entered) {
+            seedtool_require(join_words(words, count, prefix, sizeof(prefix)));
         }
         /* Flips and result in one loop, so backing off the result is the last
          * flip again. */
-        size_t i = 0;
-        while (outcome == 1) {
-            while (outcome == 1 && i < bits_count) {
-                unsigned bit = 0;
-                char flips[8] = { 0 };
-                for (size_t f = 0; f < i; ++f) {
-                    flips[f] = (char)('0' + bits[f]);
+        size_t from = 0;
+        while (entered) {
+            if (!flip_bits("Coin flip", bits, bits_count, from)) {
+                /* Back from the first flip returns to the list of words. */
+                entered = revisit_prefix(words, count, &by_number);
+                if (entered) {
+                    seedtool_require(join_words(words, count, prefix, sizeof(prefix)));
                 }
-                const int result
-                    = enter_coin_flip("Coin flip", (unsigned)(i + 1), (unsigned)bits_count, &bit, flips, NULL);
-                seedtool_zero(flips, sizeof(flips));
-                if (result < 0) {
-                    outcome = -1;
-                } else if (result == 0) {
-                    /* Back from the first flip returns to the list of words. */
-                    if (!i) {
-                        outcome = revisit_prefix(words, count, &by_number);
-                        if (outcome == 1 && !join_words(words, count, prefix, sizeof(prefix))) {
-                            outcome = -1;
-                        }
-                    } else {
-                        --i;
-                    }
-                } else {
-                    bits[i] = (uint8_t)bit;
-                    ++i;
-                }
-            }
-            if (outcome != 1) {
-                break;
+                from = 0;
+                continue;
             }
             if (seedtool_complete_checksum(prefix, bits, bits_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
                 /* Said, not fallen through silently. */
@@ -2863,13 +2540,13 @@ static bool complete_checksum(void)
             }
             /* Back off the completed mnemonic: the last flip again, with the
              * words and every flip before it still in hand. */
-            --i;
+            from = bits_count - 1;
         }
         seedtool_zero(words, sizeof(words));
         seedtool_zero(prefix, sizeof(prefix));
         seedtool_zero(completed, sizeof(completed));
         seedtool_zero(bits, sizeof(bits));
-        if (outcome != 0) {
+        if (entered) {
             return true;
         }
     }
@@ -2883,7 +2560,7 @@ static void show_new_seed_menu(void)
     for (;;) {
         const char* items[] = { "From entropy", "Complete checksum" };
         const int selected = choose_menu_at("New Seed", items, 2, &cursor);
-        if (selected < 0 || selected == 2) {
+        if (selected == 2) {
             return;
         }
         /* A generated seed returns home. Leaving the wallet reboots, so this
@@ -2900,7 +2577,7 @@ static void restore_seed(void)
     for (;;) {
         const char* lengths[] = { "12 words", "24 words" };
         const int selected = choose_menu_at("Restore mnemonic", lengths, 2, &cursor);
-        if (selected < 0 || selected == 2) {
+        if (selected == 2) {
             return;
         }
         const size_t count = selected ? 24 : 12;
@@ -2910,11 +2587,11 @@ static void restore_seed(void)
         char words[24][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
         bool by_number = false;
         bool resume = false;
-        int outcome;
+        bool restored;
         for (;;) {
-            outcome = restore_mnemonic(count, words, &by_number, mnemonic, sizeof(mnemonic), resume);
+            restored = restore_mnemonic(count, words, &by_number, mnemonic, sizeof(mnemonic), resume);
             resume = false;
-            if (outcome != 1) {
+            if (!restored) {
                 break;
             }
             if (!nav_acknowledge(
@@ -2926,11 +2603,10 @@ static void restore_seed(void)
             }
             show_wallet_data(mnemonic);
             break;
-            /* Back off the wallet's first screen: the verdict again. */
         }
         seedtool_zero(words, sizeof(words));
         seedtool_zero(mnemonic, sizeof(mnemonic));
-        if (outcome != 0) {
+        if (restored) {
             return;
         }
     }
@@ -2978,7 +2654,7 @@ static void show_settings_menu(void)
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
         const char* items[] = { orientation_item, brightness_item, "About" };
         const int selected = choose_menu_at("Settings", items, 3, &cursor);
-        if (selected < 0 || selected == 3) {
+        if (selected == 3) {
             return;
         }
         if (selected == 0) {
@@ -3031,9 +2707,7 @@ void seedtool_run(void)
         /* No arrow: this is the top. */
         const int selected
             = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
-        if (selected < 0) {
-            seedtool_platform_restart();
-        } else if (selected == 0) {
+        if (selected == 0) {
             show_new_seed_menu();
         } else if (selected == 1) {
             restore_seed();
