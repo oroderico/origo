@@ -4,13 +4,40 @@
 
 #include <wally_bip39.h>
 
-/* The BIP39 English wordlist is sorted, so a prefix scan can stop as soon as it
- * walks past the matching run. No RNG is involved anywhere here: the candidate
- * order and the enabled letters are a pure function of what the user typed. */
-
 const char* seedtool_word(const size_t index)
 {
     return index < SEEDTOOL_WORDLIST_LEN ? bip39_get_word_by_index(NULL, index) : NULL;
+}
+
+/* The BIP39 English wordlist is sorted, so the words matching the first
+ * `prefix_len` characters of `prefix` are one run: [*first, returned end). */
+static size_t prefix_run(const char* prefix, const size_t prefix_len, size_t* first)
+{
+    size_t low = 0, high = SEEDTOOL_WORDLIST_LEN;
+    while (low < high) {
+        const size_t mid = low + (high - low) / 2;
+        if (strncmp(seedtool_word(mid), prefix, prefix_len) < 0) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    size_t end = low;
+    while (end < SEEDTOOL_WORDLIST_LEN && strncmp(seedtool_word(end), prefix, prefix_len) == 0) {
+        ++end;
+    }
+    *first = low;
+    return end;
+}
+
+int seedtool_word_index(const char* word)
+{
+    if (!word) {
+        return -1;
+    }
+    size_t first = 0;
+    /* Comparing the terminator too makes the run an exact match. */
+    return prefix_run(word, strlen(word) + 1, &first) > first ? (int)first : -1;
 }
 
 void seedtool_wordset_clear(seedtool_wordset_t* set)
@@ -57,16 +84,9 @@ size_t seedtool_words_with_prefix_in(const seedtool_wordset_t* allowed, const ch
     if (!prefix || !output || !output_len) {
         return 0;
     }
-    size_t matches = 0;
-    for (size_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
-        const char* const word = seedtool_word(index);
-        const int order = strncmp(word, prefix, prefix_len);
-        if (order < 0) {
-            continue;
-        }
-        if (order > 0) {
-            break;
-        }
+    size_t matches = 0, first = 0;
+    const size_t end = prefix_run(prefix, prefix_len, &first);
+    for (size_t index = first; index < end; ++index) {
         if (!seedtool_wordset_has(allowed, index)) {
             continue;
         }
@@ -168,20 +188,17 @@ size_t seedtool_next_letters_in(
         return 0;
     }
     memset(enabled, 0, sizeof(bool) * SEEDTOOL_LETTERS);
-    size_t count = 0;
-    for (size_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
-        const char* const word = seedtool_word(index);
-        const int order = strncmp(word, prefix, prefix_len);
-        if (order < 0) {
-            continue;
-        }
-        if (order > 0) {
-            break;
-        }
+    size_t count = 0, first = 0;
+    const size_t end = prefix_run(prefix, prefix_len, &first);
+    for (size_t index = first; index < end; ++index) {
         if (!seedtool_wordset_has(allowed, index)) {
             continue;
         }
-        /* The word may end exactly at the prefix; there is no next letter then. */
+        /* A word ending at the prefix has no next letter. */
+        const char* const word = seedtool_word(index);
+        if (strlen(word) <= prefix_len) {
+            continue;
+        }
         const char next = word[prefix_len];
         if (next < 'a' || next > 'z') {
             continue;

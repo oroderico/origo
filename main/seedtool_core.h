@@ -8,31 +8,17 @@
 #include "seedtool_wordlist.h"
 
 #define SEEDTOOL_HASH_LEN 32
-/* Worst case across every (source, word count) seedtool_required_events
- * covers: 256 single-character coin flips for a 24-word mnemonic
- * (SEEDTOOL_COIN, 1 char/flip, no separator) - the largest transcript this
- * app ever builds. D20/24 words is the next largest at up to 203 (68 rolls,
- * "-" plus 1-2 digits each); D6, Cards and Cards-with-replacement all stay
- * well under that. A smaller bound here silently truncated seedtool_transcript
- * for exactly the sources/word-counts near this max, which seedtool_generate
- * then surfaced as "Could not generate seed" only after every event had
- * already been collected. */
+/* Longest transcript any source builds: 256 one-character coin flips for 24
+ * words. D20/24 words is next at up to 203 characters. */
 #define SEEDTOOL_MAX_TRANSCRIPT_LEN 256
 
-/* The most events any source can ask for, and the size every buffer that
- * collects a run is cut to. seedtool_required_events' largest return is a
- * coin's 256 flips for 24 words, and the collection loop is bounded only by
- * that return - `while (i < required)`, no check of its own - so raising a
- * count past this silently writes off the end of the arrays in
- * collect_entropy() and entropy_quality() while a seed is live in memory.
- * Naming it here is what lets those arrays be declared from one number
- * instead of three copies of 256, and what gives the static assertion below
- * something to stand on; the self-test walks every source and word count
- * against it, since the function's returns are not constant expressions. */
+/* Upper bound on seedtool_required_events (a coin's 256 flips for 24 words)
+ * and the size of every buffer that collects a run. The collection loop trusts
+ * that return, so a larger count would overflow those buffers; the self-test
+ * checks every source and word count against this. */
 #define SEEDTOOL_MAX_EVENTS 256
 
-/* A coin spends one transcript character per flip, so the transcript can
- * never be the smaller of the two. */
+/* A coin spends one transcript character per flip. */
 _Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
     "a transcript must hold at least one character per collected event");
 
@@ -41,16 +27,11 @@ _Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
 #define SEEDTOOL_MAX_ADDRESS_LEN 96
 #define SEEDTOOL_MAX_XPUB_LEN 112
 
-/* Highest address index the viewer will derive. A calculation, not a stored
- * limit: raising it costs nothing but a bigger on-screen list. */
+/* Highest address index the viewer derives. */
 #define SEEDTOOL_MAX_ADDRESS_INDEX 99
 
-/* Highest BIP44-style account (the hardened third path level, m/type'/0'/
- * account') the viewer will derive. Three digits comfortably covers every
- * account a wallet actually offering a chooser (rather than free-typing a
- * number) would ever reach - keeps the on-device entry a fixed-width keypad
- * like every other numeric entry here, with no need for the word-number
- * keyboard's variable-length reachable-digit pruning. */
+/* Highest account (m/type'/0'/account') the viewer derives: three digits,
+ * so it is entered on a fixed-width keypad like every other number. */
 #define SEEDTOOL_MAX_ACCOUNT_INDEX 999
 
 typedef enum {
@@ -67,13 +48,9 @@ typedef enum {
     SEEDTOOL_D20,
     SEEDTOOL_COIN,
     SEEDTOOL_CARDS,
-    /* Same 52-card deck as SEEDTOOL_CARDS, but drawn with replacement: a
-     * card is returned and the deck reshuffled before the next draw, rather
-     * than set aside. A without-replacement deck tops out at log2(52!) -
-     * about 225.6 bits, less than a 24-word mnemonic needs even drawing
-     * every card - so 24 words uses this instead, at a genuine 52-sided-die
-     * shape (see dice_source in seedtool_core.c), never offered as its own
-     * top-level entropy source. */
+    /* The same deck drawn with replacement, i.e. a 52-sided die. Used only
+     * for 24 words: a full draw without replacement carries log2(52!) ~ 225.6
+     * bits, short of 256. */
     SEEDTOOL_CARDS_REPLACE,
 } seedtool_source_t;
 
@@ -82,21 +59,14 @@ typedef enum {
     SEEDTOOL_BIP86 = 86,
 } seedtool_address_type_t;
 
-/* BIP44's chain level, the fourth path component: the branch an address is
- * derived under, m/type'/0'/account'/chain/index. Numbered as BIP44 itself
- * numbers it - and, exactly like seedtool_address_type_t above, the enumerator
- * *is* the path component rather than something mapped to one, so it is written
- * straight into the derivation path. */
+/* BIP44 chain level (m/type'/0'/account'/chain/index). Like
+ * seedtool_address_type_t, each enumerator is written into the path as is. */
 typedef enum {
     SEEDTOOL_RECEIVE = 0,
     SEEDTOOL_CHANGE = 1,
 } seedtool_chain_t;
 
-/* Held rather than described. Because these values are written into the path
- * directly, renumbering them silently changes every address the device
- * derives and shows - the build would stay green, the vectors below would
- * still be the vectors, and the only symptom would be a reader sending coins
- * to a branch nobody meant. BIP44 fixes the numbering; this fixes it here. */
+/* Renumbering these would silently change every derived address. */
 _Static_assert(SEEDTOOL_RECEIVE == 0 && SEEDTOOL_CHANGE == 1,
     "BIP44 numbers the receive branch 0 and the change branch 1, and these values are the path component");
 
@@ -117,57 +87,36 @@ typedef struct {
 
 size_t seedtool_required_events(seedtool_source_t source, size_t words);
 
-/* Bits of entropy a 12- or 24-word mnemonic needs (128/256, the same 16/32
- * bytes seedtool_generate hashes down to). Used to grade Shannon's entropy of
- * a dice roll run against, not to gate the hash itself. */
+/* 128 or 256: the bits a 12- or 24-word mnemonic needs. Used to grade the
+ * quality estimate below, never to gate generation. */
 size_t seedtool_min_entropy_bits(size_t words);
 
-/* Shannon's entropy, in bits, of the D6/D20/coin/with-replacement-card face
- * distribution in `values[0..values_len)` (a coin flip is a two-sided die
- * and a with-replacement card draw a 52-sided one, both 1-indexed like
- * every source here - not the 0/1 or 0..51 seedtool_transcript stores), and
- * whether consecutive rolls look patterned (an arithmetic run such as
- * 1,2,3,4,5,6,1,2,3,...) rather than random. Both are pure functions of the
- * values already entered: they are a UI quality signal only and never reach
- * seedtool_generate, which remains a function of the transcript alone.
- * EINVAL for SEEDTOOL_CARDS (without replacement), which is not a die - see
- * seedtool_card_entropy_bits/seedtool_card_pattern_detected. Adapted from
- * Krux's dice-roll entropy screen (github.com/selfcustody/krux,
- * src/krux/pages/new_mnemonic/dice_rolls.py). */
+/* Shannon entropy, in bits, of a die-like run, and whether consecutive values
+ * look patterned (e.g. 1,2,3,4,...). Values are 1-indexed faces for every
+ * source, coin and with-replacement cards included (unlike seedtool_transcript's
+ * 0/1 and 0..51). A UI quality signal only: seedtool_generate never sees it.
+ * EINVAL for SEEDTOOL_CARDS. Adapted from Krux
+ * (src/krux/pages/new_mnemonic/dice_rolls.py). */
 seedtool_result_t seedtool_dice_entropy_bits(
     seedtool_source_t source, const uint8_t* values, size_t values_len, int* bits_out);
 seedtool_result_t seedtool_dice_pattern_detected(
     seedtool_source_t source, const uint8_t* values, size_t values_len, bool* detected_out);
 
-/* seedtool_dice_entropy_bits is a plug-in (maximum-likelihood) Shannon-entropy
- * estimator, which is a textbook downward-biased estimate of the true entropy
- * for small per-face sample counts: with `sides` possible faces, its expected
- * shortfall in *total* reported bits is the Miller-Madow correction term
- * (sides-1)/(2 ln 2), independent of how many rolls were made. Callers that
- * grade seedtool_dice_entropy_bits' output against seedtool_min_entropy_bits
- * should add this back first, or a genuinely random run will read as "poor"
- * far more often than the roll counts in seedtool_required_events intend
- * (worst case, D20, is otherwise flagged on almost every random run). Returns
+/* Miller-Madow correction, (sides-1)/(2 ln 2) bits: the expected shortfall
+ * of the plug-in estimator above. Add it back before grading against
+ * seedtool_min_entropy_bits, or honest runs (D20 especially) read as poor.
  * 0.0 for a non-dice source. */
 double seedtool_dice_entropy_bias_bits(seedtool_source_t source);
 
-/* Cards are drawn without replacement, so unlike a die's distribution their
- * information content is exact rather than statistically estimated: there
- * are exactly 52!/(52-drawn_count)! equally likely ordered draws of that
- * length, so seedtool_card_entropy_bits returns log2 of that count directly
- * - no Miller-Madow correction, since nothing here is being estimated from a
- * sample. EINVAL if drawn_count exceeds the deck. seedtool_card_pattern_detected
- * checks each draw's rank alone (ignoring suit) for the same kind of
- * arithmetic-run pattern seedtool_dice_pattern_detected looks for; both are a
- * UI quality signal only, exactly like their dice counterparts. */
+/* Cards without replacement: the entropy is exact, log2(52!/(52-n)!), not
+ * estimated. EINVAL past 52 cards. The pattern check looks at rank alone.
+ * UI quality signals only, like their dice counterparts. */
 seedtool_result_t seedtool_card_entropy_bits(size_t drawn_count, int* bits_out);
 seedtool_result_t seedtool_card_pattern_detected(
     const uint8_t* values, size_t values_len, bool* detected_out);
 
-/* The canonical transcript of the first `values_len` events. Callable with a
- * prefix of a run: what it writes is byte for byte the start of what the whole
- * run will write, which is what lets the screen show a running history that the
- * reader can compare against paper as it grows. */
+/* Canonical transcript of the first `values_len` events. A prefix of a run
+ * yields a prefix of the full transcript, so it can be shown as it grows. */
 seedtool_result_t seedtool_transcript(
     seedtool_source_t source, const uint8_t* values, size_t values_len, char* output, size_t output_len);
 
@@ -181,72 +130,46 @@ seedtool_result_t seedtool_generate(
 seedtool_result_t seedtool_complete_checksum(
     const char* prefix_mnemonic, const uint8_t* coin_bits, size_t coin_bits_len, char* output, size_t output_len);
 
-/* Every word that could legally end `prefix_mnemonic` - 11 words for a 12-word
- * mnemonic, 23 for a 24-word one - written into `allowed`.
- *
- * A mnemonic's last word is part entropy and part checksum: for 12 words it is
- * the final 7 entropy bits followed by 4 checksum bits, so exactly 2^7 = 128 of
- * the 2048 words can end it. For 24 words it is 3 entropy bits and 8 checksum
- * bits, leaving only 8. Which ones depends on every word before it, so this is
- * a pure function of the prefix and nothing else.
- *
- * Enumerated by hashing, not by trying words: each candidate value of the free
- * entropy bits fixes the checksum that must follow it, and the two together are
- * the word. That is 128 (or 8) SHA256 calls and no wordlist search. */
+/* Every word that can legally end an 11- or 23-word prefix, written into
+ * `allowed`: 128 candidates for 12 words (7 free bits + 4 checksum bits), 8
+ * for 24 (3 + 8). Each value of the free bits fixes its checksum, so this is
+ * one SHA256 per candidate and no wordlist search. */
 seedtool_result_t seedtool_final_word_candidates(const char* prefix_mnemonic, seedtool_wordset_t* allowed);
 
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 
-/* One-based word numbers for a Stackbit-1248-style backup: the position of
- * each word in the printed BIP39 English wordlist, `abandon`=1, `zoo`=2048 —
- * the same convention enter_word_number() already restores a plate by. Does
- * not itself check the checksum; pair with seedtool_validate_mnemonic first
- * when that matters. `numbers` must hold at least `capacity` entries; 24 is
- * enough for any mnemonic this firmware generates or restores. */
+/* One-based wordlist positions (`abandon`=1, `zoo`=2048), as on a
+ * Stackbit 1248 plate. Does not check the checksum. EINVAL for no words. */
 seedtool_result_t seedtool_mnemonic_word_numbers(
     const char* mnemonic, uint16_t* numbers, size_t capacity, size_t* count_out);
 
-/* The raw entropy a mnemonic encodes: the exact BIP39 inverse of
- * seedtool_generate's bip39_mnemonic_from_bytes call, byte for byte what
- * seedtool_generate's own hash field held (its leading 16 or 32 bytes),
- * whether the mnemonic just came from that generation or was typed in during
- * restore. `entropy` must hold at least SEEDTOOL_HASH_LEN bytes; `len_out` is
- * 16 for a 12-word mnemonic, 32 for a 24-word one. This is the exact payload
- * of a Compact SeedQR: total, irreversible compromise of the wallet if it is
- * ever photographed. Rejects a bad checksum exactly as
- * seedtool_validate_mnemonic does. */
+/* The BIP39 entropy a valid mnemonic encodes: 16 or 32 bytes into `entropy`,
+ * which must hold SEEDTOOL_HASH_LEN. This is the Compact SeedQR payload, i.e.
+ * the whole wallet. */
 seedtool_result_t seedtool_mnemonic_entropy(
     const char* mnemonic, uint8_t* entropy, size_t capacity, size_t* len_out);
 
 seedtool_result_t seedtool_master_fingerprint(
     const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
 
-/* Watch-only account key at m/type'/0'/account'. `format` is the standard
- * BIP32 xpub or, for BIP84 only, its SLIP-132 zpub: the same 78 bytes with
- * the four version bytes swapped, since libwally itself knows only the plain
- * BIP32 versions and has no notion of SLIP-132. `account` must not exceed
- * SEEDTOOL_MAX_ACCOUNT_INDEX. The caller shows it with its derivation path. */
+/* Watch-only account key at m/type'/0'/account', as an xpub or (BIP84 only)
+ * a SLIP-132 zpub. */
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
     uint32_t account, seedtool_key_format_t format, char* output, size_t output_len);
 
 /* Mainnet addresses at m/type'/0'/account'/chain/0..count-1. PBKDF2 and the
  * hardened account derivation run once rather than per address, which would
  * be slow enough on the ESP32 to look like a hang. `chain` outside
- * seedtool_chain_t is EINVAL. `addresses` must hold `count` rows. */
+ * seedtool_chain_t is EINVAL. `addresses` must hold `count` rows, and is
+ * zeroed on failure. */
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
     seedtool_address_type_t type, uint32_t account, seedtool_chain_t chain, uint32_t count,
     char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
-/* BIP380 output descriptor checksum (bitcoin/bips, bip-0380.mediawiki):
- * appends "#" plus 8 checksum characters to `descriptor`, writing the whole
- * result to `output`. A pure function of the descriptor text alone - no
- * mnemonic, no derivation, callable on whatever string the caller already
- * assembled from a watch-only key origin and xpub. EINVAL if `descriptor`
- * contains a character outside the checksum's own charset (a plain ASCII
- * structural set; shouldn't happen for anything this firmware itself
- * assembles, checked rather than trusted blindly). ENOSPACE if `output_len`
- * is too small for descriptor + "#" + 8 checksum characters + a NUL. */
+/* Writes `descriptor` + "#" + its 8-character BIP380 checksum to `output`,
+ * which must not overlap it. EINVAL for a character outside BIP380's charset,
+ * ENOSPACE if it does not fit. */
 seedtool_result_t seedtool_descriptor_checksum(const char* descriptor, char* output, size_t output_len);
 
 void seedtool_zero(void* ptr, size_t len);
