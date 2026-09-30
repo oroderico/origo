@@ -110,10 +110,10 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         bool letters[SEEDTOOL_LETTERS];
         bool digits[SEEDTOOL_DIGITS];
         const size_t prefix_len = n ? (size_t)(uint8_t)str[0] % (sizeof(str) - 1) : 0;
-        (void)seedtool_words_with_prefix(str, prefix_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
-        (void)seedtool_next_letters(str, prefix_len, letters);
-        (void)seedtool_next_digits(str, prefix_len, digits);
-        (void)seedtool_word_number(str, prefix_len);
+        (void)seedtool_words_with_prefix_in(NULL, str, prefix_len, candidates, SEEDTOOL_MAX_WORD_CHOICES);
+        (void)seedtool_next_letters_in(NULL, str, prefix_len, letters);
+        (void)seedtool_next_digits_in(NULL, str, prefix_len, digits);
+        (void)seedtool_word_number_in(NULL, str, prefix_len);
         break;
     }
     case 9: { /* passphrase: texto livre digitado pelo usuario */

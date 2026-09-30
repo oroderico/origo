@@ -550,9 +550,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertIn("left_seen != right_seen", platform)
 
     def test_go_to_index_cannot_read_past_the_address_cache(self):
-        # "Go to index" indexes the static address cache directly, so it never
-        # reaches seedtool_mainnet_address, which is where an address index is
-        # otherwise range-checked. Two things stand in for that, and a compiler
+        # "Go to index" indexes the static address cache directly, so no core
+        # function range-checks the index on the way. Two things stand in for that, and a compiler
         # can only see one of them: the _Static_assert holding the keypad width
         # and the derived range together fails the build on its own, but the
         # runtime reject can be deleted with the build still passing, so it is
@@ -599,8 +598,8 @@ class SeedToolVerifierTests(unittest.TestCase):
     def test_number_entry_narrows_by_the_same_set_the_letters_do(self):
         # The checksum filter is proved exact by the C self-test, but that
         # proves the *function*, not that the screen calls it. enter_word_number
-        # is the screen, and a rewrite of it that reached for the unnarrowed
-        # seedtool_word_number would leave the number pad accepting last words
+        # is the screen, and a rewrite of it that passed NULL instead of the
+        # allowed set would leave the number pad accepting last words
         # the letter keyboard refuses - the exact asymmetry the filter exists to
         # prevent, and invisible to every other test here, since the function it
         # stopped calling still works perfectly.
@@ -610,13 +609,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         start = source.index("static int enter_word_number(")
         body = source[start : source.index("\n}\n", start)]
         self.assertIn("const seedtool_wordset_t* allowed", body, "enter_word_number no longer takes the allowed set")
-        for narrowed, plain in (("seedtool_next_digits_in", "seedtool_next_digits"),
-                                ("seedtool_word_number_in", "seedtool_word_number")):
+        for narrowed in ("seedtool_next_digits_in(allowed", "seedtool_word_number_in(allowed"):
             self.assertIn(narrowed, body, f"enter_word_number no longer calls {narrowed}")
-            # The plain name is a prefix of the narrowed one, so count the calls
-            # rather than searching for the string: `foo(` never matches `foo_in(`.
-            self.assertEqual(
-                body.count(f"{plain}("), 0, f"enter_word_number calls {plain} directly, bypassing the filter")
 
     def test_warning_screens_do_not_preselect_the_way_forward(self):
         # A screen whose purpose is the warning on it opens on the back arrow,
@@ -710,7 +704,6 @@ class SeedToolVerifierTests(unittest.TestCase):
             "../../main",
             "esp32_deflate",
             " esp_adc",
-            " ledc",
             " driver ",
             "BigFont",
             "DejaVu",

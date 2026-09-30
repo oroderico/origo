@@ -69,8 +69,6 @@ REQUIRED = {
     "seedtool_complete_checksum",
     "seedtool_mainnet_addresses",
     "seedtool_account_xpub",
-    # The narrowed forms, not the plain ones: entry screens call these, and the
-    # plain wrappers now have no firmware caller left to keep them linked.
     "seedtool_words_with_prefix_in",
     "seedtool_next_letters_in",
     "seedtool_render_keyboard",

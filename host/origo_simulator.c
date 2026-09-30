@@ -237,37 +237,6 @@ static bool final_word_filter_is_exact(void)
         && seedtool_final_word_candidates("abandon", &set) != SEEDTOOL_OK;
 }
 
-/* A NULL set means the whole wordlist, so the narrowed functions must agree
- * with the plain ones exactly when nothing is being narrowed by. */
-static bool unnarrowed_filter_matches_plain(void)
-{
-    for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
-        const char* const word = seedtool_word(index);
-        for (size_t prefix_len = 0; prefix_len <= strlen(word); ++prefix_len) {
-            bool a[SEEDTOOL_LETTERS], b[SEEDTOOL_LETTERS];
-            uint16_t ca[SEEDTOOL_MAX_WORD_CHOICES], cb[SEEDTOOL_MAX_WORD_CHOICES];
-            if (seedtool_next_letters(word, prefix_len, a) != seedtool_next_letters_in(NULL, word, prefix_len, b)
-                || memcmp(a, b, sizeof(a)) != 0
-                || seedtool_words_with_prefix(word, prefix_len, ca, SEEDTOOL_MAX_WORD_CHOICES)
-                    != seedtool_words_with_prefix_in(NULL, word, prefix_len, cb, SEEDTOOL_MAX_WORD_CHOICES)
-                || memcmp(ca, cb, sizeof(ca)) != 0) {
-                return false;
-            }
-        }
-        char digits[SEEDTOOL_MAX_WORD_DIGITS + 1];
-        (void)snprintf(digits, sizeof(digits), "%04u", (unsigned)index + 1u);
-        for (size_t len = 0; len <= strlen(digits); ++len) {
-            bool a[SEEDTOOL_DIGITS], b[SEEDTOOL_DIGITS];
-            if (seedtool_word_number(digits, len) != seedtool_word_number_in(NULL, digits, len)
-                || seedtool_next_digits(digits, len, a) != seedtool_next_digits_in(NULL, digits, len, b)
-                || memcmp(a, b, sizeof(a)) != 0) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 /* The word-entry keyboard is only usable if every reachable letter really does
  * lead to a word, and if narrowing always terminates in a listable candidate
  * set. Both are checked exhaustively rather than by example. */
@@ -276,8 +245,8 @@ static bool wordlist_completion_is_sound(void)
     uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
     bool enabled[SEEDTOOL_LETTERS];
 
-    if (seedtool_words_with_prefix("", 0, candidates, SEEDTOOL_MAX_WORD_CHOICES) != SEEDTOOL_WORDLIST_LEN
-        || seedtool_next_letters("", 0, enabled) == 0) {
+    if (seedtool_words_with_prefix_in(NULL, "", 0, candidates, SEEDTOOL_MAX_WORD_CHOICES) != SEEDTOOL_WORDLIST_LEN
+        || seedtool_next_letters_in(NULL, "", 0, enabled) == 0) {
         return false;
     }
     for (size_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
@@ -289,14 +258,14 @@ static bool wordlist_completion_is_sound(void)
         for (size_t prefix_len = 0; prefix_len < length; ++prefix_len) {
             /* Every prefix of a real word must match it, and the next letter of
              * that word must be offered by the keyboard. */
-            if (!seedtool_words_with_prefix(word, prefix_len, candidates, SEEDTOOL_MAX_WORD_CHOICES)
-                || !seedtool_next_letters(word, prefix_len, enabled) || !enabled[word[prefix_len] - 'a']) {
+            if (!seedtool_words_with_prefix_in(NULL, word, prefix_len, candidates, SEEDTOOL_MAX_WORD_CHOICES)
+                || !seedtool_next_letters_in(NULL, word, prefix_len, enabled) || !enabled[word[prefix_len] - 'a']) {
                 return false;
             }
         }
         /* Typing four letters always narrows to a set the carousel can show. */
         const size_t stem = length < 4 ? length : 4;
-        if (seedtool_words_with_prefix(word, stem, candidates, SEEDTOOL_MAX_WORD_CHOICES)
+        if (seedtool_words_with_prefix_in(NULL, word, stem, candidates, SEEDTOOL_MAX_WORD_CHOICES)
             > SEEDTOOL_MAX_WORD_CHOICES) {
             return false;
         }
@@ -319,10 +288,8 @@ static bool wire_order_is_big_endian(void)
      * the same width the plain list did - 226 orange pixels on that row either
      * way, measured before this was switched over. */
     const seedtool_nav_t nav = { .selected = 0,
-        .confirm = NULL,
         .confirm_enabled = false,
-        .back = false,
-        .confirm_style = SEEDTOOL_CONFIRM_TICK };
+        .back = false };
 
     seedtool_render_nav_list(&nav, "Origo", items, 3, 0);
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -451,18 +418,18 @@ static bool word_number_types_out(const char* digits, const size_t digits_len, c
 {
     bool enabled[SEEDTOOL_DIGITS];
     for (size_t typed = 0; typed < digits_len; ++typed) {
-        if (!seedtool_next_digits(digits, typed, enabled) || !enabled[digits[typed] - '0']) {
+        if (!seedtool_next_digits_in(NULL, digits, typed, enabled) || !enabled[digits[typed] - '0']) {
             return false;
         }
-        if (seedtool_word_number(digits, typed) != 0 && typed + 1 < digits_len
-            && seedtool_word_number(digits, typed + 1) == 0) {
+        if (seedtool_word_number_in(NULL, digits, typed) != 0 && typed + 1 < digits_len
+            && seedtool_word_number_in(NULL, digits, typed + 1) == 0) {
             /* A prefix that is itself a word number may only be extended into
              * another one, or accept would be offered for a number the user is
              * still in the middle of typing. */
             return false;
         }
     }
-    return seedtool_word_number(digits, digits_len) == expected && seedtool_word(expected - 1) != NULL;
+    return seedtool_word_number_in(NULL, digits, digits_len) == expected && seedtool_word(expected - 1) != NULL;
 }
 
 /* Numbers are the whole input for a backup that records them, so every one of
@@ -484,7 +451,7 @@ static bool word_numbers_are_reachable(void)
     /* Nothing outside 1..2048 may pass, however it is spelled. */
     static const char* const rejected[] = { "", "0", "00", "0000", "2049", "9999", "20480" };
     for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); ++i) {
-        if (seedtool_word_number(rejected[i], strlen(rejected[i])) != 0) {
+        if (seedtool_word_number_in(NULL, rejected[i], strlen(rejected[i])) != 0) {
             return false;
         }
     }
@@ -731,7 +698,7 @@ static bool invalid_runs_do_not_generate(void)
     uint8_t run[60];
     memset(run, 1, sizeof(run));
     memcpy(run, bad, sizeof(bad));
-    if (seedtool_generate(SEEDTOOL_D6, 12, run, sizeof(run), &generated) != SEEDTOOL_ERANGE) {
+    if (seedtool_generate(SEEDTOOL_D6, 12, run, sizeof(run), &generated) != SEEDTOOL_EINVAL) {
         return false;
     }
     for (size_t i = 0; i < sizeof(generated); ++i) {
@@ -1177,10 +1144,8 @@ static size_t count_pixel_color(const uint16_t color)
 static seedtool_nav_t stackbit_test_nav(void)
 {
     const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
-        .confirm = NULL,
         .confirm_enabled = false,
-        .back = true,
-        .confirm_style = SEEDTOOL_CONFIRM_TICK };
+        .back = true };
     return nav;
 }
 
@@ -1979,7 +1944,6 @@ static bool grouped_lines_clear_the_edges(void)
         memcpy(line, lines[i], fit);
         const char* const shown[] = { line, line, line };
         const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
-            .confirm = "Continue",
             .confirm_enabled = true,
             .back = true,
             .counter = "1/2" };
@@ -2015,10 +1979,9 @@ static bool nav_chrome_bands_do_not_collide(void)
              * that pass is the one that draws the bar dimmed. */
             const bool confirm_enabled = selections[s] != 0;
             const seedtool_nav_t nav = { .selected = selections[s],
-                .confirm = "Continue",
+                .confirm = SEEDTOOL_CONFIRM_TICK,
                 .confirm_enabled = confirm_enabled,
-                .back = true,
-                .confirm_style = SEEDTOOL_CONFIRM_TICK };
+                .back = true, };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
             /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
              * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
@@ -2037,7 +2000,6 @@ static bool nav_chrome_bands_do_not_collide(void)
              * title's placement depends only on whether there is an arrow, so
              * it is measured on a tick-free rendering of the same screen. */
             const seedtool_nav_t bare = { .selected = nav.selected,
-                .confirm = nav.confirm,
                 .confirm_enabled = nav.confirm_enabled,
                 .back = true };
             seedtool_render_nav_list(&bare, titles[i], words, 12, 0);
@@ -2061,7 +2023,7 @@ static bool nav_chrome_bands_do_not_collide(void)
      * noticed, because every check only ever asserted the tick was present. */
     for (size_t s = 0; s < 2; ++s) {
         const seedtool_nav_t nav
-            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true, .confirm_style = SEEDTOOL_CONFIRM_TICK };
+            = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
         seedtool_render_nav_list(&nav, "Word entry", words, 2, 0);
         if (!nav_band_is_clear(NAV_BAR_BAND_Y, SEEDTOOL_DISPLAY_HEIGHT) || nav_right_slot_is_drawn()) {
             return false;
@@ -2104,10 +2066,9 @@ static bool nav_chrome_bands_do_not_collide(void)
              * slot and no bar is drawn. Rendering them with a bar would have
              * this table checking a layout the firmware stopped shipping. */
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
-                .confirm = screens[i].label,
+                .confirm = SEEDTOOL_CONFIRM_TICK,
                 .confirm_enabled = true,
-                .back = true,
-                .confirm_style = SEEDTOOL_CONFIRM_TICK };
+                .back = true, };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
             /* Line 2 sits at 65 and the 16px face is that tall again, so its
              * wraps land at 81, 97, 113 - and 113 is inside the bar's own
@@ -2133,7 +2094,6 @@ static bool nav_chrome_bands_do_not_collide(void)
              * depends only on whether there is an arrow, never on the tick, so
              * it is measured on a tick-free rendering of the same screen. */
             const seedtool_nav_t bare = { .selected = nav.selected,
-                .confirm = nav.confirm,
                 .confirm_enabled = true,
                 .back = true };
             seedtool_render_nav_text(&bare, screens[i].title, screens[i].line1, screens[i].line2, NULL);
@@ -2163,10 +2123,9 @@ static bool nav_chrome_bands_do_not_collide(void)
     for (size_t i = 0; i < sizeof(dice) / sizeof(dice[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
-                .confirm = dice[i].label,
+                .confirm = SEEDTOOL_CONFIRM_TICK,
                 .confirm_enabled = true,
-                .back = true,
-                .confirm_style = SEEDTOOL_CONFIRM_TICK };
+                .back = true, };
             seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
                 return false;
@@ -2177,7 +2136,6 @@ static bool nav_chrome_bands_do_not_collide(void)
             /* Title measured tick-free, for the reason given above: the box
              * stands exactly where an overlong title would land. */
             const seedtool_nav_t bare = { .selected = nav.selected,
-                .confirm = nav.confirm,
                 .confirm_enabled = true,
                 .back = true };
             seedtool_render_nav_dice(&bare, dice[i].title, dice[i].line1, dice[i].line2, &full);
@@ -2203,10 +2161,8 @@ static bool nav_chrome_bands_do_not_collide(void)
     };
     for (size_t i = 0; i < sizeof(notices) / sizeof(notices[0]); ++i) {
         const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BACK,
-            .confirm = NULL,
             .confirm_enabled = true,
-            .back = true,
-            .confirm_style = SEEDTOOL_CONFIRM_TICK };
+            .back = true };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
         /* A notice's only control is now the arrow - if that failed to draw the
          * screen would be one the reader cannot leave at all, which is worth
@@ -2229,11 +2185,10 @@ static bool nav_chrome_bands_do_not_collide(void)
         /* A full-width transcript line, and the widest counter either paged
          * screen can reach: MAX_PAGE_LINES=24 gives page_text eight pages. */
         const seedtool_nav_t paged = { .selected = cursors[c],
-            .confirm = "Continue",
+            .confirm = SEEDTOOL_CONFIRM_TICK,
             .confirm_enabled = true,
             .back = true,
-            .counter = "8/8",
-            .confirm_style = SEEDTOOL_CONFIRM_TICK };
+            .counter = "8/8", };
         seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
@@ -2244,7 +2199,7 @@ static bool nav_chrome_bands_do_not_collide(void)
         }
         /* Title measured tick-free, for the reason the list pass above gives. */
         const seedtool_nav_t bare_paged
-            = { .selected = paged.selected, .confirm = paged.confirm, .confirm_enabled = true, .back = true,
+            = { .selected = paged.selected, .confirm_enabled = true, .back = true,
                   .counter = paged.counter };
         seedtool_render_nav_text(&bare_paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
@@ -2253,11 +2208,10 @@ static bool nav_chrome_bands_do_not_collide(void)
         }
         static const char* const rows[] = { "21. mosquito", "22. mosquito", "23. mosquito", "24. mosquito" };
         const seedtool_nav_t listed = { .selected = cursors[c],
-            .confirm = "Continue",
+            .confirm = SEEDTOOL_CONFIRM_TICK,
             .confirm_enabled = true,
             .back = true,
-            .counter = "6/6",
-            .confirm_style = SEEDTOOL_CONFIRM_TICK };
+            .counter = "6/6", };
         seedtool_render_nav_rows(&listed, "BIP39 word numbers", rows, 4);
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
@@ -2266,7 +2220,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             return false;
         }
         /* Title measured tick-free, as above. */
-        const seedtool_nav_t bare_rows = { .selected = listed.selected, .confirm = listed.confirm,
+        const seedtool_nav_t bare_rows = { .selected = listed.selected,
             .confirm_enabled = true, .back = true, .counter = listed.counter };
         seedtool_render_nav_rows(&bare_rows, "BIP39 word numbers", rows, 4);
         if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
@@ -2400,15 +2354,27 @@ static bool bbqr_parts_are_sound(void)
     return reassembled_len == len && memcmp(reassembled, payload, len) == 0;
 }
 
+/* One address, through the batch derivation the firmware uses. */
+static seedtool_result_t address_at(const seedtool_address_type_t type, const seedtool_chain_t chain,
+    const uint32_t index, char output[SEEDTOOL_MAX_ADDRESS_LEN])
+{
+    char rows[SEEDTOOL_MAX_ADDRESS_INDEX + 1][SEEDTOOL_MAX_ADDRESS_LEN];
+    const seedtool_result_t ret = seedtool_mainnet_addresses(mnemonic, "", type, 0, chain, index + 1, rows);
+    if (ret == SEEDTOOL_OK) {
+        memcpy(output, rows[index], SEEDTOOL_MAX_ADDRESS_LEN);
+    }
+    return ret;
+}
+
 static int self_test(void)
 {
     char address[SEEDTOOL_MAX_ADDRESS_LEN];
     char xpub[SEEDTOOL_MAX_XPUB_LEN];
     if (wally_init(0) != WALLY_OK || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
-        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_RECEIVE, 0, address, sizeof(address))
+        || address_at(SEEDTOOL_BIP84, SEEDTOOL_RECEIVE, 0, address)
             != SEEDTOOL_OK
         || strcmp(address, expected_address) != 0
-        || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_CHANGE, 0, address, sizeof(address))
+        || address_at(SEEDTOOL_BIP84, SEEDTOOL_CHANGE, 0, address)
             != SEEDTOOL_OK
         || strcmp(address, expected_change_address) != 0
         || seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) != SEEDTOOL_OK
@@ -2450,13 +2416,12 @@ static int self_test(void)
         char receive[SEEDTOOL_MAX_ADDRESS_LEN];
         char change[SEEDTOOL_MAX_ADDRESS_LEN];
         char batch[2][SEEDTOOL_MAX_ADDRESS_LEN];
-        if (seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_RECEIVE, 3, receive, sizeof(receive))
+        if (address_at(SEEDTOOL_BIP86, SEEDTOOL_RECEIVE, 3, receive)
                 != SEEDTOOL_OK
-            || seedtool_mainnet_address(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_CHANGE, 3, change, sizeof(change))
+            || address_at(SEEDTOOL_BIP86, SEEDTOOL_CHANGE, 3, change)
                 != SEEDTOOL_OK
             || strcmp(receive, change) == 0
-            || seedtool_mainnet_address(
-                   mnemonic, "", SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 0, receive, sizeof(receive))
+            || address_at(SEEDTOOL_BIP84, (seedtool_chain_t)2, 0, receive)
                 != SEEDTOOL_EINVAL
             || seedtool_mainnet_addresses(mnemonic, "", SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 2, batch)
                 != SEEDTOOL_EINVAL) {
@@ -2493,10 +2458,6 @@ static int self_test(void)
     }
     if (!final_word_filter_is_exact()) {
         fputs("Origo final word filter self-test failed\n", stderr);
-        return 1;
-    }
-    if (!unnarrowed_filter_matches_plain()) {
-        fputs("Origo unnarrowed filter self-test failed\n", stderr);
         return 1;
     }
     if (!stackbit_grid_is_sound()) {
@@ -2653,15 +2614,11 @@ static int self_test(void)
      * these two used to paint the old list, which meant they were exercising a
      * widget the firmware had stopped shipping. */
     const seedtool_nav_t scrolled = { .selected = 6,
-        .confirm = NULL,
         .confirm_enabled = false,
-        .back = true,
-        .confirm_style = SEEDTOOL_CONFIRM_TICK };
+        .back = true };
     const seedtool_nav_t at_start = { .selected = 0,
-        .confirm = NULL,
         .confirm_enabled = false,
-        .back = true,
-        .confirm_style = SEEDTOOL_CONFIRM_TICK };
+        .back = true };
     seedtool_render_nav_list(&scrolled, "Wallet", menu_labels, 7, 4);
     seedtool_render_nav_list(&at_start, "Word 3/12  aba", menu_labels, MENU_LABEL_COUNT, 0);
     /* Draw the real layouts, each opened at its centre, so one that overflows a

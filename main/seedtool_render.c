@@ -60,8 +60,6 @@ void seedtool_render_qr_cycle_shade(void)
  * the selection bar so a long label never runs underneath one. */
 #define LIST_TITLE_Y 3
 #define LIST_TOP 21
-#define LIST_ROW_HEIGHT 33
-#define LIST_FOOTER_Y 122
 
 /* The plain screens put their title at the top and their footer near the
  * bottom; the band between is what the screen is for. Named because the digit
@@ -76,7 +74,6 @@ void seedtool_render_qr_cycle_shade(void)
 #define LIST_TEXT_WIDTH (LIST_BAR_X + LIST_BAR_WIDTH - LIST_TEXT_X)
 #define LIST_SCROLL_X (SEEDTOOL_DISPLAY_WIDTH - 7)
 #define LIST_SCROLL_WIDTH 4
-#define LIST_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * LIST_ROW_HEIGHT)
 #define LIST_SCROLL_MIN 10
 
 /* Nav chrome. The back arrow lives inside the title bar, so the rows below it
@@ -104,8 +101,6 @@ void seedtool_render_qr_cycle_shade(void)
  * plain list can let its track overhang that gap, having nothing below it,
  * but here the confirm bar is what comes next and the two must not touch. */
 #define NAV_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * NAV_ROW_HEIGHT - 2)
-#define NAV_BAR_Y 118
-#define NAV_BAR_HEIGHT 17
 /* Between the lowest body line a paged screen draws (screen4's fourth, ending
  * at 103) and the bar. The small face fits the 14px left over; the 16px one
  * would not. */
@@ -698,21 +693,11 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
             NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
             on_back ? COLOR_BLACK : COLOR_WHITE);
     }
-    /* The confirm as a tick in the right slot, mirroring the arrow: same box,
-     * same borders, same rule closing it underneath. The slot has been held
-     * open by the title's own margins since the chrome arrived, so nothing
-     * moves to make room for it. */
-    /* Only when there is something to confirm. A menu passes no label because
-     * its rows are its actions, and a tick there offers an answer to a
-     * question the screen never asked - the same guard the bar had, which this
-     * did not inherit when it replaced it. */
-    if (nav->confirm_style != SEEDTOOL_CONFIRM_BAR && nav->confirm) {
-        /* Three states, the same three the bar had: filled when it is both
-         * available and selected, outlined when available and not, and drawn
-         * dim throughout when confirming is not possible yet - the checksum
-         * screen with a word still wrong is the case that needs the third.
-         * The control keeps its place in every state, so what changes is
-         * whether it can be taken and never whether it is there. */
+    /* The confirm in the right slot, mirroring the arrow: same box, same
+     * borders, same rule closing it underneath. */
+    if (nav->confirm != SEEDTOOL_CONFIRM_NONE) {
+        /* Filled when available and selected, outlined when available, dim
+         * when confirming is not possible yet. */
         const bool on_tick = nav->confirm_enabled && nav->selected == SEEDTOOL_NAV_CONFIRM;
         const int x = SEEDTOOL_DISPLAY_WIDTH - NAV_BACK_X - NAV_BACK_WIDTH;
         if (on_tick) {
@@ -723,7 +708,7 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(x, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         const uint16_t ink = !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE;
-        if (nav->confirm_style == SEEDTOOL_CONFIRM_FORWARD) {
+        if (nav->confirm == SEEDTOOL_CONFIRM_FORWARD) {
             /* The back arrow's own shape, mirrored, in the slot opposite it -
              * so "there is more this way" and "back the way you came" are
              * plainly the same control pointing two ways, rather than two
@@ -751,29 +736,6 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
     fill_rect(NAV_BACK_X, NAV_BACK_Y + NAV_BACK_HEIGHT, SEEDTOOL_DISPLAY_WIDTH - 2 * NAV_BACK_X, 1, COLOR_DIM);
 }
 
-static void draw_nav_bar(const seedtool_nav_t* nav)
-{
-    /* Nothing along the bottom when the confirm is a tick in the header: the
-     * control exists once, and drawing it twice would make the reader look for
-     * the difference between them. */
-    if (!nav->confirm || nav->confirm_style != SEEDTOOL_CONFIRM_BAR) {
-        return;
-    }
-    const bool on_confirm = nav->selected == SEEDTOOL_NAV_CONFIRM;
-    /* Filled when it is both selectable and selected, outlined when it is
-     * selectable but not selected, dimmed when it cannot be taken at all - so
-     * the bar is in the same place either way and only its state says whether
-     * confirming is available yet. */
-    const uint16_t ink = !nav->confirm_enabled ? COLOR_DIM : on_confirm ? COLOR_BLACK : COLOR_WHITE;
-    if (on_confirm && nav->confirm_enabled) {
-        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, NAV_BAR_HEIGHT, COLOR_HIGHLIGHT);
-    } else {
-        fill_rect(0, NAV_BAR_Y, SEEDTOOL_DISPLAY_WIDTH, 1, nav->confirm_enabled ? COLOR_WHITE : COLOR_DIM);
-    }
-    draw_centered_in(tft_Ubuntu16, nav->confirm, 0, SEEDTOOL_DISPLAY_WIDTH,
-        NAV_BAR_Y + (NAV_BAR_HEIGHT - tft_Ubuntu16[1]) / 2, ink);
-}
-
 /* The page counter, in the gap the body leaves above the confirm bar. Small
  * face: it is a position indicator, not a value to transcribe. */
 static void draw_nav_counter(const seedtool_nav_t* nav)
@@ -795,7 +757,6 @@ static void nav_begin(const seedtool_nav_t* nav, const char* title)
 static void nav_end(const seedtool_nav_t* nav)
 {
     draw_nav_counter(nav);
-    draw_nav_bar(nav);
 }
 
 void seedtool_render_nav_text(
