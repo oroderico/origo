@@ -108,7 +108,7 @@ void seedtool_render_qr_cycle_shade(void)
 /* Four left-aligned rows. The heights are inherited from the plain four-line
  * screen this replaced, and kept rather than re-derived: 28 to 88 in steps of
  * 20 fits four 16px lines between the header and the counter with a real gap
- * under each, which is the arithmetic the pixel scan in the self-test holds
+ * under each, which is the arithmetic the pixel scan in the tests holds
  * them to. */
 #define NAV_ROWS_SHOWN 4
 #define NAV_ROWS_TOP 28
@@ -481,7 +481,7 @@ size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 
 /* A row's text, with an ellipsis when it did not all fit. A row that simply
  * stops is indistinguishable from a row that ended - which is fine for a menu
- * label, since those are held to fitting by a self-test, and wrong for the
+ * label, whose text is chosen to fit, and wrong for the
  * address list, where every row is a value cut short and the reader has no
  * way to tell how much is missing. The three dots say "there is more" without
  * claiming how much; the address's own page says the rest.
@@ -847,6 +847,15 @@ static const char* row_end(const char* row)
     }
     return row;
 }
+
+/* Every key is found by its character rather than by where it sits, so the
+ * layouts are QWERTY, or anything else, purely by changing these strings. */
+const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES] = {
+    "qwertyuiop\nasdfghjkl \nzxcvbnm\b\t\r",
+    "QWERTYUIOP\nASDFGHJKL \nZXCVBNM\b\t\r",
+    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
+    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
+};
 
 size_t seedtool_layout_keys(const char* layout)
 {

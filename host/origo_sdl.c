@@ -1,3 +1,4 @@
+#include "seedtool_app.h"
 #include "seedtool_display.h"
 #include "seedtool_platform.h"
 #include "seedtool_render.h"
@@ -324,4 +325,10 @@ _Noreturn void seedtool_platform_restart(void)
     }
     SDL_Quit();
     exit(EXIT_SUCCESS);
+}
+
+int main(void)
+{
+    seedtool_run();
+    return 0;
 }

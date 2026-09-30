@@ -1,12 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(origo_simulator C)
+project(origo_host C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 
 set(ORIGO_ROOT "${CMAKE_CURRENT_LIST_DIR}/..")
 set(WALLY_COMPONENT "${ORIGO_ROOT}/components/libwally-core")
@@ -34,43 +33,54 @@ target_compile_options(wally_host PRIVATE
     -fstack-protector-strong -Wno-nonnull-compare -Wno-unused-function
     -Wno-maybe-uninitialized -Wno-type-limits -Wno-array-parameter)
 
-add_executable(origo-simulator
-    origo_simulator.c
-    origo_sdl.c
-    "${ORIGO_ROOT}/main/seedtool_app.c"
+set(ORIGO_WARNINGS -Wall -Wextra -Werror -fstack-protector-strong)
+
+# -DORIGO_SANITIZE=ON builds everything below under AddressSanitizer and
+# UndefinedBehaviorSanitizer: reading the code finds the bugs someone thought
+# to look for, these find the out-of-bounds access nobody did. Never applied
+# to wally_host: libwally is vendored, and secp256k1's inline assembly does not
+# compile instrumented. Needs a sanitizer runtime; on Fedora configure with
+# -DCMAKE_C_COMPILER=clang.
+option(ORIGO_SANITIZE "Build Origo's sources with ASan and UBSan" OFF)
+function(origo_target target)
+    target_include_directories(${target} PRIVATE "${ORIGO_ROOT}/main")
+    target_compile_options(${target} PRIVATE ${ORIGO_WARNINGS})
+    if(ORIGO_SANITIZE)
+        target_compile_options(${target} PRIVATE
+            -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all -g)
+        target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endif()
+endfunction()
+
+set(CORE_SOURCES
     "${ORIGO_ROOT}/main/seedtool_bbqr.c"
     "${ORIGO_ROOT}/main/seedtool_core.c"
+    "${ORIGO_ROOT}/main/seedtool_wordlist.c")
+set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/seedtool_render.c"
-    "${ORIGO_ROOT}/main/seedtool_wordlist.c"
     "${ORIGO_ROOT}/main/seedtool_logo.c"
     "${ORIGO_ROOT}/main/qrcode.c"
     "${ORIGO_ROOT}/main/fonts/DefaultFont.c"
     "${ORIGO_ROOT}/main/fonts/Ubuntu16.c")
-target_include_directories(origo-simulator PRIVATE "${ORIGO_ROOT}/main")
-target_compile_options(origo-simulator PRIVATE -Wall -Wextra -Werror -fstack-protector-strong)
-target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
-
-# -DORIGO_SANITIZE=ON runs the self-test under AddressSanitizer and
-# UndefinedBehaviorSanitizer. Reading the code catches the bugs you thought to
-# look for; these catch the reads and the overflows you did not, which is a
-# different set - the firmware is full of fixed-size buffers whose bounds are
-# argued rather than checked.
-#
-# Applied to Origo's own sources only, never to wally_host. libwally is
-# vendored and trusted, and secp256k1's 64-bit inline assembly does not even
-# compile under the instrumentation ("inline assembly requires more registers
-# than available"). Excluding it costs nothing that is being audited here and
-# is what makes the option usable at all.
-#
-# Needs a toolchain whose sanitizer runtime is installed. On Fedora, GCC ships
-# the link stubs without libasan/libubsan, so configure with
-# -DCMAKE_C_COMPILER=clang.
-option(ORIGO_SANITIZE "Build the simulator with ASan and UBSan" OFF)
-if(ORIGO_SANITIZE)
-    target_compile_options(origo-simulator PRIVATE
-        -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all -g)
-    target_link_options(origo-simulator PRIVATE -fsanitize=address,undefined)
-endif()
 
 enable_testing()
-add_test(NAME origo-host-self-test COMMAND origo-simulator --self-test)
+foreach(suite core entropy_stats render)
+    add_executable(test_${suite} "${ORIGO_ROOT}/tests/test_${suite}.c" ${CORE_SOURCES})
+    origo_target(test_${suite})
+    target_link_libraries(test_${suite} PRIVATE wally_host m)
+    add_test(NAME ${suite} COMMAND test_${suite})
+endforeach()
+target_sources(test_render PRIVATE ${RENDER_SOURCES})
+
+add_executable(test_qrcode "${ORIGO_ROOT}/tests/test_qrcode.c" "${ORIGO_ROOT}/main/qrcode.c")
+origo_target(test_qrcode)
+add_test(NAME qrcode COMMAND test_qrcode)
+
+# The simulator runs the firmware's app against an SDL window. The tests above
+# do not need it, so a machine without SDL still builds and runs them.
+pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
+if(SDL2_FOUND)
+    add_executable(origo-simulator origo_sdl.c "${ORIGO_ROOT}/main/seedtool_app.c" ${CORE_SOURCES} ${RENDER_SOURCES})
+    origo_target(origo-simulator)
+    target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
+endif()

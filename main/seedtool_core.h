@@ -14,8 +14,8 @@
 
 /* Upper bound on seedtool_required_events (a coin's 256 flips for 24 words)
  * and the size of every buffer that collects a run. The collection loop trusts
- * that return, so a larger count would overflow those buffers; the self-test
- * checks every source and word count against this. */
+ * that return, so a larger count would overflow those buffers; the tests
+ * check every source and word count against this. */
 #define SEEDTOOL_MAX_EVENTS 256
 
 /* A coin spends one transcript character per flip. */

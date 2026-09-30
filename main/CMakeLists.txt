@@ -14,7 +14,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     PRIV_REQUIRES libwally-seed esp_driver_gpio esp_driver_spi esp_driver_ledc esp_hw_support heap)
 
-target_compile_options(${COMPONENT_LIB} PRIVATE -Werror=unused-result)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
 idf_build_get_property(link_options LINK_OPTIONS)
 list(APPEND link_options "-Wl,--wrap=abort")

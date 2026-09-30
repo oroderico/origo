@@ -596,9 +596,9 @@ sudo apt install build-essential cmake pkg-config libsdl2-dev
 
 Use `Left` or `A` for the left TTGO button and `Right` or `D` for the right one.
 Select with `Enter` or `Space`, or by holding one arrow and pressing the other
-as you would on the device. `Q` or `Escape` closes the simulator. Run the
-non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
-it verifies the published BIP84/BIP86 address and account xpub vectors, the
+as you would on the device. `Q` or `Escape` closes the simulator. The tests
+need no SDL: `cmake -S host -B build-host && cmake --build build-host && ctest
+--test-dir build-host`. They verify the published BIP84/BIP86 address and account xpub vectors, the
 published SLIP-132 zpub vector for the same BIP84 account and that BIP86
 rejects a zpub request outright, that every prefix of every BIP39 word and all
 2048 word numbers are reachable through their keyboards, that every one of
