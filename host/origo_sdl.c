@@ -40,7 +40,7 @@ static void redraw(void)
     SDL_RenderPresent(renderer);
 }
 
-static void present(void)
+void seedtool_display_flush(void)
 {
     if (SDL_UpdateTexture(texture, NULL, seedtool_render_pixels(), SEEDTOOL_DISPLAY_WIDTH * sizeof(uint16_t)) != 0) {
         sdl_fail("SDL_UpdateTexture");
@@ -84,141 +84,7 @@ void seedtool_display_init(void)
         sdl_fail("SDL_CreateTexture");
     }
     seedtool_render_clear();
-    present();
-}
-
-void seedtool_display_screen(const char* title, const char* line1, const char* line2, const char* footer)
-{
-    seedtool_render_screen(title, line1, line2, footer);
-    present();
-}
-
-void seedtool_display_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
-    const seedtool_progress_t* progress)
-{
-    seedtool_render_dice_screen(title, line1, line2, footer, progress);
-    present();
-}
-
-void seedtool_display_digits(const char* title, const char* digits, const size_t count, const size_t active,
-    const char* footer, const seedtool_progress_t* progress)
-{
-    seedtool_render_digits(title, digits, count, active, footer, progress);
-    present();
-}
-
-void seedtool_display_value_box(
-    const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
-{
-    seedtool_render_value_box(title, text, back, footer, progress);
-    present();
-}
-
-void seedtool_display_splash(void)
-{
-    seedtool_render_splash();
-    present();
-}
-
-void seedtool_display_nav_text(
-    const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3)
-{
-    seedtool_render_nav_text(nav, title, line1, line2, line3);
-    present();
-}
-
-void seedtool_display_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
-    const size_t* first_group, const size_t count)
-{
-    seedtool_render_nav_grouped(nav, title, lines, first_group, count);
-    present();
-}
-
-void seedtool_display_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, const size_t count)
-{
-    seedtool_render_nav_rows(nav, title, rows, count);
-    present();
-}
-
-void seedtool_display_nav_list(
-    const seedtool_nav_t* nav, const char* title, const char* const* items, const size_t count, const size_t top)
-{
-    seedtool_render_nav_list(nav, title, items, count, top);
-    present();
-}
-
-void seedtool_display_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
-    const seedtool_progress_t* progress)
-{
-    seedtool_render_nav_dice(nav, title, line1, line2, progress);
-    present();
-}
-
-void seedtool_display_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
-    const size_t selected, const size_t position, const size_t total)
-{
-    seedtool_render_keyboard(title, text, layout, enabled, selected, position, total);
-    present();
-}
-
-bool seedtool_display_qr(const char* title, const char* text, const size_t selected)
-{
-    const bool ok = seedtool_render_qr(title, text, selected);
-    if (ok) {
-        present();
-    }
-    return ok;
-}
-
-bool seedtool_display_qr_address(const char* title, const char* text, const size_t selected)
-{
-    const bool ok = seedtool_render_qr_address(title, text, selected);
-    if (ok) {
-        present();
-    }
-    return ok;
-}
-
-bool seedtool_display_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
-{
-    const bool ok = seedtool_render_qr_bytes(title, data, len, selected);
-    if (ok) {
-        present();
-    }
-    return ok;
-}
-
-bool seedtool_display_qr_bytes_region(
-    const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
-{
-    const bool ok = seedtool_render_qr_bytes_region(title, data, len, region_index, selected);
-    if (ok) {
-        present();
-    }
-    return ok;
-}
-
-bool seedtool_display_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
-{
-    const bool ok = seedtool_render_qr_bytes_map(title, data, len, selected);
-    if (ok) {
-        present();
-    }
-    return ok;
-}
-
-void seedtool_display_stackbit_screen(const seedtool_nav_t* nav, const char* title, const unsigned word_number,
-    const char* word, const char* footer)
-{
-    seedtool_render_stackbit_screen(nav, title, word_number, word, footer);
-    present();
-}
-
-void seedtool_display_stackbit_physical_screen(const seedtool_nav_t* nav, const char* title,
-    const unsigned word_number, const char* word, const char* footer)
-{
-    seedtool_render_stackbit_physical_screen(nav, title, word_number, word, footer);
-    present();
+    seedtool_display_flush();
 }
 
 void seedtool_platform_init(void)
