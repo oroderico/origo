@@ -711,6 +711,37 @@ static bool full_entropy_events_generate(void)
     return true;
 }
 
+/* A pairing with no required count must not generate from an empty run, and a
+ * rejected run must not leave its transcript behind. */
+static bool invalid_runs_do_not_generate(void)
+{
+    const uint8_t values[] = { 1 };
+    const uint8_t bad[] = { 1, 2, 7 };
+    seedtool_generated_t generated;
+    char transcript[8];
+    memset(&generated, 0xa5, sizeof(generated));
+    if (seedtool_generate(SEEDTOOL_CARDS, 24, values, 0, &generated) != SEEDTOOL_EINVAL
+        || seedtool_generate(SEEDTOOL_CARDS_REPLACE, 12, values, 0, &generated) != SEEDTOOL_EINVAL
+        || seedtool_generate(SEEDTOOL_D6, 13, values, 0, &generated) != SEEDTOOL_EINVAL
+        || seedtool_transcript(SEEDTOOL_D6, values, 1, NULL, 8) != SEEDTOOL_EINVAL
+        || seedtool_transcript(SEEDTOOL_D6, values, 1, transcript, 0) != SEEDTOOL_EINVAL
+        || seedtool_transcript(SEEDTOOL_D6, NULL, 1, transcript, sizeof(transcript)) != SEEDTOOL_EINVAL) {
+        return false;
+    }
+    uint8_t run[60];
+    memset(run, 1, sizeof(run));
+    memcpy(run, bad, sizeof(bad));
+    if (seedtool_generate(SEEDTOOL_D6, 12, run, sizeof(run), &generated) != SEEDTOOL_ERANGE) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(generated); ++i) {
+        if (((const uint8_t*)&generated)[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Checked against BIP380's own published example (bip-0380.mediawiki,
  * "Checksum" section: raw(deadbeef) -> raw(deadbeef)#89f8spxm) rather than a
  * vector this project invented for itself, plus a real wpkh() descriptor
@@ -2510,6 +2541,10 @@ static int self_test(void)
     }
     if (!full_entropy_events_generate()) {
         fputs("Origo full-event-count generation self-test failed\n", stderr);
+        return 1;
+    }
+    if (!invalid_runs_do_not_generate()) {
+        fputs("Origo invalid-run generation self-test failed\n", stderr);
         return 1;
     }
     if (!descriptor_checksum_matches_bip380_vector()) {
