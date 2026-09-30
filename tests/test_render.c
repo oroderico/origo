@@ -15,20 +15,15 @@
 #include <string.h>
 #include <wally_core.h>
 
-/* The panel takes each pixel most significant byte first; the framebuffer holds
- * it the other way. Nothing on the host exercises that conversion — origo_sdl.c
- * replaces the whole driver — so the arithmetic is pinned here, including the
- * two colours whose symmetry hid the bug for as long as the screens were text. */
+/* The panel takes each pixel most significant byte first, the framebuffer the
+ * other way. The SDL simulator replaces the driver, so the conversion is pinned
+ * here, including the colours whose symmetry hides a missing swap. */
 static bool wire_order_is_big_endian(void)
 {
     static uint16_t wire[SEEDTOOL_DISPLAY_WIDTH * 5];
     const char* const items[] = { "Create Seed", "Restore Seed", "Complete Checksum" };
-    /* The Origo menu as the firmware draws it: the nav chrome, no arrow (it has
-     * no level above it), the selection on the first row. What this test needs
-     * from the image is the selection orange on row 21 and black and white
-     * elsewhere, and the chrome's list puts the bar in the same place and at
-     * the same width the plain list did - 226 orange pixels on that row either
-     * way, measured before this was switched over. */
+    /* The Origo menu: chrome, no arrow, the selection on the first row, 226
+     * orange pixels on row 21. */
     const seedtool_nav_t nav = { .selected = 0,
         .confirm_enabled = false,
         .back = false };
@@ -65,9 +60,8 @@ static bool wire_order_is_big_endian(void)
     return orange_found;
 }
 
-/* Rearranging a layout by hand is exactly where a character goes missing without
- * anyone noticing, so the layouts are checked rather than trusted: no row wider
- * than the renderer draws, and a centre that is a real key. */
+/* Hand-edited layouts are checked: no row wider than the renderer draws, and a
+ * centre that is a real key. */
 static bool layout_is_well_formed(const char* layout)
 {
     size_t row = 0;
@@ -111,11 +105,8 @@ static bool layouts_are_complete(void)
             return false;
         }
     }
-    /* The number keyboard's characters, not just its key count. enter_word_number
-     * indexes reachable[key - '0'] for every key that is neither backspace nor
-     * accept (seedtool_app.c), so a non-digit smuggled into this layout reads
-     * off the end of a ten-element stack array. The letter layout above has
-     * always had its characters checked; this one had only its length. */
+    /* The number keyboard's characters, not just its count: enter_word_number
+     * indexes reachable[key - '0'], so a non-digit would read past the array. */
     memset(seen, 0, sizeof(seen));
     for (size_t i = 0; i < seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT); ++i) {
         const unsigned char key = (unsigned char)seedtool_layout_key(SEEDTOOL_WORD_NUMBER_LAYOUT, i);
@@ -132,9 +123,8 @@ static bool layouts_are_complete(void)
             return false;
         }
     }
-    /* The passphrase pages together must still reach all 95 printable ASCII
-     * characters, or a passphrase typed on an older build could not be retyped
-     * on this one. Space repeats on every page on purpose. */
+    /* The passphrase pages together reach all 95 printable characters, so a
+     * passphrase can always be retyped. */
     memset(seen, 0, sizeof(seen));
     for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
         const char* const layout = seedtool_passphrase_layouts[page];
@@ -153,17 +143,13 @@ static bool layouts_are_complete(void)
     return true;
 }
 
-/* Scrolling is only navigation if the selection is always on screen and the end
- * of a list looks like the end of it. Both hold for every list the firmware can
- * build, from any previous scroll position, so both are checked exhaustively. */
+/* The selection is always on screen and the end of a list looks like the end,
+ * for every list size and scroll position. */
 static bool list_viewport_is_sound(void)
 {
     const int track = 99;
-    /* The largest list the firmware builds is the address browser's, at 50
-     * shown addresses plus "Go to index" and Back. The sweep runs well past
-     * that on purpose: it costs nothing here, and it used to be a hundred-row
-     * list, so the headroom is what keeps this test from having to move every
-     * time that screen is resized. */
+    /* Well past the largest list the firmware builds (50 addresses and Go to
+     * index). */
     for (size_t count = 1; count <= 101; ++count) {
         for (size_t selected = 0; selected < count; ++selected) {
             for (size_t previous = 0; previous <= count; ++previous) {
@@ -197,11 +183,8 @@ static bool list_viewport_is_sound(void)
     return true;
 }
 
-/* The entry screen shows the transcript as it grows, to be compared against
- * paper while it is still cheap to fix. That is only honest if a partial
- * transcript is a prefix of the finished one — a separator that appeared or
- * changed later would mean the reader checked a string the device then rewrote.
- * Checked for every prefix length of every source. */
+/* A partial transcript must be a prefix of the finished one, or the reader
+ * checked a string the device then rewrote. Every prefix of every source. */
 static bool partial_transcripts_are_prefixes(void)
 {
     static const seedtool_source_t sources[]
@@ -211,9 +194,7 @@ static bool partial_transcripts_are_prefixes(void)
         uint8_t values[52];
         const size_t count = sources[s] == SEEDTOOL_CARDS ? 25 : sources[s] == SEEDTOOL_CARDS_REPLACE ? 48 : 40;
         for (size_t i = 0; i < count; ++i) {
-            /* Deliberately repeats (only 5 distinct values across 48 draws):
-             * unlike SEEDTOOL_CARDS, a repeat here must be accepted, not
-             * rejected as a data-integrity error. */
+            /* Repeats here must be accepted, unlike SEEDTOOL_CARDS. */
             if (sources[s] == SEEDTOOL_CARDS_REPLACE) {
                 values[i] = (uint8_t)(i % 5);
             } else if (sources[s] == SEEDTOOL_CARDS) {
@@ -242,9 +223,7 @@ static bool partial_transcripts_are_prefixes(void)
     return true;
 }
 
-/* Paging splits by pixel width, so the chunks must still reassemble byte for
- * byte: a dropped character in a displayed xpub or address would be transcribed
- * as fact. */
+/* Paging splits by pixel width, so the chunks must reassemble byte for byte. */
 static bool paging_is_lossless(const char* text)
 {
     char rebuilt[512] = { 0 };
@@ -275,13 +254,8 @@ static size_t count_pixel_color(const uint16_t color)
     return count;
 }
 
-/* The chrome these screens now wear, with the cursor on a word rather than on
- * the arrow. That is not incidental: both proofs below count COLOR_HIGHLIGHT
- * pixels to measure the lit punch cells, and a selected arrow fills its box
- * with exactly that colour - the count would then include the chrome and the
- * unit area discovered from "0001" would be wrong for every number after it.
- * The cursor sits on a word for all but one position of the real screen's
- * ring, so this is the ordinary state as well as the measurable one. */
+/* The cursor on a word, not the arrow: the proofs count COLOR_HIGHLIGHT pixels,
+ * and a selected arrow is filled with it. */
 static seedtool_nav_t stackbit_test_nav(void)
 {
     const seedtool_nav_t nav = { .selected = SEEDTOOL_NAV_BODY,
@@ -290,10 +264,8 @@ static seedtool_nav_t stackbit_test_nav(void)
     return nav;
 }
 
-/* Every one of the 2048 word numbers, drawn as a Stackbit 1248 grid, lights
- * exactly the punch cells its digits' bits call for — checked by counting
- * highlighted pixels rather than by duplicating the renderer's private
- * geometry, the same tactic dice_progress_bar_is_bounded uses. */
+/* All 2048 word numbers as Stackbit 1248 grids light exactly the cells their
+ * digits' bits call for, measured by counting highlighted pixels. */
 static bool stackbit_grid_is_sound(void)
 {
     const seedtool_nav_t nav = stackbit_test_nav();
@@ -320,11 +292,8 @@ static bool stackbit_grid_is_sound(void)
     return true;
 }
 
-/* Same proof as stackbit_grid_is_sound, for the layout that matches the
- * physical Stackbit 1248 plate's own two-row arrangement instead of the
- * simplified one: the total lit area is the same popcount-of-digits formula
- * either way, since every digit still contributes 0-4 lit weight cells
- * regardless of where on screen they are placed. */
+/* The same proof for the physical plate's layout: the lit area is the same
+ * popcount either way. */
 static bool stackbit_physical_grid_is_sound(void)
 {
     const seedtool_nav_t nav = stackbit_test_nav();
@@ -349,14 +318,8 @@ static bool stackbit_physical_grid_is_sound(void)
     return true;
 }
 
-/* The Compact SeedQR payload is exactly the mnemonic's raw entropy: the
- * all-zero 12- and 24-word vectors must decode to 16 and 32 zero bytes
- * respectively and still fit within the QR version main/seedtool_render.c
- * caps byte-mode codes at (QR_VERSION, 6 there), and a broken checksum must be
- * rejected rather than silently encoded. Byte mode is drawn at the smallest
- * version that holds the payload, not always that cap — the whole point of
- * "compact" in the SeedSigner/Krux convention this follows — so 16 and 32
- * raw bytes must land on versions 1 and 2 respectively, not the cap itself. */
+/* The Compact SeedQR payload is the raw entropy: the all-zero vectors decode to
+ * 16 and 32 zero bytes on versions 1 and 2, and a bad checksum is refused. */
 static bool compact_seedqr_is_sound(void)
 {
     uint8_t entropy[32];
@@ -392,14 +355,8 @@ static bool compact_seedqr_is_sound(void)
     return seedtool_mnemonic_entropy(bad_checksum_mnemonic, entropy, sizeof(entropy), &len) != SEEDTOOL_OK;
 }
 
-/* seedtool_render_qr_bytes_regions must tile the exact QR sizes Compact
- * SeedQR ever produces (per compact_seedqr_is_sound above: version 1, 21x21
- * for 12 words; version 2, 25x25 for 24 words) with no gap or partial-region
- * edge case: 21 = 3*7 and 25 = 5*5 divide evenly by Krux's own region-size
- * thresholds. Every region index below that count must render, and the first
- * one at or past it must not -- the same "prove the count is exact, not
- * approximate" property compact_seedqr_is_sound already checks for QR
- * versions, applied to region tiling instead. */
+/* Region tiling is exact for both Compact SeedQR sizes (21 = 3 x 7, 25 = 5 x
+ * 5): every index below the count renders and the first past it does not. */
 static bool zoomed_qr_regions_are_sound(void)
 {
     uint8_t entropy[32];
@@ -434,10 +391,8 @@ static bool zoomed_qr_regions_are_sound(void)
     return !seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 25, SEEDTOOL_NAV_BACK);
 }
 
-/* The bar's warn (red) and complete (green) colors appear nowhere else on a
- * dice-entry screen, and its fill grows with the percentage passed in — so
- * both are checked by counting matching pixels rather than by duplicating the
- * renderer's private layout constants here. */
+/* The bar's red and green appear nowhere else on the screen, so both are
+ * checked by counting pixels. */
 static bool dice_progress_bar_is_bounded(void)
 {
     const uint16_t warn_color = 0xf800, go_color = 0x07e0, fill_color = 0xfd20;
@@ -466,19 +421,11 @@ static bool dice_progress_bar_is_bounded(void)
     return count_pixel_color(go_color) != 0;
 }
 
-/* Lit rows of the nav chrome, scanned band by band. The chrome packs a title
- * bar, three list rows and a confirm bar into 135 pixels with single-digit
- * gaps between them, and draw_centered_box wraps rather than clips - so a
- * title or a button label one word too long lands in the band below instead
- * of running off the glass, exactly the failure the dice-hint check above
- * exists for. Bands are the geometry in seedtool_render.c (NAV_BACK_HEIGHT,
- * LIST_TOP, NAV_ROW_HEIGHT, NAV_BAR_Y), kept in sync with the numbers here. */
-/* Chrome the bands are allowed to hold: the 1px rules that separate the cells
- * and close the back button's box are deliberate and land exactly in these
- * gaps. What the bands exist to catch is text - a wrapped title or an overlong
- * button label - so a rule is permitted by colour and anything brighter is
- * not. COLOR_DIM in seedtool_render.c; a lit glyph is white or the highlight,
- * both of which still fail. */
+/* Lit rows of the nav chrome, scanned band by band: text wraps rather than
+ * clips, so a title one word too long lands in the band below. The bands are
+ * seedtool_render.c's geometry, kept in step with the numbers here. */
+/* The 1px rules are allowed in the gaps, by colour (COLOR_DIM); text is
+ * brighter and fails. */
 #define NAV_RULE_COLOR UINT16_C(0x39e7)
 
 static bool nav_band_is_clear(const int from, const int to)
@@ -497,11 +444,8 @@ static bool nav_band_is_clear(const int from, const int to)
     return true;
 }
 
-/* Nothing lit at or right of `x` in the title band. Measured on the right
- * rather than over the arrow on the left, because that is the side a title too
- * wide for its column shows up on: draw_centered_box centres by an offset it
- * clamps at zero, so an overlong line starts hard against its left edge and
- * runs off the right one. A title that clears this has cleared the arrow. */
+/* Nothing lit at or right of `x` in the title band: an overlong title runs off
+ * the right, since its offset clamps at zero on the left. */
 static bool nav_title_stays_in_its_column(const int x)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -519,11 +463,7 @@ static bool nav_title_stays_in_its_column(const int x)
  * bar used to occupy, still the floor the body must stay above. */
 #define NAV_BAR_BAND_Y 118
 
-/* The confirm's box in the title bar's right slot: lit, and inside the glass.
- * A tick says nothing about what confirming does, so what this can check is
- * that the control is there at all - the screen that vanished its own confirm
- * would otherwise look like a screen the reader can only back out of, and
- * nothing else here would notice. */
+/* The confirm's box in the title bar's right slot is drawn, inside the glass. */
 static bool nav_right_slot_is_drawn(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -540,10 +480,7 @@ static bool nav_right_slot_is_drawn(void)
     return false;
 }
 
-/* The arrow's own box, the mirror of the tick's check above. A screen whose
- * only way out is the arrow has to actually draw one: the notices lost their
- * tick on the argument that a screen with nothing to accept should not offer
- * assent, and that argument only holds if what replaced it is really there. */
+/* The arrow's box is drawn: on a notice it is the only way out. */
 static bool nav_left_slot_is_drawn(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -559,26 +496,11 @@ static bool nav_left_slot_is_drawn(void)
     return false;
 }
 
-/* Grouping an address is a drawing decision, so the one thing it must never
- * do is change the address. Walking a value with seedtool_render_fit_grouped
- * the way page_text_impl does has to reproduce it character for character -
- * a group dropped, doubled or reordered at a line break would hand the reader
- * an address that is not theirs, and they would have no way to tell.
- *
- * Also checks the cut lands on a group boundary. That is what keeps the
- * alternating ink meaningful across a break: a line ending mid-group would
- * put two same-coloured groups against each other with only the gap between
- * them, and the gap is the signal the colour is there to back up. */
-/* A truncated row has to say so, and has to pay for saying it out of the same
- * width. Two things are checked, because either alone passes while the other
- * is broken: that the dots stay inside the row's own column rather than
- * running under the scrollbar, and that they are drawn at all.
- *
- * The second is the one worth explaining. A row drawn without the ellipsis
- * would be exactly its own fit_row prefix, so rendering that prefix as a row
- * in its own right and comparing the two framebuffers says whether anything
- * extra reached the screen. Without it this test would pass on a draw_row
- * that silently cut, which is the bug it exists for. */
+/* Walking a value with seedtool_render_fit_grouped must reproduce it character
+ * for character, and each cut must land on a group boundary so the alternating
+ * ink stays meaningful. */
+/* A truncated row shows an ellipsis inside its own column. Comparing against
+ * the prefix drawn as its own row proves the dots reach the screen at all. */
 static bool truncated_rows_show_an_ellipsis(void)
 {
     static uint16_t truncated[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
@@ -601,9 +523,8 @@ static bool truncated_rows_show_an_ellipsis(void)
     if (rightmost < 0) {
         return false; /* the row never reached the screen */
     }
-    /* LIST_TEXT_X + LIST_TEXT_WIDTH in seedtool_render.c, kept in sync with
-     * the 6 + 222 below: the row's own column, which the ellipsis has to stay
-     * inside rather than run past into the scrollbar's strip. */
+    /* LIST_TEXT_X + LIST_TEXT_WIDTH in seedtool_render.c: the ellipsis stays in
+     * the row's column. */
     if (rightmost > 6 + 222) {
         return false;
     }
@@ -663,22 +584,10 @@ static bool grouped_paging_preserves_the_value(void)
     return true;
 }
 
-/* The QR screen draws the address beside the code, and the margin it has is
- * not always enough: a taproot address is 62 characters against the 48 two
- * columns of four hold there. seedtool_render_qr_address must refuse those
- * outright rather than draw as far as it reaches, because an address cut off
- * mid-value looks exactly like one that ended there and nothing on screen
- * says otherwise. This is the check grouped_paging_preserves_the_value does
- * not make: that one walks seedtool_render_fit_grouped, the paged path at the
- * body face, and says nothing about groups drawn by any other route. The first
- * version of this screen truncated a taproot address to 48 of its characters
- * with every other check still passing.
- *
- * Proving the tail is drawn without restating the renderer's own geometry:
- * change only the value's last group and the margin must change with it. The
- * margin is everything left of the code, found by looking for the first column
- * carrying a run of white tall enough to be the code itself rather than a line
- * of text. */
+/* seedtool_render_qr_address must refuse an address that does not fit its
+ * margin (taproot, 62 characters against 48) rather than cut it. Changing only
+ * the last group must change the margin, which proves the tail is drawn; the
+ * margin is everything left of the first tall run of white. */
 static int qr_code_left_edge(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
@@ -749,10 +658,8 @@ static bool qr_address_draws_every_group(void)
         "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr", SEEDTOOL_NAV_BACK);
 }
 
-/* How far right the theme's orange reaches in the strip the two QR controls
- * share - NAV_BACK_Y + NAV_BACK_HEIGHT tall, above the first line a margin
- * draws. Which control the cursor is on is read off this rather than off a
- * box's coordinates, so the proofs below survive the chrome being moved. */
+/* How far right the orange reaches in the strip above the margin's text, which
+ * says which control the cursor is on. */
 static int qr_highlight_reach(void)
 {
     const uint16_t highlight = 0xfd20;
@@ -768,10 +675,8 @@ static int qr_highlight_reach(void)
     return reach;
 }
 
-/* Every QR screen wears the same two controls, and the cursor reaches the sun
- * on all of them: the account key animates and the Compact SeedQR carousels,
- * so a shade that only the address screen could reach would be missing from
- * exactly the codes hardest to scan. */
+/* The cursor reaches the sun on every QR screen, animated and carousel
+ * included. */
 static bool qr_chrome_is_the_same_everywhere(void)
 {
     static const char* const text = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
@@ -797,13 +702,9 @@ static bool qr_chrome_is_the_same_everywhere(void)
     return true;
 }
 
-/* Cycling the QR's shade has to move the light half of the code and nothing
- * else: a step that also touched the dark modules would be lowering contrast
- * from both sides, which is the opposite of what a camera that cannot lock on
- * needs. Measured off the panel rather than read off the ramp, so the test
- * says nothing about which greys were chosen - only that one press lands the
- * light field on one new colour, that the ring closes on itself, and that the
- * cursor can be seen to be on the control that does it. */
+/* A shade step moves the light half of the code and nothing else, the ring
+ * closes, and the cursor is visibly on the control. Measured off the panel, not
+ * off the ramp. */
 static bool qr_shade_moves_only_the_light_field(void)
 {
     static const char* const value = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
@@ -819,11 +720,8 @@ static bool qr_shade_moves_only_the_light_field(void)
     }
     memcpy(white, seedtool_render_pixels(), sizeof(white));
 
-    /* The cursor has to be visible ON the control, not merely somewhere on the
-     * screen: moving to the second control has to carry the highlight to it.
-     * A check that "something changed" passes even when the second control
-     * ignores the cursor entirely, because the first one still gives its
-     * highlight up. */
+    /* The highlight must move onto the second control, not merely leave the
+     * first. */
     const int back_reach = qr_highlight_reach();
     if (back_reach < 0) {
         return false; /* the cursor was never on the way out either */
@@ -863,9 +761,7 @@ static bool qr_shade_moves_only_the_light_field(void)
         return false;
     }
 
-    /* The ring closes: pressing on round the ramp lands back on white, in the
-     * same number of presses every time. Each one has to move something, or a
-     * ramp with a repeated entry would still come home and look correct. */
+    /* Round the ramp and back to white, each press changing something. */
     for (int i = 0; i < 32; ++i) {
         seedtool_render_qr_cycle_shade();
         if (!seedtool_render_qr_address(path, value, SEEDTOOL_NAV_BACK)) {
@@ -922,36 +818,27 @@ static bool nav_chrome_bands_do_not_collide(void)
      * copied from seedtool_app.c the same way the dice hints above are. */
     static const char* const titles[] = { "Review words", "Review - fix a word" };
     for (size_t i = 0; i < sizeof(titles) / sizeof(titles[0]); ++i) {
-        /* Every state the chrome can be drawn in, since each paints something
-         * the others do not: the arrow highlighted, an item highlighted with
-         * the confirm bar dimmed, and the confirm bar filled. */
+        /* Every state the chrome is drawn in: the arrow lit, an item lit with
+         * the confirm dimmed, and the confirm lit. */
         static const size_t selections[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
         for (size_t s = 0; s < sizeof(selections) / sizeof(selections[0]); ++s) {
-            /* Item 0 stands for the invalid-checksum screen, the one case
-             * where a word is the selection and the bar cannot be taken - so
-             * that pass is the one that draws the bar dimmed. */
+            /* Item 0 is the invalid-checksum case, where the confirm is dimmed. */
             const bool confirm_enabled = selections[s] != 0;
             const seedtool_nav_t nav = { .selected = selections[s],
                 .confirm = SEEDTOOL_CONFIRM_TICK,
                 .confirm_enabled = confirm_enabled,
                 .back = true, };
             seedtool_render_nav_list(&nav, titles[i], words, 12, 0);
-            /* Title bar ends at 20, rows run 21..116 (LIST_TOP + 3 *
-             * NAV_ROW_HEIGHT, less the 2px each row leaves under itself), the
-             * confirm bar starts at 118. Two gaps must stay dark, or a band
-             * has grown into its neighbour. */
+            /* Title bar ends at 20 and rows run 21..116; the gaps must stay
+             * dark. */
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(115, 118)) {
                 return false;
             }
             if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* The title's column is inset by NAV_BACK_X + NAV_BACK_WIDTH at
-             * both ends, so its right edge is that far in from the glass - and
-             * that is exactly where the tick's box begins, so an overlong
-             * title landing past its column would read as the control. The
-             * title's placement depends only on whether there is an arrow, so
-             * it is measured on a tick-free rendering of the same screen. */
+            /* The title's column ends where the tick's box begins, so the title
+             * is measured on a rendering without the tick. */
             const seedtool_nav_t bare = { .selected = nav.selected,
                 .confirm_enabled = nav.confirm_enabled,
                 .back = true };
@@ -961,19 +848,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
-    /* The text screen wearing the same chrome: enter_word_number's check of
-     * the number just typed. Its body is drawn by draw_centered, which wraps
-     * rather than clips, so line 2 growing to two lines would march down
-     * towards the bar - and the bar's own label is the widest this chrome
-     * carries anywhere. Strings copied from seedtool_app.c, the same way the
-     * dice hints above are. */
-    /* A menu wears the chrome with no confirm at all: its rows are its
-     * actions, so the arrow is the only control. Both places the confirm could
-     * appear must stay empty - the band along the bottom, and the title bar's
-     * right slot. The slot is the one that caught a real bug: the tick
-     * is set for every list, so the tick drew on the Origo and Wallet menus,
-     * offering an answer to a question those screens never ask. Nothing here
-     * noticed, because every check only ever asserted the tick was present. */
+    /* A menu has no confirm: the right slot must stay empty. */
     for (size_t s = 0; s < 2; ++s) {
         const seedtool_nav_t nav
             = { .selected = s ? SEEDTOOL_NAV_BACK : 0, .back = true };
@@ -988,10 +863,7 @@ static bool nav_chrome_bands_do_not_collide(void)
         const char* line2;
         const char* label;
     } screens[] = {
-        /* Every screen on the chrome, with the widest text each can build -
-         * the longest word in the list, and every digit of the largest word
-         * number twice over. Copied from seedtool_app.c the same way the dice
-         * hints above are. */
+        /* The widest text each screen builds, copied from seedtool_app.c. */
         { "Word 12/24", "mosquito", "Number 2048 of 2048", "Use this word" },
         { "Confirm backup", "Retype 8 of the 24 words", "Have your backup ready", "Start quiz" },
         { "Checksum valid", "BIP39 English", "Derivation unlocked", "Open wallet" },
@@ -1000,52 +872,28 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "QR export", "Account key included", "A photo reveals every address", "Show QR" },
         { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
-        /* The two entropy verdicts wear no title: the finding is drawn in the
-         * body, so what the widest-text check has to hold is the body line, and
-         * a NULL title here is the table saying that is deliberate rather than
-         * an entry someone forgot to fill in. */
+        /* The entropy verdicts have no title; the finding is in the body. */
         { NULL, "Poor entropy!", "128 of 128 bits", "Proceed anyway" },
         { NULL, "Pattern detected!", NULL, "Proceed anyway" },
-        /* The coin-word run's reflip warning, the widest question it builds
-         * and the widest subject under it. This table claims to hold every
-         * screen on the chrome and did not hold this one: the screen arrived
-         * with the coin-word method, after the table was written. */
         { "Flip word 23 again?", "2048  mosquito", "These flips are lost", "Flip again" },
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
-            /* confirm_style, because that is what nav_screen sets and these
-             * are its screens: the confirm is a box in the title bar's right
-             * slot and no bar is drawn. Rendering them with a bar would have
-             * this table checking a layout the firmware stopped shipping. */
             const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
                 .confirm = SEEDTOOL_CONFIRM_TICK,
                 .confirm_enabled = true,
                 .back = true, };
             seedtool_render_nav_text(&nav, screens[i].title, screens[i].line1, screens[i].line2, NULL);
-            /* Line 2 sits at 65 and the 16px face is that tall again, so its
-             * wraps land at 81, 97, 113 - and 113 is inside the bar's own
-             * margin. One wrap is tolerated because the export warnings
-             * already take it on the plain screen this chrome inherits its
-             * body layout from ("A photo reveals every address" has always
-             * been two lines there); a second is what would reach the bar. */
+            /* Line 2 sits at 65, so its wraps land at 81, 97 and 113; one wrap
+             * is allowed, a second would reach the bottom. */
             if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, 118)) {
                 return false;
             }
-            /* No bar to measure on these screens any more - the confirm is a
-             * box in the right slot, so what has to hold is that the slot is
-             * drawn at all. A screen that lost its confirm would otherwise
-             * look like one the reader can only back out of, and nothing else
-             * here would notice. */
+            /* The confirm must be drawn. */
             if (!nav_right_slot_is_drawn()) {
                 return false;
             }
-            /* The title's column ends exactly where the tick's box begins, so
-             * on a rendering that draws the tick the two are indistinguishable
-             * by position: an overlong title painting past its column lands
-             * inside the box and reads as the box. The title's placement
-             * depends only on whether there is an arrow, never on the tick, so
-             * it is measured on a tick-free rendering of the same screen. */
+            /* Measured without the tick, as above. */
             const seedtool_nav_t bare = { .selected = nav.selected,
                 .confirm_enabled = true,
                 .back = true };
@@ -1055,12 +903,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
-    /* The same chrome with the entropy quality bar drawn in. Its band is
-     * different: the bar occupies DICE_BAR_Y=90..103, so what is checked here
-     * is the 104..118 gap between it and the confirm bar. A body line wrapping
-     * *into* the quality bar is not checked here and does not need to be -
-     * dice_screen_hints_clear_the_bar above already holds these same hints to
-     * that, at the same body heights this chrome inherits. */
+    /* With the entropy bar (y=90..103), the gap below it must stay clear. */
     static const struct {
         const char* title;
         const char* line1;
@@ -1097,10 +940,7 @@ static bool nav_chrome_bands_do_not_collide(void)
             }
         }
     }
-    /* The notices: an arrow and no tick, since there is nothing on them to
-     * agree to. The title therefore shares the bar with the arrow and is held
-     * to the same column the acknowledge screens' titles are, and the body
-     * still wraps rather than clips. Strings from seedtool_app.c. */
+    /* Notices: an arrow and no tick, the title held to the same column. */
     static const struct {
         const char* title;
         const char* line1;
@@ -1117,22 +957,14 @@ static bool nav_chrome_bands_do_not_collide(void)
             .confirm_enabled = true,
             .back = true };
         seedtool_render_nav_text(&nav, notices[i].title, notices[i].line1, notices[i].line2, NULL);
-        /* A notice's only control is now the arrow - if that failed to draw the
-         * screen would be one the reader cannot leave at all, which is worth
-         * more than checking a label's width. The mirror of the old check: the
-         * tick must be absent, or the screen would be offering an answer its
-         * caller has no way to receive. */
+        /* The arrow must be drawn and the tick absent. */
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(97, NAV_BAR_BAND_Y) || !nav_left_slot_is_drawn()
             || nav_right_slot_is_drawn()) {
             return false;
         }
     }
-    /* The paged screens. Their bodies run lower than the two-line ones -
-     * screen4's fourth row ends at 103 - and the page counter goes in what is
-     * left, so the band that must stay clear is only 116..118. Body lines are
-     * already held to their own widths by seedtool_render_fit, which is what
-     * page_text splits by; what is new here is the counter, and whether the
-     * two together clear the bar. */
+    /* The paged screens: the body ends at 103 and the page counter sits below,
+     * so 116..118 must stay clear. */
     static const size_t cursors[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
     for (size_t c = 0; c < sizeof(cursors) / sizeof(cursors[0]); ++c) {
         /* A full-width transcript line, and the widest counter either paged
@@ -1183,9 +1015,7 @@ static bool nav_chrome_bands_do_not_collide(void)
     return true;
 }
 
-/* Inverse of seedtool_bbqr_base32_encode, for the round-trip check below only
- * -- not part of the firmware, which only ever needs to encode (a QR reader
- * does the decoding). */
+/* Inverse of seedtool_bbqr_base32_encode, for the round trip below. */
 static bool base32_decode(const char* text, const size_t len, uint8_t* out, const size_t out_cap, size_t* out_len)
 {
     static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -1214,13 +1044,8 @@ static bool base32_decode(const char* text, const size_t len, uint8_t* out, cons
     return true;
 }
 
-/* An account key's worth of payload, split into whatever
- * seedtool_render_qr_alphanumeric_capacity() says fits one frame, must
- * reassemble byte for byte: every part's header must carry the right
- * "B$2U" + total + index, every part's base32 payload must decode cleanly,
- * and concatenating them in index order must reproduce the original bytes --
- * the same property a real BBQr-reading wallet depends on, checked here
- * without needing one. */
+/* An account key split into BBQr parts must reassemble byte for byte, with the
+ * right "B$2U" header, total and index on every part. */
 static bool bbqr_parts_are_sound(void)
 {
     const char payload[] = "[65fb43fe/84'/0'/0']"
