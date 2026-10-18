@@ -1212,37 +1212,37 @@ static void draw_qr_chrome(const int code_x, const size_t selected)
     draw_qr_shade(code_x - QR_SHADE_GAP - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
 }
 
-/* Shared by every encoder: draws the populated `qr`, then zeroes `modules`,
- * which held the encoded value. */
-static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
+/* The code against the right edge inside its quiet zone, on a cleared screen:
+ * the light field in the current shade, the dark modules over it. The scale is
+ * the largest that fits the display's height. */
+static qr_geometry_t draw_modules(const QRCode* qr)
 {
-    /* The code against the right edge with its quiet zone, the title in the
-     * margin to its left so a stepped sequence of codes says what each holds.
-     * The scale is the largest that fits the display's height. */
     const qr_geometry_t g = qr_geometry(qr->size + 2);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
     seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, qr_light());
+    fill_rect(g.code_x, g.top, g.extent, g.extent, qr_light());
     for (uint8_t y = 0; y < qr->size; ++y) {
         for (uint8_t x = 0; x < qr->size; ++x) {
-            if (qrcode_getModule(qr, x, y)) {
-                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
+            if (qrcode_getModule((QRCode*)qr, x, y)) {
+                fill_rect(g.code_x + (x + 1) * g.scale, g.top + (y + 1) * g.scale, g.scale, g.scale, COLOR_BLACK);
             }
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    return g;
+}
+
+/* Draws the populated `qr` with its title in the margin, so a stepped sequence
+ * of codes says what each holds, then zeroes `modules`, which held the encoded
+ * value. */
+static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
+{
+    const qr_geometry_t g = draw_modules(qr);
+    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
 
-/* Shared by the plain QR and the one that carries a forward control: `selected`
- * NULL draws only the way out. */
-static bool render_qr_text(const char* title, const char* text, const size_t selected)
+bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
 {
     /* At the smallest version that holds `text`, so a short value gets coarser,
      * easier modules. */
@@ -1259,11 +1259,6 @@ static bool render_qr_text(const char* title, const char* text, const size_t sel
         return false;
     }
     return draw_qr(&qr, modules, title, selected);
-}
-
-bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
-{
-    return render_qr_text(title, text, selected);
 }
 
 /* Two groups to a line, so an address always falls into the same block; a
@@ -1358,29 +1353,31 @@ size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
     return chars;
 }
 
-bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
+/* Encodes `data` in byte mode at the smallest version that holds it: that is
+ * what "compact" means in SeedSigner's convention. `modules` must hold
+ * qrcode_getBufferSize(QR_VERSION), which bounds every smaller version. */
+static bool encode_bytes(QRCode* qr, uint8_t* modules, const uint8_t* data, const size_t len)
 {
     if (len > UINT16_MAX) {
         return false;
     }
-    /* At the smallest version that holds the payload: that is what "compact"
-     * means in SeedSigner's convention. `modules` is sized for QR_VERSION,
-     * which bounds every smaller version. */
     const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
+    /* qrcode_initBytes only reads through `data`; the cast does not let it
+     * write through it. */
+    if (!version || qrcode_initBytes(qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        /* `data` is seed entropy, and a failed encode may already have written
+         * some of it into `modules`. */
+        memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
         return false;
     }
+    return true;
+}
+
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
+{
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    /* qrcode_initBytes only reads through `data` into its own codeword
-     * buffer; this cast does not let it write through it. */
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        /* `data` here is raw seed entropy; a failed encode may already have
-         * written some of it into `modules` before the encoder gave up. */
-        memset(modules, 0, sizeof(modules));
-        return false;
-    }
-    return draw_qr(&qr, modules, title, selected);
+    return encode_bytes(&qr, modules, data, len) && draw_qr(&qr, modules, title, selected);
 }
 
 /* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own
@@ -1407,42 +1404,20 @@ size_t seedtool_render_qr_bytes_regions(const size_t len)
  * split draw_qr_region uses, so the map always matches the tiles. */
 bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
-    if (len > UINT16_MAX) {
-        return false;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
-        return false;
-    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        memset(modules, 0, sizeof(modules));
+    if (!encode_bytes(&qr, modules, data, len)) {
         return false;
     }
     const size_t region_size = qr_region_size(qr.size);
     const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    const qr_geometry_t g = qr_geometry(qr.size + 2);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
+    const qr_geometry_t g = draw_modules(&qr);
     /* The code's top-left corner, one quiet-zone module in, which the grid and
      * labels are placed from. */
-    const int code_left = g.code_x + scale;
-    const int code_top = top + scale;
-    const int code_extent = (int)qr.size * scale;
-    const int block = (int)region_size * scale;
-    seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, qr_light());
-    for (uint8_t y = 0; y < qr.size; ++y) {
-        for (uint8_t x = 0; x < qr.size; ++x) {
-            if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
-            }
-        }
-    }
+    const int code_left = g.code_x + g.scale;
+    const int code_top = g.top + g.scale;
+    const int code_extent = (int)qr.size * g.scale;
+    const int block = (int)region_size * g.scale;
     for (size_t i = 0; i <= columns; ++i) {
         const int pos = (int)i * block;
         fill_rect(code_left, code_top + pos, code_extent, 1, COLOR_DIM);
@@ -1461,7 +1436,7 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
             draw_centered_in(tft_DefaultFont, label, label_x, block, label_y, COLOR_BLACK);
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
@@ -1476,28 +1451,24 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
     const size_t row = region_index / columns;
     const size_t column = region_index % columns;
     const qr_geometry_t g = qr_geometry((int)region_size);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
     seedtool_render_clear();
     for (size_t y = 0; y < region_size; ++y) {
         for (size_t x = 0; x < region_size; ++x) {
             const size_t qx = column * region_size + x;
             const size_t qy = row * region_size + y;
             const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
-            fill_rect(g.code_x + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : qr_light());
+            fill_rect(g.code_x + (int)x * g.scale, g.top + (int)y * g.scale, g.scale, g.scale,
+                set ? COLOR_BLACK : qr_light());
         }
     }
     for (size_t i = 0; i <= region_size; ++i) {
-        fill_rect(g.code_x, top + (int)i * scale, extent, 1, COLOR_DIM);
-        fill_rect(g.code_x + (int)i * scale, top, 1, extent, COLOR_DIM);
+        fill_rect(g.code_x, g.top + (int)i * g.scale, g.extent, 1, COLOR_DIM);
+        fill_rect(g.code_x + (int)i * g.scale, g.top, 1, g.extent, COLOR_DIM);
     }
-    const int label_y = draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    const int label_y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
-    draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
+    draw_centered_box(tft_DefaultFont, label, g.title_x, g.title_width, label_y + 4);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }
@@ -1505,19 +1476,9 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
 bool seedtool_render_qr_bytes_region(
     const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
 {
-    if (len > UINT16_MAX) {
-        return false;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
-        return false;
-    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        /* `data` is seed entropy, and a failed encode may already have written
-         * some of it into `modules`. */
-        memset(modules, 0, sizeof(modules));
+    if (!encode_bytes(&qr, modules, data, len)) {
         return false;
     }
     const size_t region_size = qr_region_size(qr.size);

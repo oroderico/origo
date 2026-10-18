@@ -54,7 +54,11 @@ python3 tools/audit_origo_elf.py build-a/origo.elf --map build-a/origo.map \
 
 A change that only touches host-testable code (most of `main/seedtool_core.c`,
 the render/transcript logic) can be fully verified with the first three steps
-and never needs a flashed board. A change to hardware-facing code (display
+and never needs a flashed board. A change to the app (`main/app_*.c`,
+`main/seedtool_app.c`) that is not meant to change what the device shows can be
+checked with `origo-replay`, which runs the app from a key script and prints a
+hash of every frame: replay the same random scripts on the parent commit and on
+yours, and the outputs must match. A change to hardware-facing code (display
 driver, input, backlight) still needs a real TTGO T-Display: the simulator
 deliberately does not reach the SPI path or the panel's byte order, and a
 colour that is right on host has been wrong on hardware before.
@@ -65,18 +69,17 @@ There is no `.clang-format`; match the file you are editing. Public functions,
 types and macros use the `seedtool_` / `SEEDTOOL_` prefix; everything is
 snake_case. Comments justify a non-obvious *why* — a bias correction, a buffer
 size that must track a specific constant, a trade-off that was deliberately
-made — never restate *what* the next line already says. `main/seedtool_core.c`
+made — never restate *what* the next line already says, and never narrate how
+the code got here: that is what the commit message is for. `main/seedtool_core.c`
 and its header are the clearest examples of the standard: read a few of their
 comments before writing your own.
 
 ## Adding a dependency
 
 Treat this as an exceptional change, not a routine one. `tools/audit_origo_elf.py`
-enforces a 512 KiB firmware image — an auditability budget, not a hardware
-limit: the partition holds twice that — and rejects linked wallet, radio, OTA,
-persistence, battery, generic-graphics, transaction, PSBT and Elements symbols
-by name — a dependency has to be justified against that list, not just against
-whether it compiles. Origo has turned down a two-kilobyte size win before
+enforces the image budget and the list of rejected symbols described in README.md's
+[Build and flash](README.md#build-and-flash) section, and a dependency has to be
+justified against that list, not just against whether it compiles. Origo has turned down a two-kilobyte size win before
 because it required a decompressor the audit is built to reject (see
 README.md's logo section); expect the same bar to apply. A PR that adds a
 dependency should update `tools/audit_origo_elf.py` (if it legitimately needs
