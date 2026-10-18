@@ -443,11 +443,12 @@ bool restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1
     }
 }
 
+/* The passphrase keyboard, editing what `output` already holds. Returns true
+ * on Accept, false on backspace with nothing left to delete. */
 bool enter_passphrase_once(char* output, const size_t output_len)
 {
-    size_t used = 0, page = 0;
+    size_t used = strlen(output), page = 0;
     size_t selected = seedtool_layout_center(seedtool_passphrase_layouts[0]);
-    output[0] = '\0';
     for (;;) {
         const char* const layout = seedtool_passphrase_layouts[page];
         const size_t keys = seedtool_layout_keys(layout);
@@ -479,9 +480,10 @@ bool enter_passphrase_once(char* output, const size_t output_len)
              * rather than from wherever the page key happened to sit. */
             selected = seedtool_layout_center(seedtool_passphrase_layouts[page]);
         } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
-            if (used) {
-                output[--used] = '\0';
+            if (!used) {
+                return false;
             }
+            output[--used] = '\0';
         } else if (used + 1 < output_len) {
             output[used++] = pressed;
             output[used] = '\0';

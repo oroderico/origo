@@ -403,8 +403,11 @@ screen in the entry path may depend on the device RNG.
 ### Passphrase
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
-four-page keyboard covering the whole printable range, entered twice, and exists
-for that derivation session only. It is set from the wallet viewer's Derivation
+four-page keyboard covering the whole printable range, read back whole with its
+length (the one sign of a space at either end), entered a second time, and exists
+for that derivation session only. Backspace on an empty field steps back, so the
+review returns to the keyboard with the text still there, and a second entry that
+differs is retyped against the first rather than costing both. It is set from the wallet viewer's Derivation
 screen rather than asked for on the way in: a session begins with none, and the
 screen states which of the two is in force rather than leaving it to be assumed.
 Changing or clearing it re-derives the master fingerprint, since that
