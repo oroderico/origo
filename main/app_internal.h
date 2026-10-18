@@ -86,6 +86,8 @@ extern unsigned backlight_level;
 #define NAV_BACK (-2)
 #define NAV_CONFIRM (-3)
 
+#define ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
+
 /* app_ui.c */
 void seedtool_require(const bool condition);
 bool show_qr(const bool drawn);

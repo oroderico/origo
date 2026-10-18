@@ -45,8 +45,8 @@ static void show_settings_menu(void)
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
         const char* items[] = { orientation_item, brightness_item, "About" };
-        const int selected = choose_menu_at("Settings", items, 3, &cursor);
-        if (selected == 3) {
+        const int selected = choose_menu_at("Settings", items, ARRAY_LEN(items), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
         if (selected == 0) {

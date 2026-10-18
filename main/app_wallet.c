@@ -91,8 +91,8 @@ static void show_account_key_qr(const char* title, const char* value)
 static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
     const char* options[] = { "No passphrase", "Enter passphrase" };
-    const int selected = choose_menu("Passphrase", options, 2);
-    if (selected == 2) {
+    const int selected = choose_menu("Passphrase", options, ARRAY_LEN(options));
+    if (selected == NAV_BACK) {
         return false;
     }
     if (selected == 0) {
@@ -268,7 +268,7 @@ static bool derive_addresses(const char* mnemonic, const char* passphrase, const
 }
 
 /* Browses the cache. Returns the chosen index with its address in address_out,
- * or -1 on Back. `cursor` is where the list opens and where it is
+ * or NAV_BACK. `cursor` is where the list opens and where it is
  * left; Go to index moves it only within the shown rows. */
 static int browse_addresses(
     const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
@@ -293,12 +293,13 @@ static int browse_addresses(
                 addresses[index]);
             return (int)index;
         }
-        /* choose_menu_at has already left the cursor on what was taken. */
-        if (selected >= 0 && selected < (int)ADDRESS_SHOWN_ROWS) {
-            (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
-                addresses[selected]);
+        if (selected == NAV_BACK) {
+            return NAV_BACK;
         }
-        return selected == (int)ADDRESS_SHOWN_ROWS + 1 ? -1 : selected;
+        /* choose_menu_at has already left the cursor on what was taken. */
+        (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
+            addresses[selected]);
+        return selected;
     }
 }
 
@@ -341,7 +342,7 @@ static bool choose_address_type(seedtool_address_type_t* type)
         }
     }
     const int selected = choose_menu_at("Type", items, ADDRESS_TYPE_COUNT, &current);
-    if ((size_t)selected >= ADDRESS_TYPE_COUNT) {
+    if (selected == NAV_BACK) {
         return false;
     }
     *type = ADDRESS_TYPES[selected].type;
@@ -382,8 +383,7 @@ static void show_extended_keys(const char* mnemonic, const char* passphrase, con
         }
         items[count++] = "Descriptor";
         const int selected = choose_menu_at("Extended public key", items, count, &cursor);
-        /* The arrow returns `count`, one past the last row. */
-        if ((size_t)selected == count) {
+        if (selected == NAV_BACK) {
             return;
         }
         if (selected == 0) {
@@ -403,8 +403,8 @@ static void show_addresses(
 {
     /* Which branch, asked before the list, as xpub/zpub is. */
     const char* const branches[] = { "Receive", "Change" };
-    const int branch = choose_menu("Addresses", branches, 2);
-    if (branch == 2) {
+    const int branch = choose_menu("Addresses", branches, ARRAY_LEN(branches));
+    if (branch == NAV_BACK) {
         return;
     }
     const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;
@@ -422,7 +422,7 @@ static void show_addresses(
     for (;;) {
         char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
         const int index = browse_addresses(prefix, address, sizeof(address), &cursor);
-        if (index < 0) {
+        if (index == NAV_BACK) {
             seedtool_zero(address, sizeof(address));
             break;
         }
@@ -451,8 +451,8 @@ static void show_stackbit(const char* mnemonic)
         return;
     }
     const char* const layouts[] = { "Simple grid", "Physical layout" };
-    const int layout = choose_menu("Stackbit 1248", layouts, 2);
-    if (layout == 2) {
+    const int layout = choose_menu("Stackbit 1248", layouts, ARRAY_LEN(layouts));
+    if (layout == NAV_BACK) {
         seedtool_zero(numbers, sizeof(numbers));
         return;
     }
@@ -641,8 +641,8 @@ static void show_backup_menu(const char* mnemonic)
     size_t cursor = 0;
     for (;;) {
         const char* items[] = { "Words", "Numbers", "Stackbit 1248", "Compact SeedQR" };
-        const int selected = choose_menu_at("Backup", items, 4, &cursor);
-        if (selected == 4) {
+        const int selected = choose_menu_at("Backup", items, ARRAY_LEN(items), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
         if (selected == 0) {
@@ -674,8 +674,8 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
         /* Widest consequence first: the passphrase changes the seed, the type
          * the path, the account a branch of it. */
         const char* items[] = { passphrase_item, type_item, account_item };
-        const int selected = choose_menu_at("Derivation", items, 3, &cursor);
-        if (selected == 3) {
+        const int selected = choose_menu_at("Derivation", items, ARRAY_LEN(items), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
         if (selected == 0) {
@@ -721,29 +721,35 @@ void show_wallet_data(const char* mnemonic)
     _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
         "the wallet title must hold its label and all eight fingerprint hex digits");
     (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+    enum { WALLET_BACKUP, WALLET_KEYS, WALLET_DERIVATION, WALLET_ADDRESSES, WALLET_ERASE };
     size_t cursor = 0;
     for (;;) {
-        const char* menu[] = { "Backup", "Extended public key", "Derivation", "Addresses", "Erase and restart" };
+        const char* menu[] = {
+            [WALLET_BACKUP] = "Backup",
+            [WALLET_KEYS] = "Extended public key",
+            [WALLET_DERIVATION] = "Derivation",
+            [WALLET_ADDRESSES] = "Addresses",
+            [WALLET_ERASE] = "Erase and restart",
+        };
         /* No arrow: the only exit erases the session, so it is a row. */
-        const int selected
-            = choose_nav(wallet_title, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
+        const int selected = choose_nav(wallet_title, menu, ARRAY_LEN(menu), NULL, false, false, &cursor);
         /* The only way out of a wallet session is a restart: C startup zeroes
          * .bss, and scrub_free_heap zeroes the old stacks, which a reset
          * alone leaves in DRAM. Display settings go back to their defaults. */
-        if (selected == 4) {
+        if (selected == WALLET_ERASE) {
             seedtool_zero(fp, sizeof(fp));
             seedtool_zero(fphex, sizeof(fphex));
             seedtool_zero(passphrase, sizeof(passphrase));
             seedtool_platform_restart();
         }
         switch (selected) {
-        case 0:
+        case WALLET_BACKUP:
             show_backup_menu(mnemonic);
             break;
-        case 1:
+        case WALLET_KEYS:
             show_extended_keys(mnemonic, passphrase, fphex, type, account);
             break;
-        case 2:
+        case WALLET_DERIVATION:
             show_derivation_menu(mnemonic, &account, &type, passphrase, fp, fphex);
             /* The passphrase may have changed under it, and with it the
              * fingerprint this title states. */

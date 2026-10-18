@@ -288,12 +288,11 @@ seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* c
     return nav;
 }
 
-/* A menu: its rows are its actions, so it has no confirm. The arrow returns
- * `count`, one past the last row. */
+/* A menu: its rows are its actions, so it has no confirm. Returns a row index
+ * or NAV_BACK. */
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
-    const int selected = choose_nav(title, items, count, NULL, false, true, cursor);
-    return selected == NAV_BACK ? (int)count : selected;
+    return choose_nav(title, items, count, NULL, false, true, cursor);
 }
 
 int choose_menu(const char* title, const char* const* items, const size_t count)

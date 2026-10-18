@@ -36,11 +36,11 @@ bool enter_word(const size_t position, const size_t total, const seedtool_wordse
                 items[i] = seedtool_word(candidates[i]);
             }
             /* The arrow deletes a letter, or leaves the word from an empty
-             * stem. It returns `matches`, one past the last row. */
+             * stem. */
             (void)snprintf(listing, sizeof(listing), "%s  %s", title, stem_len ? stem : "-");
             const int chosen = choose_menu(listing, items, matches);
             seedtool_zero(listing, sizeof(listing));
-            if ((size_t)chosen < matches) {
+            if (chosen != NAV_BACK) {
                 strcpy(output, items[chosen]);
                 seedtool_zero(stem, sizeof(stem));
                 seedtool_zero(candidates, sizeof(candidates));
@@ -301,8 +301,8 @@ bool join_words(
 bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
 {
     const char* methods[] = { "Type the letters", "Enter word numbers" };
-    const int method = choose_menu("Word entry", methods, 2);
-    if (method == 2) {
+    const int method = choose_menu("Word entry", methods, ARRAY_LEN(methods));
+    if (method == NAV_BACK) {
         return false;
     }
     if (by_number) {
