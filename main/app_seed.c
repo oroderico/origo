@@ -330,6 +330,7 @@ static bool flip_words(const size_t words)
     const size_t word_count = coin_flipped_words(words);
     const size_t tail_count = coin_tail_bits(words);
     uint16_t indices[23] = { 0 };
+    char words_flipped[23][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
     uint8_t tail[7] = { 0 };
     char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
     char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
@@ -374,20 +375,11 @@ static bool flip_words(const size_t words)
             continue;
         }
 
-        prefix[0] = '\0';
-        size_t used = 0;
         for (size_t i = 0; i < word_count; ++i) {
-            const char* const word = seedtool_word(indices[i]);
-            const size_t len = strlen(word);
-            /* Checked, not assumed: a truncated prefix would be a wrong seed. */
-            seedtool_require(used + len + (i ? 1 : 0) < sizeof(prefix));
-            if (i) {
-                prefix[used++] = ' ';
-            }
-            memcpy(prefix + used, word, len);
-            used += len;
-            prefix[used] = '\0';
+            strcpy(words_flipped[i], seedtool_word(indices[i]));
         }
+        /* Checked, not assumed: a truncated prefix would be a wrong seed. */
+        seedtool_require(join_words(words_flipped, word_count, prefix, sizeof(prefix)));
 
         if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
             notice("Error", "Could not complete", "the mnemonic");
@@ -398,6 +390,7 @@ static bool flip_words(const size_t words)
     }
 
     seedtool_zero(indices, sizeof(indices));
+    seedtool_zero(words_flipped, sizeof(words_flipped));
     seedtool_zero(tail, sizeof(tail));
     seedtool_zero(prefix, sizeof(prefix));
     seedtool_zero(completed, sizeof(completed));
