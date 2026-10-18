@@ -55,17 +55,18 @@ static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
     return key;
 }
 
-/* Anything but an extension ends the session by restarting, wherever it was:
- * unwinding back to the menu would repaint every screen on the way, secrets
- * included. The restart is the erase (see scrub_free_heap). An extended
- * session returns KEY_REDRAW, because the warning replaced the caller's
- * screen. */
+/* The timer is for a reader who walked away, so any press says they are
+ * still here and extends the session; only silence ends it, by restarting
+ * wherever it was: unwinding back to the menu would repaint every screen on
+ * the way, secrets included. The restart is the erase (see scrub_free_heap).
+ * An extended session returns KEY_REDRAW, because the warning replaced the
+ * caller's screen. */
 static seedtool_key_t session_timeout(void)
 {
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "Press any button to stay");
     /* A press begun before this screen existed cannot be an answer to it. */
     seedtool_platform_flush_keys();
-    if (wait_key_raw(WARNING_TIMEOUT_MS) != KEY_SELECT) {
+    if (wait_key_raw(WARNING_TIMEOUT_MS) == KEY_TIMEOUT) {
         seedtool_platform_restart();
     }
     return KEY_REDRAW;

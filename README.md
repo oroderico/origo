@@ -291,8 +291,8 @@ good once the chord has been used once — not under the main menu itself, which
 is not the place to also be teaching it. What stays under a screen after that is
 its position counter alone, or nothing at all on a screen that answers with the
 tick in the header rather than a bar along the bottom. The one footer that still
-names a consequence rather than a gesture — the timeout's `BOTH extend
-Up/Down erase` — is always shown, because guessing wrong there costs a session.
+names a consequence rather than a gesture — the timeout's `Press any button to
+stay` — is always shown, because missing it costs a session.
 
 ### Carousels: dice, coins and cards
 
@@ -738,9 +738,11 @@ what is in RAM is what the screen in front of you needs and not what three
 screens ago needed. Power the board down when you are done rather than leaving
 a session open.
 
-The ten-minute inactivity timer gives a 60-second extend-or-erase warning, and
-anything but extending restarts the device, from any screen; so does leaving the
-wallet. A software restart leaves RAM as it was, so every boot zeroes the free
+The ten-minute inactivity timer gives a 60-second warning; any button extends
+the session, and a warning left unanswered restarts the device, from any
+screen. So does leaving the wallet. Erasing on purpose is the wallet's own
+`Erase and restart` row: a timer meant for a reader who walked away has no
+business turning a stray press into the loss of a half-entered transcript. A software restart leaves RAM as it was, so every boot zeroes the free
 heap, where the previous session's stacks lived, and C startup zeroes the
 rest. That covers an internal assertion failure too (`__wrap_abort` in
 `main/seedtool_platform_esp.c`), which restarts without unwinding.
