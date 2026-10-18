@@ -8,10 +8,8 @@
 #define SEEDTOOL_DISPLAY_WIDTH 240
 #define SEEDTOOL_DISPLAY_HEIGHT 135
 
-/* Rows a list shows at once. Every choice in the firmware is made through a list
- * of this height, so an option is always read with its neighbours in view. Three
- * rows rather than five buys each one the 16px face instead of the 11px one:
- * this is read at arm's length off a screen an inch across. */
+/* Rows a list shows at once: three, so each gets the 16px face, since the
+ * screen is an inch across and read at arm's length. */
 #define SEEDTOOL_LIST_ROWS 3
 
 /* Keyboard control keys. They occupy one cell of the layout like any other key
@@ -23,24 +21,18 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
-/* The dice-roll quality bar drawn under a D6/D20 entry screen: a top segment
- * for rolls collected against the minimum, a bottom segment for Shannon's
- * entropy of those rolls against the minimum bits needed. `warn` colors the
- * entropy segment as a pattern warning; `complete` colors the outline once
- * both minimums are met. Adapted from Krux's dice-roll entropy screen
- * (github.com/selfcustody/krux, src/krux/pages/new_mnemonic/dice_rolls.py). */
+/* The entropy quality bar under an entry screen: rolls against the minimum on
+ * top, Shannon entropy against the bits needed below. `warn` marks a pattern;
+ * `complete` colours the outline once both minimums are met. Adapted from Krux
+ * (src/krux/pages/new_mnemonic/dice_rolls.py). */
 typedef struct {
     int rolls_pct; /* 0-100 */
     int entropy_pct; /* 0-100 */
     bool warn;
     bool complete;
-    /* The count behind entropy_pct, in bits rather than percent, for a screen
-     * that prints the number rather than only filling the bar. `graded` says
-     * whether there is one: the default struct literal leaves it false, which
-     * is what the screens that draw a bar without a running estimate - and the
-     * checksum-completion flips, which are not graded at all - rely on. It is
-     * a flag rather than a sentinel value of `bits`, because zero bits is a
-     * real and meaningful reading at the start of every run. */
+    /* entropy_pct as bits, for a screen that prints the number. `graded` says
+     * there is one: zero bits is a real reading at the start of a run, so it
+     * cannot be the sentinel. */
     bool graded;
     int bits;
 } seedtool_progress_t;
@@ -54,41 +46,31 @@ void seedtool_render_dice_screen(
 void seedtool_render_splash(void);
 
 /* How many leading characters of `text` fit on one body line, up to `limit`.
- * The body font is proportional, so callers must split by this rather than by a
- * fixed character count: an address silently wrapped onto the next row would be
- * transcribed wrongly. */
+ * The font is proportional, so values are split by this rather than by a
+ * character count. */
 size_t seedtool_render_fit(const char* text, size_t limit);
 
-/* How many leading characters of a list item are drawn before the row runs out
- * of width. A label that does not fit is cut here, so this is what a caller
- * checks a new label against. Values meant to be transcribed never go in a list:
- * they are paged with `seedtool_render_fit` instead, which loses nothing. */
+/* How many leading characters of a list item fit its row. Values meant to be
+ * transcribed are never listed; they are paged with seedtool_render_fit. */
 size_t seedtool_render_fit_row(const char* text);
 
-/* Characters per group. Four is the grouping every wallet that does this at
- * all has settled on, and it divides the eye's span without making the gaps
- * outnumber the text. */
+/* Characters per group, as wallets group addresses. */
 #define SEEDTOOL_GROUP_LEN 4
 
-/* How many characters of `text` fit one body line when it is drawn grouped -
- * see seedtool_render_nav_grouped. Fewer than seedtool_render_fit allows,
- * since the gaps between groups take width, and always a whole number of
- * groups unless the value itself ends mid-group. */
+/* How many characters of `text` fit one line drawn grouped: fewer than
+ * seedtool_render_fit, since the gaps take width, and a whole number of groups
+ * unless the value ends mid-group. */
 size_t seedtool_render_fit_grouped(const char* text, size_t limit);
 
 /* How many *trailing* characters of `text` fit one body line. A running
  * transcript is read from its end, where what was just entered is. */
 size_t seedtool_render_fit_tail(const char* text);
 
-/* First visible row so that `selected` is on screen, scrolling as little as
- * possible away from `previous_top`. A pure function of its arguments: the
- * entry path is exactly where the device RNG must not reach, and where the list
- * has scrolled to is part of that path. */
+/* First visible row that keeps `selected` on screen, scrolling as little as
+ * possible from `previous_top`. */
 size_t seedtool_list_top(size_t count, size_t selected, size_t previous_top);
 
-/* Scrollbar thumb inside a track of `track` pixels: `height` is how much of the
- * list is on screen, `offset` is how far into it. Pure, like the scroll position
- * itself, so the self-test can prove the thumb never leaves its track. */
+/* Scrollbar thumb inside a track of `track` pixels. */
 typedef struct {
     int offset;
     int height;
@@ -96,38 +78,27 @@ typedef struct {
 
 seedtool_thumb_t seedtool_list_thumb(size_t count, size_t top, int track);
 
-/* The two fixed controls a nav screen always carries, addressed as selections
- * alongside an ordinary item index. Sentinels rather than positions past the
- * end of the list, so a caller never has to know how many rows the chrome
- * added to reach them - "the back arrow" and "the confirm bar" name
- * themselves. SEEDTOOL_NAV_BODY is neither: it says the cursor is on what the
- * screen is showing, which is how a paged screen says "reading, not on a
- * control". Adapted from Blockstream Jade, which puts a back button in every
- * title bar (main/ui/dialogs.c) rather than spending a list row on it. */
+/* The chrome's fixed controls, addressed as selections alongside an item index.
+ * SEEDTOOL_NAV_BODY is the cursor on what the screen shows, as on a paged
+ * screen. Adapted from Jade, which puts back in the title bar
+ * (main/ui/dialogs.c). */
 #define SEEDTOOL_NAV_BACK SIZE_MAX
 #define SEEDTOOL_NAV_CONFIRM (SIZE_MAX - 1)
 #define SEEDTOOL_NAV_BODY (SIZE_MAX - 2)
-/* The QR's own second control, which cycles how bright its light half is. Only
- * a QR screen has one, so it names itself here rather than borrowing CONFIRM,
- * which would claim the reader had agreed to something. */
+/* The QR's second control, which cycles how bright its light half is. */
 #define SEEDTOOL_NAV_SHADE (SIZE_MAX - 3)
 
-/* The chrome a nav screen wears: a back arrow at the top left, in the title
- * bar where it costs no row, and a confirm bar along the bottom. Both sit in
- * the same place on every screen that uses this, so neither button carries a
- * meaning that changes with the screen - up and down only ever move the
- * cursor, and the chord only ever takes what is highlighted.
- *
- * Passed as one struct rather than four parameters so that a screen names its
- * controls once, and so a screen type added later inherits them without every
- * renderer growing a signature. Every field is meant to be set explicitly:
- * the zero value of `confirm_enabled` dims a bar and the zero value of `back`
- * removes an arrow, neither of which is what a screen usually wants. The app
- * builds these in its own few nav helpers, not at each call site. */
-/* BAR is the zero value, so a struct that names no style keeps the behaviour
- * it had before there was one to name. */
+/* The chrome a nav screen wears: the back arrow at the top left of the title
+ * bar and the confirm at the top right, in the same place on every screen, so
+ * up and down only move the cursor and the chord only takes what is lit. Every
+ * field is meant to be set: the zero value of `confirm_enabled` dims the
+ * confirm and that of `back` removes the arrow. */
+/* The confirm control in the title bar's right slot, opposite the back arrow
+ * (Jade's ui/confirm_address.c layout). A tick accepts what the title names; a
+ * forward arrow hands off to another screen without accepting anything. NONE,
+ * the zero value, is a menu: its rows are its actions. */
 typedef enum {
-    SEEDTOOL_CONFIRM_BAR,
+    SEEDTOOL_CONFIRM_NONE,
     SEEDTOOL_CONFIRM_TICK,
     SEEDTOOL_CONFIRM_FORWARD,
 } seedtool_confirm_t;
@@ -135,55 +106,25 @@ typedef enum {
 typedef struct {
     /* An item index, or one of the three sentinels above. */
     size_t selected;
-    /* Label on the confirm bar. NULL draws no bar at all: a menu's rows are
-     * its actions, and there is nothing left to confirm once one is picked. */
-    const char* confirm;
-    /* False draws the bar dimmed and unselectable - for a screen where
-     * confirming is not yet possible and the reader should still see where
-     * the control will be. */
+    seedtool_confirm_t confirm;
+    /* False draws the confirm dimmed and unselectable, for a screen where it is
+     * not possible yet. */
     bool confirm_enabled;
-    /* False draws no arrow, for a notice with nowhere to go back to. Drawing
-     * one there would restate as a control the same false promise the old
-     * "Up/Down back" footer was making. */
+    /* False draws no arrow, for a notice with nowhere to go back to. */
     bool back;
-    /* Page counter, drawn small in the gap above the bar. NULL draws none. */
+    /* Page counter, drawn small at the bottom. NULL draws none. */
     const char* counter;
-    /* What the confirm looks like. The title bar's right slot is already held
-     * open - the title is centred between two margins the width of the arrow's
-     * box - which is how Jade lays out a screen the reader takes or leaves:
-     * reject on the left, accept on the right, nothing along the bottom
-     * (ui/confirm_address.c).
-     *
-     * TICK and FORWARD both live in that slot and differ in what they claim. A
-     * tick says "yes, this one" and suits a screen whose title already names
-     * what confirming does. A forward arrow says "there is more this way" and
-     * suits a screen that hands off to another rather than accepting anything -
-     * an address before its QR code, say, where a tick would be agreeing to
-     * something nobody asked.
-     *
-     * `confirm` stays the label the screen would have used either way, kept for
-     * the self-test's width checks. */
-    seedtool_confirm_t confirm_style;
 } seedtool_nav_t;
 
-/* Two or three centred body lines - three when `line3` is given, which picks
- * the tighter pitch. Both layouts keep the heights the plain screens used
- * before the chrome replaced them, so a screen gaining the chrome does not
- * also move its own text. */
+/* Two or three centred body lines; three when `line3` is given, at a tighter
+ * pitch. */
 void seedtool_render_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3);
 
-/* The same chrome over a value drawn in groups of four, alternating between
- * the body's own white and the theme's orange, with a gap at each boundary.
- * For a Bitcoin address: an unbroken run of characters with no word shapes to
- * count by, which is exactly what a reader transcribing it loses their place
- * in. The space and the colour change each say where a group ends, so the
- * grouping survives a reader who cannot tell the two inks apart.
- *
- * `first_group` gives, per line, how many groups came before it, so the
- * alternation carries across the line break instead of restarting. The value
- * passed in is never modified: this groups at draw time only, and what is
- * compared or encoded elsewhere stays the unbroken string. */
+/* The same chrome over a value drawn in groups of four, alternating white and
+ * orange with a gap at each boundary, so a reader transcribing an address keeps
+ * their place. `first_group` gives how many groups precede each line, so the
+ * alternation carries across line breaks. Grouping happens only at draw time. */
 void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, const char* const* lines,
     const size_t* first_group, size_t count);
 
@@ -191,38 +132,24 @@ void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, c
  * than as centred blocks. */
 void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, const char* const* rows, size_t count);
 
-/* A scrolling list under the chrome, SEEDTOOL_LIST_ROWS rows at a time, each a
- * pixel shorter than the plain list's were to buy the bar its height - which is
- * why seedtool_list_top and seedtool_list_thumb apply here unchanged. */
+/* A scrolling list under the chrome, SEEDTOOL_LIST_ROWS rows at a time. */
 void seedtool_render_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 
-/* Two body lines with the dice/coin quality bar drawn in, for the screens that
- * bracket an entropy run: the one before it showing the bar empty, and the one
- * after showing it full. */
+/* Two body lines with the entropy bar, for the screens before and after an
+ * entropy run. */
 void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
     const seedtool_progress_t* progress);
 
-/* `layout` is the key characters row by row, rows separated by '\n' and at most
- * ten keys per row. `enabled` is indexed by key position across the whole
- * layout, ignoring the separators; disabled keys are drawn dimmed and are meant
- * to be unreachable. `selected` is a key position and is drawn highlighted.
- * `total` is the word count a mnemonic entry is part of; `position` (1-based)
- * is which word this screen is typing. A thin bar between the typed text and
- * the keys fills to `position - 1` of `total`, the words already behind this
- * one - passphrase and account-index entry have no such count, so `total` of
- * 0 skips the bar entirely rather than drawing an empty one. */
-/* A row of digit boxes with the one being set carrying up and down arrows,
- * for a value scrolled in place rather than hunted for on a keypad.
- * `digits[0..count)` is what each box shows: boxes before `active` are drawn as
- * set, the one at `active` as being scrolled - a SEEDTOOL_KEY_BACKSPACE there
- * draws the backspace glyph - and those after it as still to come. `progress`
- * draws the dice bar underneath when it is not NULL.
- *
- * `count` must not exceed SEEDTOOL_DIGIT_BOXES_MAX: the row is centred, so more
- * boxes than fit do not wrap or shrink, they run off both edges where fill_rect
- * clips them without complaint. The renderer asserts that this many fit the
- * display; the caller is what has to stay within it. */
+/* `enabled` is indexed by key position across the whole layout; disabled keys
+ * are dimmed and meant to be unreachable. `selected` is the highlighted key.
+ * `position` (1-based) of `total` fills a bar with the words already typed; a
+ * `total` of 0 draws no bar. */
+/* A row of digit boxes, the one at `active` carrying up and down arrows. Boxes
+ * before `active` are set, those after it still to come; a
+ * SEEDTOOL_KEY_BACKSPACE at `active` draws the backspace glyph. `progress`
+ * draws the entropy bar when not NULL. `count` must not exceed
+ * SEEDTOOL_DIGIT_BOXES_MAX, or the centred row runs off both edges. */
 #define SEEDTOOL_DIGIT_BOXES_MAX 4
 void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,
     const seedtool_progress_t* progress);
@@ -235,112 +162,77 @@ void seedtool_render_value_box(
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 
+/* Keyboard layouts: the key characters row by row, rows separated by '\n' and at
+ * most ten keys per row. Public so the tests can prove they cover what they
+ * must: a layout that dropped a character would leave a passphrase impossible
+ * to retype. */
+#define SEEDTOOL_WORD_LAYOUT "qwertyuiop\nasdfghjkl\nzxcvbnm\b"
+/* Accept before Backspace: the cursor snaps to whichever is nearer on the ring,
+ * and a completed number should land on Accept. */
+#define SEEDTOOL_WORD_NUMBER_LAYOUT "1234567890\n\r\b"
+#define SEEDTOOL_PASSPHRASE_PAGES 4
+extern const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES];
+
 /* Layout geometry, kept here so the string is read the same way everywhere it is
  * drawn, walked or measured. */
 size_t seedtool_layout_keys(const char* layout);
 char seedtool_layout_key(const char* layout, size_t index);
 
-/* Key position at the visual centre: the middle key of the middle row. It is
- * where a keyboard opens, because with two buttons on a ring of thirty keys the
- * corner is the furthest possible place to start from. */
+/* Key position at the visual centre, where a keyboard opens: the middle key of
+ * the middle row. */
 size_t seedtool_layout_center(const char* layout);
 
-/* Cycles the shade of the light half of every QR this file draws, one step
- * darker each time and back to white after the darkest - a ring, because the
- * control that drives it is a single button pressed repeatedly rather than a
- * pair of keys with a direction each. The dark modules do not move: what
- * changes is how bright the field they sit on is, which is what a phone's
- * exposure meters. A white block on this panel makes some cameras stop down
- * until the code stops resolving, and a dimmer one is what they lock onto; in
- * daylight it is the other way about. Starts at white, so a QR nobody touches
- * is drawn exactly as it was before this existed. */
+/* Cycles the shade of the light half of every QR, darker each step and back to
+ * white: some cameras stop down on a white block until the code no longer
+ * resolves. The dark modules never change. */
 void seedtool_render_qr_cycle_shade(void);
 
 bool seedtool_render_qr(const char* title, const char* text, size_t selected);
 
-/* The same code, with its derivation path and the value itself drawn in the
- * margin beside it - for an address, where the code and the text are two halves
- * of one fact and were on two screens.
- *
- * `selected` is SEEDTOOL_NAV_BACK or SEEDTOOL_NAV_SHADE: this screen is the one
- * QR that carries two controls, so unlike the others it needs a cursor to say
- * which of them the chord would take. */
+/* The code with its derivation path and the value beside it, for an address.
+ * `selected` is SEEDTOOL_NAV_BACK or SEEDTOOL_NAV_SHADE. */
 bool seedtool_render_qr_address(const char* title, const char* text, size_t selected);
 
-/* How many alphanumeric-mode characters (see qrcode_versionForAlphanumeric)
- * fit in one frame at `max_version` and ECC_LOW -- the same error-correction
- * level every other QR this firmware draws already commits to. What a
- * multi-part QR protocol such as BBQr needs to know to decide how many
- * frames a payload needs; capping `max_version` below this file's QR_VERSION
- * trades more, smaller frames for a coarser, more legible module grid on
- * each one. */
+/* Alphanumeric-mode characters one frame holds at `max_version` and ECC_LOW,
+ * which BBQr needs to split a payload into frames. */
 size_t seedtool_render_qr_alphanumeric_capacity(uint8_t max_version);
 
-/* Same as seedtool_render_qr, but for raw bytes rather than a null-terminated
- * string: entropy can contain embedded 0x00 bytes, which qrcode_initText's
- * strlen() would silently truncate at. `len` is passed straight through to
- * the byte-mode encoder instead. */
+/* seedtool_render_qr for raw bytes, which can contain 0x00. */
 bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, size_t len, size_t selected);
 
-/* How many "Zoomed Region" tiles seedtool_render_qr_bytes_region below can
- * step through for a byte-mode payload of `len` bytes: the QR is split into
- * 7x7-module blocks if it is the smallest (version 1, 21x21) QR, 5x5 blocks
- * otherwise (Krux's own thresholds, github.com/selfcustody/krux,
- * src/krux/pages/qr_view.py), covering it exactly since Compact SeedQR's two
- * possible sizes (21, 25) both divide evenly by their block size. Returns 0
- * on the same failure seedtool_render_qr_bytes_region would have. A pure
- * function of `len` alone, like seedtool_render_fit and friends: it does not
- * touch the framebuffer, so callers reach it directly rather than through
- * seedtool_display. */
+/* How many zoomed tiles seedtool_render_qr_bytes_region steps through for `len`
+ * bytes: 7x7-module blocks on a version 1 code, 5x5 otherwise (Krux,
+ * src/krux/pages/qr_view.py), which divide both Compact SeedQR sizes exactly. 0
+ * on the same failure the tile would have. */
 size_t seedtool_render_qr_bytes_regions(size_t len);
 
-/* The region map: the same full-size code seedtool_render_qr_bytes draws,
- * with a dim line at every region boundary and each region's own "A1" etc
- * label stamped inside its own block - the same split
- * seedtool_render_qr_bytes_regions counts, and the same dim-line-over-
- * modules convention a zoomed tile already uses on itself, just a region
- * apart instead of a module apart. Meant to be shown between the plain full
- * code and the zoomed tiles, so a reader has already seen the code at this
- * size before the labels are laid over it, and knows where "A1" sits
- * relative to "B2" before copying either onto a paper template. */
+/* The full code with a dim line at every region boundary and each region's
+ * label ("A1") inside it, shown before the zoomed tiles so the reader knows
+ * where each sits. */
 bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, size_t len, size_t selected);
 
-/* Draws one zoomed-in region tile of a byte-mode payload's QR code, in raster
- * order (region_index 0 is the top-left block, stepping right then down),
- * enlarged to nearly fill the display with a grid overlay and a "Region: A1"
- * legend, so it can be hand-copied onto a paper template too small to fit the
- * whole code drawn small enough to trace by eye. Krux's "Zoomed Regions Mode"
- * ported to this display's layout. `region_index` must be less than what
- * seedtool_render_qr_bytes_regions(len) returns. */
+/* One region of the code enlarged to nearly fill the display, with a grid and a
+ * "Region: A1" legend, for copying onto a paper template. Regions go in raster
+ * order. Krux's "Zoomed Regions" mode. `region_index` must be below
+ * seedtool_render_qr_bytes_regions(len). */
 bool seedtool_render_qr_bytes_region(
     const char* title, const uint8_t* data, size_t len, size_t region_index, size_t selected);
 
-/* The Stackbit 1248 punch-grid backup display: one word's one-based word
- * number (1-2048, the convention enter_word_number() restores by) shown as
- * four decimal digits, each digit a column of four punch cells for binary
- * weights 1, 2, 4 and 8 read top to bottom, lit where that digit's bits are
- * set. `word` is shown beside the grid so the number can be checked against
- * the word it means before it is punched. One simple layout, adapted from
- * Krux's Stackbit 1248 export (github.com/selfcustody/krux,
- * src/krux/pages/stack_1248.py) rather than its three alternates. */
+/* A Stackbit 1248 punch grid: the word's one-based number as four digits, each
+ * a column of cells weighted 1, 2, 4 and 8, lit where its bits are set, with
+ * the word beside it. Adapted from Krux (src/krux/pages/stack_1248.py). */
 void seedtool_render_stackbit_screen(
     const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
-/* The same backup, laid out the way a physical Stackbit 1248 plate actually
- * is: two rows, not four, with the thousands digit a single column of two
- * cells and the other three digits each a 2x2 block. For anyone punching a
- * plate side by side with the screen and matching its layout by eye rather
- * than by the weight label alone. */
+/* The same, laid out as the physical plate: two rows, the thousands digit a
+ * column of two cells and the others 2x2 blocks. */
 void seedtool_render_stackbit_physical_screen(
     const seedtool_nav_t* nav, const char* title, unsigned word_number, const char* word, const char* footer);
 
 const uint16_t* seedtool_render_pixels(void);
 
-/* Copies `rows` rows of the framebuffer into `out` in the order the panel reads
- * them, most significant byte of each pixel first. The framebuffer is
- * little-endian because the CPU is; the wire is not. Black and white are the
- * same in both orders, which is why a missing swap is invisible on a screen made
- * only of text — and was, until the logo. */
+/* Copies `rows` rows of the framebuffer into `out` in the panel's byte order,
+ * most significant byte first; the framebuffer is little-endian like the CPU. */
 void seedtool_render_wire_rows(uint16_t* out, size_t first_row, size_t rows);
 
 #endif
