@@ -37,44 +37,34 @@ bool seedtool_wordset_has(const seedtool_wordset_t* set, size_t index);
 /* How many words the set holds. */
 size_t seedtool_wordset_count(const seedtool_wordset_t* set);
 
-/* Total number of BIP39 English words starting with `prefix`. The first
- * `output_len` matching indices are written to `output`. */
-size_t seedtool_words_with_prefix(const char* prefix, size_t prefix_len, uint16_t* output, size_t output_len);
+/* Every function below that takes `allowed` counts only words in it, NULL
+ * meaning the whole wordlist. */
 
-/* Same, counting only words in `allowed` (NULL for all of them). */
+/* Number of words starting with `prefix`. The first `output_len` matching
+ * indices are written to `output`. */
 size_t seedtool_words_with_prefix_in(
     const seedtool_wordset_t* allowed, const char* prefix, size_t prefix_len, uint16_t* output, size_t output_len);
 
 /* For each letter a..z, whether appending it to `prefix` still leaves at least
- * one BIP39 word. Returns how many letters were enabled, which is never zero
- * for a prefix that itself has candidates. */
-size_t seedtool_next_letters(const char* prefix, size_t prefix_len, bool enabled[SEEDTOOL_LETTERS]);
-
-/* Same, counting only words in `allowed` (NULL for all of them). */
+ * one word. Returns how many letters were enabled, which is never zero for a
+ * prefix that itself has candidates. */
 size_t seedtool_next_letters_in(
     const seedtool_wordset_t* allowed, const char* prefix, size_t prefix_len, bool enabled[SEEDTOOL_LETTERS]);
 
-/* The value of `digits` as a one-based BIP39 word number, or 0 when it is not
- * one. One-based is the position in a printed wordlist: `abandon` is 1 and `zoo`
- * is 2048, one more than the zero-based index the encoding itself uses. Leading
- * zeros are accepted, because a printed list pads to four digits and whoever
- * reads `0004` off it types all four. */
-unsigned seedtool_word_number(const char* digits, size_t digits_len);
-
-/* Same, but zero for a word number outside `allowed` (NULL for all of them) -
- * which is what keeps the Accept key dark on a number the mnemonic cannot end
- * with. */
+/* The value of `digits` as a one-based word number (`abandon` = 1, `zoo` =
+ * 2048, as printed), or 0 when it is not one. Leading zeros are accepted: a
+ * printed list pads to four digits. */
 unsigned seedtool_word_number_in(const seedtool_wordset_t* allowed, const char* digits, size_t digits_len);
 
 /* For each digit 0..9, whether appending it to `digits` still leaves a word
  * number reachable within SEEDTOOL_MAX_WORD_DIGITS characters. Returns how many
  * were enabled, which is never zero while a word number is still reachable. */
-size_t seedtool_next_digits(const char* digits, size_t digits_len, bool enabled[SEEDTOOL_DIGITS]);
-
-/* Same, counting only word numbers in `allowed` (NULL for all of them). */
 size_t seedtool_next_digits_in(
     const seedtool_wordset_t* allowed, const char* digits, size_t digits_len, bool enabled[SEEDTOOL_DIGITS]);
 
 const char* seedtool_word(size_t index);
+
+/* Zero-based index of `word` in the wordlist, or -1 if it is not in it. */
+int seedtool_word_index(const char* word);
 
 #endif
