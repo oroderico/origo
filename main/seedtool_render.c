@@ -15,9 +15,8 @@
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
 
-/* Five greys the light half of a QR can be drawn in, evenly spaced from
- * near-black to white: 16, 74, 124, 198, 255 packed as RGB565. The last is
- * COLOR_WHITE, and is where the ramp starts. */
+/* Five greys for the QR's light half, near-black to white (16, 74, 124, 198,
+ * 255 as RGB565). The ramp starts at white. */
 static const uint16_t qr_shades[]
     = { UINT16_C(0x1082), UINT16_C(0x4a49), UINT16_C(0x7bef), UINT16_C(0xc618), COLOR_WHITE };
 #define QR_SHADE_COUNT (sizeof(qr_shades) / sizeof(qr_shades[0]))
@@ -29,9 +28,8 @@ void seedtool_render_qr_cycle_shade(void)
     qr_shade_index = qr_shade_index ? qr_shade_index - 1 : QR_SHADE_COUNT - 1;
 }
 
-/* Sits in the gap between the transcript line (ends y=81) and the footer
- * (starts y=111) that seedtool_render_screen leaves empty on a dice-entry
- * screen. */
+/* In the gap seedtool_render_screen leaves between the transcript line (ends
+ * y=81) and the footer (starts y=111). */
 #define DICE_BAR_MARGIN 20
 #define DICE_BAR_X DICE_BAR_MARGIN
 #define DICE_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * DICE_BAR_MARGIN)
@@ -39,8 +37,7 @@ void seedtool_render_qr_cycle_shade(void)
 #define DICE_BAR_HEIGHT 14
 
 /* Left margin for the four-row body: a numbered list reads as a table, so every
- * row starts at the same x rather than each being centred as its own block and
- * drifting with how wide its own text is. */
+ * row starts at the same x. */
 #define SCREEN4_TEXT_X 20
 
 #define KEYBOARD_COLUMNS 10
@@ -48,22 +45,18 @@ void seedtool_render_qr_cycle_shade(void)
 #define KEY_HEIGHT 27
 #define KEYBOARD_TOP (SEEDTOOL_DISPLAY_HEIGHT - 3 * KEY_HEIGHT)
 
-/* The 6px gap left between the typed text (ends y=48) and the keyboard
- * (starts at KEYBOARD_TOP=54) - same DICE_BAR_X/WIDTH margin as the entropy
- * bar, so a word-count progress bar reads as the same widget in a narrower
- * space, not a new one. */
+/* In the 6px gap between the typed text (ends y=48) and the keyboard (starts
+ * y=54), with the entropy bar's margins. */
 #define WORD_BAR_Y (KEYBOARD_TOP - 4)
 #define WORD_BAR_HEIGHT 3
 
-/* The 16px title, three 33px rows and the 11px footer fill the 135px display
- * exactly. The rightmost strip carries the scroll arrows and is kept clear of
- * the selection bar so a long label never runs underneath one. */
+/* The 16px title, three 33px rows and the 11px footer fill the 135px display.
+ * The scroll strip on the right is kept clear of the selection bar. */
 #define LIST_TITLE_Y 3
 #define LIST_TOP 21
 
-/* The plain screens put their title at the top and their footer near the
- * bottom; the band between is what the screen is for. Named because the digit
- * field centres itself in it. */
+/* The band between a plain screen's title and footer; the digit field centres
+ * in it. */
 #define SCREEN_TITLE_Y 2
 #define SCREEN_TITLE_BOTTOM (SCREEN_TITLE_Y + 16) /* the 16px face's own height */
 #define SCREEN_FOOTER_Y 111
@@ -76,58 +69,45 @@ void seedtool_render_qr_cycle_shade(void)
 #define LIST_SCROLL_WIDTH 4
 #define LIST_SCROLL_MIN 10
 
-/* Nav chrome. The back arrow lives inside the title bar, so the rows below it
- * keep the full height they have on a plain list bar one pixel each, which is
- * what pays for the confirm bar at the bottom. The title is centred between
- * two margins of NAV_BACK_WIDTH rather than across the whole screen, so the
- * arrow does not push it visually off-centre. */
+/* Nav chrome. The back arrow sits inside the title bar, and the title is
+ * centred between margins of NAV_BACK_WIDTH so the arrow does not push it off
+ * centre. */
 #define NAV_BACK_X 2
 #define NAV_BACK_Y 1
 #define NAV_BACK_WIDTH 20
 #define NAV_BACK_HEIGHT 19
 #define NAV_ARROW_WIDTH 7
 #define NAV_ARROW_HEIGHT 11
-/* The tick gets its own box rather than the arrow's: the arrow is tall and
- * narrow to read as a triangle, a check this small has to be wider than tall.
- * The legs and stroke are the shape; the box is what they add up to, derived
- * so it cannot drift from them. */
+/* The tick's box is derived from its legs, so the two cannot drift. */
 #define NAV_TICK_STROKE 2
 #define NAV_TICK_SHORT 3
 #define NAV_TICK_LONG 6
 #define NAV_TICK_WIDTH (NAV_TICK_SHORT + NAV_TICK_LONG + NAV_TICK_STROKE)
 #define NAV_TICK_HEIGHT (NAV_TICK_LONG + NAV_TICK_STROKE)
 #define NAV_ROW_HEIGHT 32
-/* The rows' own height, less the 2px the last one leaves under itself: a
- * plain list can let its track overhang that gap, having nothing below it,
- * but here the confirm bar is what comes next and the two must not touch. */
+/* The rows' height less the 2px gap under the last row, so the track stops
+ * short of what follows. */
 #define NAV_SCROLL_HEIGHT (SEEDTOOL_LIST_ROWS * NAV_ROW_HEIGHT - 2)
-/* Between the lowest body line a paged screen draws (screen4's fourth, ending
- * at 103) and the bar. The small face fits the 14px left over; the 16px one
- * would not. */
+/* Between the lowest line a paged screen draws (ends y=103) and the bottom of
+ * the display; the small face fits, the 16px one would not. */
 #define NAV_COUNTER_Y 105
-/* Four left-aligned rows. The heights are inherited from the plain four-line
- * screen this replaced, and kept rather than re-derived: 28 to 88 in steps of
- * 20 fits four 16px lines between the header and the counter with a real gap
- * under each, which is the arithmetic the pixel scan in the tests holds
- * them to. */
+/* Four left-aligned rows, 28 to 88 in steps of 20: four 16px lines between the
+ * header and the counter with a gap under each. */
 #define NAV_ROWS_SHOWN 4
 #define NAV_ROWS_TOP 28
 #define NAV_ROWS_HEIGHT 20
 
 /* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
- * xpub in one image. Raising it again is a compile error rather than a code
- * quietly clipped by the bottom of the display. */
+ * xpub in one code. Raising it is a compile error rather than a code clipped by
+ * the display. */
 #define QR_VERSION 6
 #define QR_MAX_MODULES (17 + 4 * QR_VERSION)
 #define QR_MARGIN 3
 #define QR_TITLE_Y 50
 _Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest QR no longer fits the display");
 
-/* Stackbit 1248 punch grid: four digit columns (thousands..units, left to
- * right) times four weight rows (1,2,4,8 top to bottom), with the word
- * number and word text in a panel to its right. A simplified layout rather
- * than a pixel-faithful copy of the physical plate's own 2-row arrangement:
- * read by weight label, not by matching screen geometry to the plate. */
+/* Stackbit 1248 punch grid: four digit columns (thousands to units) by four
+ * weight rows (1, 2, 4, 8), with the number and the word beside it. */
 #define STACKBIT_GRID_X 10
 #define STACKBIT_LABEL_WIDTH 12
 #define STACKBIT_CELL 20
@@ -145,13 +125,10 @@ _Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest
 _Static_assert(STACKBIT_GRID_TOP + STACKBIT_GRID_HEIGHT <= STACKBIT_FOOTER_Y, "the punch grid runs into the footer");
 _Static_assert(STACKBIT_PANEL_WIDTH >= 60, "no room left beside the grid to name the word");
 
-/* The physical Stackbit 1248 plate's own arrangement (github.com/selfcustody/krux,
- * src/krux/pages/stack_1248.py: _draw_grid/_draw_punched): two rows, not four.
- * The thousands digit gets one column of two cells (weight 1 on top, weight 2
- * below — the digit is never more than 2, so only one is ever lit); the other
- * three digits each get a 2x2 block, top-left=1, top-right=2, bottom-left=4,
- * bottom-right=8. Below the grid rather than beside it, since it is wide and
- * short rather than tall and narrow. */
+/* The physical plate's layout (Krux, src/krux/pages/stack_1248.py): two rows.
+ * The thousands digit is one column of two cells (weights 1 and 2, since it is
+ * never above 2); the others are 2x2 blocks weighted 1, 2 / 4, 8. Below the
+ * grid, being wide and short. */
 #define STACKBIT_PHYS_CELL 22
 #define STACKBIT_PHYS_DOT 6
 #define STACKBIT_PHYS_GAP 6
@@ -292,14 +269,9 @@ static void draw_centered_line(
     draw_line_at(font, text, length, x + offset, y, COLOR_WHITE);
 }
 
-/* Centred and wrapped inside the box of `width` pixels starting at `x`. A
- * wrap that would land inside a word backs off to the last space instead, so
- * the word carries whole onto the next line; a single word wider than the
- * whole box is the one case with no better break, and is left to split.
- * Returns the y just past the last line drawn, so a caller stacking more text
- * beneath a value of unknown line count - draw_qr_region's title, which wraps
- * whenever the zoomed layout's narrow column can't fit it on one line - can
- * place it without guessing how many lines came before it. */
+/* Centred and wrapped inside the box of `width` pixels at `x`, breaking at the
+ * last space rather than inside a word; a word wider than the box is split.
+ * Returns the y just past the last line, for callers stacking text below. */
 static int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
 {
     if (!text) {
@@ -336,17 +308,14 @@ static void draw_centered(const uint8_t* font, const char* text, const int y)
     draw_centered_box(font, text, 0, SEEDTOOL_DISPLAY_WIDTH, y);
 }
 
-/* Left-aligned rather than boxed and centred: a numbered list reads as a
- * table, with the word (or word number) starting at the same x on every row,
- * not drifting with how wide each entry's own text happens to be. */
+/* Left-aligned, so a numbered list reads as a table. */
 static void draw_left(const uint8_t* font, const char* text, const int x, const int y)
 {
     draw_line_at(font, text, strlen(text), x, y, COLOR_WHITE);
 }
 
-/* What has been typed so far, read back to be checked, so it takes the larger
- * face. Only the tail that fits one line is drawn: a passphrase long enough to
- * wrap would push a second line down into the keyboard. */
+/* What has been typed, in the larger face to be checked. Only the tail that
+ * fits one line is drawn, so a long passphrase does not push into the keyboard. */
 static void draw_typed(const uint8_t* font, const char* text, const int y)
 {
     const size_t length = strlen(text);
@@ -357,9 +326,8 @@ static void draw_typed(const uint8_t* font, const char* text, const int y)
     draw_centered_line(font, text + start, length - start, 0, SEEDTOOL_DISPLAY_WIDTH, y);
 }
 
-/* Leading characters of `text` that fit in `max_width` pixels, at most `limit`
- * of them. The body font is proportional, so every caller that has to know where
- * text stops measures it here rather than counting characters. */
+/* Leading characters of `text` that fit in `max_width` pixels, at most `limit`.
+ * The font is proportional, so text is measured, not counted. */
 static size_t fit_in(const uint8_t* font, const char* text, const size_t limit, const int max_width)
 {
     int width = 0;
@@ -374,11 +342,9 @@ static size_t fit_in(const uint8_t* font, const char* text, const size_t limit, 
     return count;
 }
 
-/* Same as fit_in, but backs a mid-word fit off to the last space within it,
- * so paged text (page_text, via seedtool_render_fit) never splits a word
- * across pages the way a raw pixel-width cut can. Only for callers that have
- * a next line to carry the rest of the word onto: a list row's single-line
- * truncation (seedtool_render_fit_row) has none, so it keeps the plain cut. */
+/* fit_in, backed off to the last space, so paged text never splits a word. Only
+ * for callers with a next line to carry it onto; a list row keeps the plain
+ * cut. */
 static size_t fit_in_wrapped(const uint8_t* font, const char* text, const size_t limit, const int max_width)
 {
     const size_t fit = fit_in(font, text, limit, max_width);
@@ -398,18 +364,10 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
     return fit_in_wrapped(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
 }
 
-/* A Bitcoin address is a single unbroken run of base58 or bech32, which is
- * exactly the shape a reader loses their place in: no word boundaries, no
- * repeated shapes to count by, and characters chosen to look unlike each
- * other rather than to group. Drawn in fours with a gap and an alternating
- * ink, the eye gets a place to rest every four characters and two independent
- * signals for where one group ends - the space and the colour change - so
- * neither carries the grouping alone.
- *
- * The address itself is never touched. Grouping happens at draw time only:
- * what is compared, hashed and put in a QR is the same unbroken string it
- * always was, and nothing downstream has to know to strip separators back
- * out. */
+/* An address has no word boundaries to keep one's place by, so it is drawn in
+ * groups of four with a gap and an alternating ink: two signals for where a
+ * group ends. Grouping is only drawn; what is compared, hashed and encoded is
+ * the unbroken string. */
 #define GROUP_LEN SEEDTOOL_GROUP_LEN
 #define GROUP_GAP 5
 
@@ -418,8 +376,7 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
 static uint16_t group_ink(const size_t index) { return index % 2 ? COLOR_HIGHLIGHT : COLOR_WHITE; }
 
 /* `length` characters of `text` drawn in groups, centred in the column at
- * `column_x` of `column_width`. `first_group` is how many groups came before
- * this line. */
+ * `column_x`. `first_group` is how many groups came before this line. */
 static void draw_grouped_in(const uint8_t* font, const char* text, const size_t length, const int column_x,
     const int column_width, const int y, const size_t first_group)
 {
@@ -447,10 +404,8 @@ static void draw_grouped_in(const uint8_t* font, const char* text, const size_t 
     }
 }
 
-/* How many characters of `text` fit one line once the gaps are paid for.
- * Rounded down to a whole number of groups, so a group is never split across
- * a line and the alternation stays readable at the break - unless the value
- * ends mid-group, which is the one short group allowed. */
+/* Characters of `text` that fit one line with the gaps paid for, rounded down
+ * to whole groups unless the value ends mid-group. */
 /* The width-and-face-agnostic half of seedtool_render_fit_grouped, so the
  * address beside a QR can be fitted to its own margin with the same rounding. */
 static size_t fit_grouped_in(const uint8_t* font, const char* text, const size_t limit, const int max_width)
@@ -479,16 +434,8 @@ size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 }
 
 
-/* A row's text, with an ellipsis when it did not all fit. A row that simply
- * stops is indistinguishable from a row that ended - which is fine for a menu
- * label, whose text is chosen to fit, and wrong for the
- * address list, where every row is a value cut short and the reader has no
- * way to tell how much is missing. The three dots say "there is more" without
- * claiming how much; the address's own page says the rest.
- *
- * The ellipsis is paid for out of the same width, not drawn past it: the fit
- * is recomputed against what is left after reserving room for the dots, so a
- * truncated row is never wider than one that fits. */
+/* A row's text, with an ellipsis when it did not all fit, so a cut address does
+ * not look like a whole one. The ellipsis comes out of the same width. */
 #define ROW_ELLIPSIS "..."
 
 static void draw_row(const uint8_t* font, const char* text, const int x, const int y, const int width,
@@ -519,15 +466,12 @@ size_t seedtool_render_fit_tail(const char* text)
 
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
 
-/* The splash is the logo as it was drawn — mark, wordmark and tagline in one
- * picture — and nothing else: it holds the screen briefly and then the menu
- * takes over, so there is no instruction to give. */
+/* The splash is the logo, and nothing else: it holds the screen briefly and the
+ * menu follows. */
 _Static_assert(SEEDTOOL_LOGO_WIDTH <= SEEDTOOL_DISPLAY_WIDTH, "the logo is wider than the display");
 _Static_assert(SEEDTOOL_LOGO_HEIGHT <= SEEDTOOL_DISPLAY_HEIGHT, "the logo is taller than the display");
 
-/* Sixteen palette entries at two pixels per byte, high nibble first. Written
- * straight into the framebuffer: it is one picture on one screen, not a drawing
- * surface for anything else to use. */
+/* Sixteen palette entries, two pixels per byte, high nibble first. */
 static void draw_logo(const int x, const int y)
 {
     for (int row = 0; row < SEEDTOOL_LOGO_HEIGHT; ++row) {
@@ -552,9 +496,7 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, 5);
     /* The body carries the values that get transcribed, so it takes the larger
-     * face. It costs four characters a line and no extra page: this font is 45%
-     * taller than the small one but only 18% wider on base58. The footer stays
-     * small because 16px there would run off the bottom of the display. */
+     * face. The footer stays small or it would run off the display. */
     draw_centered(tft_Ubuntu16, line1, 39);
     draw_centered(tft_Ubuntu16, line2, 65);
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
@@ -570,12 +512,9 @@ seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const
     if (thumb.height < LIST_SCROLL_MIN) {
         thumb.height = LIST_SCROLL_MIN;
     }
-    /* Spread the remaining travel over the scrollable range, so the thumb sits
-     * against the top at the first row and flush with the bottom at the last:
-     * the end of a list has to look like the end of it here too. On a long
-     * enough list the division below can floor a small top back down to 0,
-     * which would show row 1 as if it were row 0; nudge it to the nearest
-     * pixel off the top instead, the one case the floor can get wrong. */
+    /* The thumb sits against the top at the first row and against the bottom at
+     * the last; a small top that the division floors to 0 is nudged off the
+     * top, so row 1 never reads as row 0. */
     thumb.offset = (int)((size_t)(track - thumb.height) * top / (count - SEEDTOOL_LIST_ROWS));
     if (top && !thumb.offset) {
         thumb.offset = 1;
@@ -603,18 +542,10 @@ size_t seedtool_list_top(const size_t count, const size_t selected, size_t previ
     return previous_top;
 }
 
-/* A solid isoceles triangle filling a width x height box, apex pointing the
- * way asked - drawn rather than set, since the 16px face carries no glyph for
- * one and Jade's own symbols font is not linked here.
- *
- * Up and down walk the rows drawing horizontal bars; left walks the columns
- * drawing vertical ones. That is the same arithmetic transposed, which is why
- * the header's back arrow and the digit field's scroll hints are one function
- * rather than two that drift apart.
- *
- * The `+ 1` on the step is what keeps the apex a single pixel: without it the
- * first two steps round to the same half-width and the point comes out as a
- * two-pixel spike. */
+/* A solid triangle filling a width x height box, apex the way asked, drawn
+ * because the faces have no glyph for it. Up and down draw rows, left and right
+ * the same arithmetic in columns. The `+ 1` on the step keeps the apex a single
+ * pixel. */
 typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT, TRIANGLE_RIGHT } triangle_dir_t;
 
 static void draw_triangle(
@@ -635,14 +566,9 @@ static void draw_triangle(
     }
 }
 
-/* A tick, drawn rather than set, for the same reason the arrow above is: the
- * 16px face has no glyph for one and Jade's symbols font is a component the
- * audit rejects by name. Two strokes up from a common low point, each a stack
- * of squares so the diagonals read as solid rather than as dotted pixels.
- *
- * The legs are fixed lengths rather than fractions of one width - at this size
- * that rounds the short leg away entirely - and roughly 1:2 is what reads as a
- * check. `x, y` is the top-left of the NAV_TICK_WIDTH x NAV_TICK_HEIGHT box. */
+/* A tick, drawn because the faces have no glyph for it: two strokes from a
+ * common low point, each a stack of squares so the diagonals read as solid. `x,
+ * y` is the top-left of the NAV_TICK_WIDTH x NAV_TICK_HEIGHT box. */
 static void draw_tick(const int x, const int y, const uint16_t color)
 {
     const int foot_x = x + NAV_TICK_SHORT;
@@ -663,10 +589,7 @@ static void draw_border(const int x, const int y, const int width, const int hei
     fill_rect(x + width - 1, y, 1, height, color);
 }
 
-/* The chrome itself, drawn the same way for every screen that wears it - the
- * point of the thing being that the arrow and the bar are found in one place
- * regardless of what sits between them. Split from the screens so a new one
- * inherits the geometry rather than restating it. */
+/* The chrome, drawn once for every screen that wears it. */
 static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
 {
     /* A screen with no way back gets no arrow, and its title takes the whole
@@ -677,14 +600,9 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         if (on_back) {
             fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, COLOR_HIGHLIGHT);
         }
-        /* Sides and top, no bottom - Jade's own header buttons are bordered
-         * that way on a full menu, its comment giving the reason: "bottom edge
-         * will be covered by upper line above top menu item" (ui/dialogs.c).
-         * The rule above the first row sits directly under this box, so the
-         * two meet and the chrome reads as one frame rather than as a button
-         * hovering above an unrelated list. Drawn whether or not the arrow is
-         * selected, dim when idle: a bare arrow in the corner reads as
-         * decoration, a box reads as something that can be taken. */
+        /* Sides and top, no bottom: the header's closing rule is the fourth
+         * edge, as in Jade (ui/dialogs.c). Bordered even when idle, so it reads
+         * as a control. */
         const uint16_t edge = on_back ? COLOR_HIGHLIGHT : COLOR_DIM;
         fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, 1, edge);
         fill_rect(NAV_BACK_X, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
@@ -709,10 +627,8 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         fill_rect(x + NAV_BACK_WIDTH - 1, NAV_BACK_Y, 1, NAV_BACK_HEIGHT, edge);
         const uint16_t ink = !nav->confirm_enabled ? COLOR_DIM : on_tick ? COLOR_BLACK : COLOR_WHITE;
         if (nav->confirm == SEEDTOOL_CONFIRM_FORWARD) {
-            /* The back arrow's own shape, mirrored, in the slot opposite it -
-             * so "there is more this way" and "back the way you came" are
-             * plainly the same control pointing two ways, rather than two
-             * glyphs the reader has to learn separately. */
+            /* The back arrow's shape, mirrored: the same control pointing the
+             * other way. */
             draw_triangle(x + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
                 NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT,
                 TRIANGLE_RIGHT, ink);
@@ -721,18 +637,11 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
                 NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_TICK_HEIGHT) / 2, ink);
         }
     }
-    /* Centred between two margins the width of the arrow's box, not across the
-     * glass: a title centred over the whole width would read as leaning right
-     * against the arrow, and a long one would paint into it. */
+    /* Centred between margins the width of the arrow's box, so a long title
+     * does not paint into it. */
     (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
-    /* The rule that closes the header, and with it the bottom of the arrow's
-     * box and the tick's - both are drawn with sides and top only, on the
-     * understanding that a line underneath would be the fourth edge. On a list
-     * that line was the rule above the first cell, so the frame closed and the
-     * chrome read as one piece; every other screen wearing this header had no
-     * cells to supply it, so the two boxes hung open with nothing across the
-     * bar. Drawn here instead of by each body, so a screen gets it for wearing
-     * the header rather than for happening to be a list. */
+    /* The rule under the header, which closes the arrow's box and the
+     * confirm's, drawn here so every screen wearing the header gets it. */
     fill_rect(NAV_BACK_X, NAV_BACK_Y + NAV_BACK_HEIGHT, SEEDTOOL_DISPLAY_WIDTH - 2 * NAV_BACK_X, 1, COLOR_DIM);
 }
 
@@ -745,9 +654,8 @@ static void draw_nav_counter(const seedtool_nav_t* nav)
     }
 }
 
-/* Opens and closes every nav screen, so the order - clear, chrome, body,
- * counter, bar - is written once and a new screen type only has to say what
- * goes between them. */
+/* The order every nav screen draws in, written once: clear, chrome, body,
+ * counter. */
 static void nav_begin(const seedtool_nav_t* nav, const char* title)
 {
     seedtool_render_clear();
@@ -763,11 +671,8 @@ void seedtool_render_nav_text(
     const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2, const char* line3)
 {
     nav_begin(nav, title);
-    /* Two layouts in one function, chosen by whether there is a third line:
-     * two lines sit at 39 and 65, three at 33, 58 and 83, pitched tighter to
-     * clear the counter. These were two separate screens before the chrome,
-     * and the heights are theirs unchanged - a screen gaining the chrome
-     * should not also move its own text. */
+    /* Two lines at 39 and 65, or three at 33, 58 and 83, pitched tighter to
+     * clear the counter. */
     if (line3) {
         draw_centered(tft_Ubuntu16, line1, 33);
         draw_centered(tft_Ubuntu16, line2, 58);
@@ -783,9 +688,8 @@ void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, c
     const size_t* first_group, const size_t count)
 {
     nav_begin(nav, title);
-    /* The three-line pitch, always: an address is long enough to want the
-     * lines and short enough to fit them, and holding one layout keeps a
-     * two-line page from moving its text when a third line appears. */
+    /* Always the three-line pitch, so a page does not move its text when a
+     * third line appears. */
     static const int y[] = { 33, 58, 83 };
     for (size_t i = 0; i < count && i < 3; ++i) {
         if (lines[i] && lines[i][0]) {
@@ -814,16 +718,9 @@ void seedtool_render_nav_list(
         const char* const item = items[top + row];
         const bool highlighted = top + row == nav->selected;
         const int y = LIST_TOP + (int)row * NAV_ROW_HEIGHT;
-        /* A rule above every row, the first included, so they read as cells
-         * rather than as lines of text that happen to be stacked - Jade draws
-         * a border under each menu item and above the top one (ui/dialogs.c).
-         * It sits in the gap between cells, so the selection bar never paints
-         * over it. The topmost one lands on the header's own closing rule and
-         * repaints it in the same colour: that rule used to be this line's job,
-         * until every screen wearing the header needed one and it moved there.
-         * Kept because the cell wants a top edge whether or not the header drew
-         * one. The last cell is closed by the confirm bar's own rule, so three
-         * rules here and that one frame three rows. */
+        /* A rule above every row, so they read as cells (as in Jade's menus,
+         * ui/dialogs.c). It sits in the gap between cells, clear of the
+         * selection bar. */
         fill_rect(LIST_BAR_X, y - 1, LIST_BAR_WIDTH, 1, COLOR_DIM);
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
@@ -903,9 +800,7 @@ size_t seedtool_layout_center(const char* layout)
     return 0;
 }
 
-/* A backspace arrow, drawn rather than spelled: the fonts are 95 printable ASCII
- * characters and have no glyph for it, and the word "del" needed the small face
- * to fit a key the letters had already outgrown. */
+/* A backspace arrow, drawn because the fonts are printable ASCII only. */
 #define BACKSPACE_WIDTH 15
 #define BACKSPACE_HEIGHT 11
 
@@ -942,10 +837,8 @@ static const char* key_label(const char key, char* scratch)
 
 static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
 
-/* The dice-roll quality bar, drawn wherever a screen leaves room for it: the
- * plain dice screen, the digit field and the nav chrome's dice screen all sit
- * above DICE_BAR_Y. The NULL guard is here rather than at each caller because
- * three of them pass a bar that a screen may or may not want. */
+/* The entropy quality bar, for every screen with room above DICE_BAR_Y. NULL
+ * draws nothing. */
 static void draw_progress_bar(const seedtool_progress_t* progress)
 {
     if (!progress) {
@@ -966,43 +859,27 @@ static void draw_progress_bar(const seedtool_progress_t* progress)
     draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
 }
 
-/* A row of digit boxes, one per character position, with the one being set
- * carrying an up and a down arrow: the value scrolls in place instead of being
- * hunted for on a keypad. Adapted from Blockstream Jade's PIN and index entry
- * (main/ui/digit_entry.c), which shows the same three states - a box still to
- * come, the box being set, and a box already set.
- *
- * The gain over the keypad is that the two buttons mean one thing here. On the
- * keypad they walk a cursor across twelve keys and the reader has to find the
- * digit; here up and down *are* the digit, and the only other move is
- * committing it. */
+/* A row of digit boxes, the one being set carrying up and down arrows, so the
+ * value scrolls in place: up and down are the digit. Adapted from Jade's PIN
+ * and index entry (main/ui/digit_entry.c). */
 #define DIGIT_BOX_WIDTH 34
 #define DIGIT_BOX_HEIGHT 32
 #define DIGIT_BOX_GAP 6
 #define DIGIT_ARROW_WIDTH 11
-/* Six rows, not seven: the half-width steps in whole pixels, so an 11-wide
- * triangle has exactly six distinct rows (1, 3, 5, 7, 9, 11). A seventh row
- * has no width left of its own and repeats one, which reads as a flat spot in
- * the edge rather than a straight diagonal. */
+/* Six rows: an 11-wide triangle has exactly six distinct half-widths, and a
+ * seventh would repeat one. */
 #define DIGIT_ARROW_HEIGHT 6
 
-/* An arrow, the boxes, an arrow: one stack, sitting at a different height on
- * each screen that draws it because what is under it differs - the value box
- * shares its screen with the entropy quality bar, the digit field has only the
- * footer. Derived from the stack's own parts, so changing an arrow's height
- * moves the stack rather than silently unbalancing it. */
+/* Arrow, boxes, arrow: one stack, its height derived from its parts. */
 #define DIGIT_FIELD_GAP 4
 #define DIGIT_FIELD_HEIGHT (2 * (DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP) + DIGIT_BOX_HEIGHT)
 #define DIGIT_FIELD_TOP(bottom) (SCREEN_TITLE_BOTTOM + ((bottom) -SCREEN_TITLE_BOTTOM - DIGIT_FIELD_HEIGHT) / 2)
 #define DIGIT_FIELD_BOX_Y(top) ((top) + DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP)
 #define DIGIT_FIELD_DOWN_Y(top) (DIGIT_FIELD_BOX_Y(top) + DIGIT_BOX_HEIGHT + DIGIT_FIELD_GAP)
 
-/* Held rather than eyeballed. The widest field is one box per digit a word
- * number can have, and it is centred, so a box or gap grown by a few pixels
- * pushes the outer boxes off the edge - where fill_rect clips them silently and
- * the field simply looks wrong on the device rather than failing anywhere. The
- * vertical pair does the same for the arrows, which sit outside the boxes and
- * must clear both the title above and the footer below. */
+/* The widest field, centred, must fit the display: a box or gap grown by a few
+ * pixels would be clipped silently. The arrows must clear the title and the
+ * footer. */
 _Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXES_MAX - 1) * DIGIT_BOX_GAP
         <= SEEDTOOL_DISPLAY_WIDTH,
     "the digit boxes are wider than the display");
@@ -1015,10 +892,8 @@ _Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(DICE_BAR_Y)) + DIGIT_ARROW_HEI
     "the value box runs into the quality bar");
 
 
-/* One wider box for a value scrolled whole rather than digit by digit: a die
- * face is 1-6 and a D20 is 1-20, so splitting it into per-digit boxes would
- * ask for two presses where the value itself is the thing being chosen.
- * `back` draws the way out on the same ring, as the digit field does. */
+/* One wider box for a value scrolled whole, a die face or a D20. `back` puts
+ * the way out on the ring, as the digit field does. */
 #define VALUE_BOX_WIDTH 60
 
 void seedtool_render_value_box(
@@ -1026,10 +901,8 @@ void seedtool_render_value_box(
 {
     seedtool_render_clear();
     draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
-    /* Centred above the quality bar, not the footer: the bar is what shares
-     * this screen, whether or not `progress` draws one this time - the box
-     * should not jump between runs that grade their entropy and runs that do
-     * not. */
+    /* Centred above the quality bar whether or not `progress` draws it, so the
+     * box does not move between graded and ungraded runs. */
     const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
     const int box_y = DIGIT_FIELD_BOX_Y(top);
     const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
@@ -1078,9 +951,7 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
         if (shown == SEEDTOOL_KEY_ACCEPT) {
             draw_centered_in(tft_Ubuntu16, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
-            /* The way out of the field rides the same ring as the digits, so
-             * the box shows the backspace glyph the keypad already uses for
-             * it rather than a letter the reader has to decode. */
+            /* The way out rides the ring as the backspace glyph. */
             draw_backspace(x + (DIGIT_BOX_WIDTH - BACKSPACE_WIDTH) / 2, box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2,
                 COLOR_BLACK, COLOR_HIGHLIGHT);
         } else if (shown && shown != ' ') {
@@ -1112,9 +983,8 @@ void seedtool_render_dice_screen(const char* title, const char* line1, const cha
 void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
     const seedtool_progress_t* progress)
 {
-    /* The quality bar sits at DICE_BAR_Y=90..103 and the confirm bar starts at
-     * 118, so the two clear each other without either moving: what the chrome
-     * takes here is the footer's row, which is exactly what it replaces. */
+    /* The quality bar (y=90..103) takes the footer's row, which the chrome
+     * replaces. */
     seedtool_render_nav_text(nav, title, line1, line2, NULL);
     draw_progress_bar(progress);
 }
@@ -1147,9 +1017,8 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
             const int x = left + column * KEY_WIDTH;
             char scratch[2];
             const char* const label = key_label(row[column], scratch);
-            /* Letters and digits take the larger face; the keys still spelled
-             * with a word keep the small one, because "OK" at 16px is 24px wide
-             * in a 24px cell and would bleed into the key beside it. */
+            /* Letters and digits take the larger face; word keys keep the small
+             * one, or "OK" would fill its cell. */
             const bool worded = row[column] == SEEDTOOL_KEY_PAGE || row[column] == SEEDTOOL_KEY_ACCEPT
                 || row[column] == ' ';
             const unsigned char* const face = worded ? tft_DefaultFont : tft_Ubuntu16;
@@ -1252,12 +1121,9 @@ void seedtool_render_stackbit_physical_screen(
     draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
 }
 
-/* Scale/extent/position math shared by every screen that draws a square,
- * height-bound grid of `modules` cells with a title column to its right:
- * draw_qr and seedtool_render_qr_bytes_map both pass the QR's own size plus
- * its 2-module quiet zone, draw_qr_region passes a zoomed region's own
- * (quiet-zone-free) size - same shape at a different cell count either way,
- * so one computation serves all three instead of each re-deriving it. */
+/* Geometry for a square, height-bound grid of `modules` cells against the right
+ * edge, with the title column to its left: a full code with its quiet zone, or
+ * a zoomed region without one. */
 typedef struct {
     int scale;
     int extent;
@@ -1267,11 +1133,8 @@ typedef struct {
     int title_width;
 } qr_geometry_t;
 
-/* The code sits against the right edge and everything that is not the code -
- * the title, and the arrow back out - shares the margin left of it. It used to
- * be the other way round, which left no room on the left for the arrow: a QR
- * screen was the one place in the firmware whose way out was drawn nowhere at
- * all, and the reader had to already know the chord left it. */
+/* The code sits against the right edge, and the title and the way out share the
+ * margin to its left. */
 static qr_geometry_t qr_geometry(const int modules)
 {
     qr_geometry_t g;
@@ -1284,10 +1147,6 @@ static qr_geometry_t qr_geometry(const int modules)
     return g;
 }
 
-/* The way out, in the margin the code leaves. Always drawn filled rather than
- * carrying the chrome's three states: every QR screen leaves on the chord from
- * wherever the reader is, so the arrow is not a cursor position to move to -
- * it is a label for what the chord already does. */
 /* The way out, drawn the way the header's controls are: filled when it is
  * where the cursor sits, outlined when it is not. */
 static void draw_qr_back(const bool selected)
@@ -1301,19 +1160,10 @@ static void draw_qr_back(const bool selected)
         selected ? COLOR_BLACK : COLOR_WHITE);
 }
 
-/* Against the code's own left edge, in the strip the margin leaves empty above
- * its text: what this control changes is the code, not the way out, and a box
- * sitting against the code says so without a label. Stacked under the back
- * arrow it would push the path and the address down, and there is no room
- * below them to give.
- *
- * A sun, because that is what the setting is - and its disc is drawn in the
- * shade the code's light half currently uses, so the glyph dims as the code
- * dims and the button reports the state it is about to change. The rays and
- * the disc's outline stay in ink, which is what keeps a sun visible once its
- * disc has gone dark enough to vanish into the panel. Drawn from rectangles
- * rather than set in a symbol font: the two faces this firmware carries are
- * ASCII, and a font added for one glyph is a dependency added for one glyph. */
+/* The shade control, against the code's left edge, since what it changes is the
+ * code. A sun whose disc is drawn in the current shade, so it dims as the code
+ * does; the rays and outline stay in ink so it stays visible. Drawn from
+ * rectangles: the faces are ASCII only. */
 #define QR_SHADE_GAP 3
 #define QR_SUN_CORE 5
 #define QR_SUN_GAP 2
@@ -1321,10 +1171,7 @@ static void draw_qr_back(const bool selected)
 #define QR_SUN_EXTENT (QR_SUN_CORE + 2 * (QR_SUN_GAP + QR_SUN_RAY))
 
 /* A code is never wider than the display is tall, so its left edge never comes
- * further left than this - which is what keeps the sun clear of the way out no
- * matter which version a screen draws. Checked here rather than trusted,
- * because the two boxes overlapping would be a quiet mess rather than a
- * failure: both would still draw. */
+ * further left than this, and the sun stays clear of the way out. */
 _Static_assert(SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - SEEDTOOL_DISPLAY_HEIGHT - QR_SHADE_GAP - NAV_BACK_WIDTH
         > NAV_BACK_X + NAV_BACK_WIDTH,
     "the QR's shade control would overlap its back arrow");
@@ -1357,60 +1204,48 @@ static void draw_qr_shade(const int box_x, const bool selected)
     fill_rect(left + QR_SUN_EXTENT - 2, top + QR_SUN_EXTENT - 2, 1, 1, ink);
 }
 
-/* Every QR screen wears the same two controls: the way out at the top left,
- * and the sun against the code's own left edge. One shape everywhere, so the
- * chord means the same thing on the address, on the account key's frames and
- * on the Compact SeedQR's tiles - take whatever is highlighted. */
+/* Every QR screen has the same two controls: the way out at the top left and
+ * the sun against the code. */
 static void draw_qr_chrome(const int code_x, const size_t selected)
 {
     draw_qr_back(selected == SEEDTOOL_NAV_BACK);
     draw_qr_shade(code_x - QR_SHADE_GAP - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
 }
 
-/* Shared by seedtool_render_qr and seedtool_render_qr_bytes: everything after
- * `qr`'s modules are populated, whichever encoder filled them. `modules` is
- * only needed back to zero it once drawn — it held whatever the mnemonic or
- * key material was encoded as. */
-static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
+/* The code against the right edge inside its quiet zone, on a cleared screen:
+ * the light field in the current shade, the dark modules over it. The scale is
+ * the largest that fits the display's height. */
+static qr_geometry_t draw_modules(const QRCode* qr)
 {
-    /* The code sits left with its quiet zone intact and the title goes in the
-     * margin beside it: on a screen that steps through several codes, one that
-     * does not say what it holds is one that gets scanned into the wrong place.
-     * The scale is the largest integer that still fits the display's height —
-     * the binding dimension, since every version here is square and narrower
-     * than the display is wide — so a smaller QR (Compact SeedQR's version 1
-     * or 2) fills as much of the screen as it can rather than sitting at the
-     * scale version 6 happens to need. */
     const qr_geometry_t g = qr_geometry(qr->size + 2);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
     seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, qr_light());
+    fill_rect(g.code_x, g.top, g.extent, g.extent, qr_light());
     for (uint8_t y = 0; y < qr->size; ++y) {
         for (uint8_t x = 0; x < qr->size; ++x) {
-            if (qrcode_getModule(qr, x, y)) {
-                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
+            if (qrcode_getModule((QRCode*)qr, x, y)) {
+                fill_rect(g.code_x + (x + 1) * g.scale, g.top + (y + 1) * g.scale, g.scale, g.scale, COLOR_BLACK);
             }
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    return g;
+}
+
+/* Draws the populated `qr` with its title in the margin, so a stepped sequence
+ * of codes says what each holds, then zeroes `modules`, which held the encoded
+ * value. */
+static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
+{
+    const qr_geometry_t g = draw_modules(qr);
+    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
 
-/* Shared by the plain QR and the one that carries a forward control: `selected`
- * NULL draws only the way out. */
-static bool render_qr_text(const char* title, const char* text, const size_t selected)
+bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
 {
-    /* Drawn at the smallest version that actually holds `text` -- like
-     * seedtool_render_qr_bytes already does for Compact SeedQR -- rather than
-     * always QR_VERSION, so a short value (an address, a single BBQr part)
-     * fills the display with far coarser, easier-to-scan modules instead of
-     * sitting at the same fine grid a full account key needs. */
+    /* At the smallest version that holds `text`, so a short value gets coarser,
+     * easier modules. */
     const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
     if (!version) {
         return false;
@@ -1426,26 +1261,13 @@ static bool render_qr_text(const char* title, const char* text, const size_t sel
     return draw_qr(&qr, modules, title, selected);
 }
 
-bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
-{
-    return render_qr_text(title, text, selected);
-}
-
-/* Two groups to a line, so the address falls into a fixed block rather than
- * into however many groups a margin happens to hold: a reader checking one
- * against paper or a scanner reads the same shape every time, and the ragged
- * last line is the only thing that varies. A 42-character bech32 address comes
- * out as five full lines and a short sixth. */
+/* Two groups to a line, so an address always falls into the same block; a
+ * 42-character bech32 address is five full lines and a short sixth. */
 #define QR_ADDRESS_GROUPS 2
 
-/* The code, its derivation path and the address itself, on one screen. The
- * margin the right-aligned code leaves is tall enough to hold all three: the
- * way out at the top, then the path, then the address under it in the same
- * groups of four the paged view uses, so a reader checking the screen against
- * a scanner or against paper reads the same shape either way.
- *
- * The address is drawn in the small face rather than the body one - it is here
- * to be checked against something, not transcribed from. */
+/* The code, its derivation path and the address, on one screen: the way out,
+ * then the path, then the address in groups of four, in the small face since it
+ * is there to be checked, not transcribed. */
 bool seedtool_render_qr_address(const char* title, const char* text, const size_t selected)
 {
     const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
@@ -1457,11 +1279,9 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     const int text_top = NAV_BACK_Y + NAV_BACK_HEIGHT + 6 + 2 * tft_DefaultFont[1] + 2;
     const size_t total = strlen(text);
 
-    /* A real grid, not centred lines. The face is proportional, so groups of
-     * the same length are not the same width - centring each line would start
-     * every one at its own x and the block would read as ragged on both edges.
-     * Each column is as wide as the widest group in this value, and every
-     * group is drawn from its column's own left edge. */
+    /* A grid, not centred lines: the face is proportional, so each column is as
+     * wide as its widest group and every group starts at its column's left
+     * edge. */
     int column = 0;
     for (size_t i = 0; i < total; i += GROUP_LEN) {
         const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
@@ -1475,13 +1295,9 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     }
     const int block_width = QR_ADDRESS_GROUPS * column + (QR_ADDRESS_GROUPS - 1) * GROUP_GAP;
 
-    /* Checked before a single pixel is drawn, and the whole reason this
-     * returns a bool. A value that does not fit here must send the caller
-     * somewhere it does fit, not be drawn as far as the margin reaches: an
-     * address cut off at the sixth line looks exactly like an address that
-     * ended there, and the reader has no way to tell. A taproot address is
-     * the case that does not fit - 62 characters against the 48 two columns
-     * of four hold in this margin. */
+    /* Checked before anything is drawn, and why this returns a bool: an address
+     * cut off at the margin looks like one that ended there. A taproot address
+     * (62 characters) does not fit the 48 two columns hold. */
     const int step = tft_DefaultFont[1] + 2;
     const size_t lines = (total + QR_ADDRESS_GROUPS * GROUP_LEN - 1) / (QR_ADDRESS_GROUPS * GROUP_LEN);
     if (block_width > g.title_width || text_top + (int)lines * step > SEEDTOOL_DISPLAY_HEIGHT) {
@@ -1504,10 +1320,7 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     for (size_t i = 0; i < total; i += GROUP_LEN) {
         const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
         const size_t slot = (i / GROUP_LEN) % QR_ADDRESS_GROUPS;
-        /* A last line that does not fill its columns is centred on the block
-         * instead of left in column one: the grid is there to be read down,
-         * and a lone group hanging off the left edge reads as a column that
-         * lost its partner rather than as the end of the value. */
+        /* A last line that does not fill its columns is centred on the block. */
         const bool last_line = i + GROUP_LEN >= total && slot == 0;
         int x;
         if (last_line) {
@@ -1540,33 +1353,31 @@ size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
     return chars;
 }
 
-bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
+/* Encodes `data` in byte mode at the smallest version that holds it: that is
+ * what "compact" means in SeedSigner's convention. `modules` must hold
+ * qrcode_getBufferSize(QR_VERSION), which bounds every smaller version. */
+static bool encode_bytes(QRCode* qr, uint8_t* modules, const uint8_t* data, const size_t len)
 {
     if (len > UINT16_MAX) {
         return false;
     }
-    /* Unlike the xpub/address QR above, a byte-mode payload (Compact SeedQR's
-     * raw entropy) is drawn at the smallest version that holds it rather than
-     * always QR_VERSION: that is the entire point of "compact" in the
-     * SeedSigner/Krux convention this follows, and a fixed large version would
-     * needlessly pad it with meaningless filler modules. `modules` stays sized
-     * for QR_VERSION since qrcode_getBufferSize grows monotonically with
-     * version, so it is a safe upper bound for the smaller version drawn here. */
     const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
+    /* qrcode_initBytes only reads through `data`; the cast does not let it
+     * write through it. */
+    if (!version || qrcode_initBytes(qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
+        /* `data` is seed entropy, and a failed encode may already have written
+         * some of it into `modules`. */
+        memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
         return false;
     }
+    return true;
+}
+
+bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
+{
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    /* qrcode_initBytes only reads through `data` into its own codeword
-     * buffer; this cast does not let it write through it. */
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        /* `data` here is raw seed entropy; a failed encode may already have
-         * written some of it into `modules` before the encoder gave up. */
-        memset(modules, 0, sizeof(modules));
-        return false;
-    }
-    return draw_qr(&qr, modules, title, selected);
+    return encode_bytes(&qr, modules, data, len) && draw_qr(&qr, modules, title, selected);
 }
 
 /* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own
@@ -1588,66 +1399,32 @@ size_t seedtool_render_qr_bytes_regions(const size_t len)
     return columns * columns;
 }
 
-/* The region map: the exact same full-size code seedtool_render_qr_bytes
- * draws (same QR_LEFT/scale/extent/title placement, so it looks like the
- * same screen, not a different one) with a dim line at every region boundary
- * and each region's own "A1" etc label stamped inside its own block - the
- * same qr_region_size/columns split, and the same dim-line-over-modules
- * convention draw_qr_region already uses on its own zoomed tile, just spaced
- * a region apart instead of a module apart. So the legend can never fall out
- * of step with what a zoomed tile actually shows, and the code is never
- * shrunk to make room for it. */
+/* The region map: seedtool_render_qr_bytes's code, same geometry, with a dim
+ * line at each region boundary and each region's label inside it, from the same
+ * split draw_qr_region uses, so the map always matches the tiles. */
 bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
 {
-    if (len > UINT16_MAX) {
-        return false;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
-        return false;
-    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        memset(modules, 0, sizeof(modules));
+    if (!encode_bytes(&qr, modules, data, len)) {
         return false;
     }
     const size_t region_size = qr_region_size(qr.size);
     const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    const qr_geometry_t g = qr_geometry(qr.size + 2);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
-    /* The code's own top-left corner, one quiet-zone module in from the white
-     * fill's corner: where the boundary grid and the region labels are drawn
-     * relative to, since the quiet zone itself has no region to divide. */
-    const int code_left = g.code_x + scale;
-    const int code_top = top + scale;
-    const int code_extent = (int)qr.size * scale;
-    const int block = (int)region_size * scale;
-    seedtool_render_clear();
-    fill_rect(g.code_x, top, extent, extent, qr_light());
-    for (uint8_t y = 0; y < qr.size; ++y) {
-        for (uint8_t x = 0; x < qr.size; ++x) {
-            if (qrcode_getModule(&qr, x, y)) {
-                fill_rect(g.code_x + (x + 1) * scale, top + (y + 1) * scale, scale, scale, COLOR_BLACK);
-            }
-        }
-    }
+    const qr_geometry_t g = draw_modules(&qr);
+    /* The code's top-left corner, one quiet-zone module in, which the grid and
+     * labels are placed from. */
+    const int code_left = g.code_x + g.scale;
+    const int code_top = g.top + g.scale;
+    const int code_extent = (int)qr.size * g.scale;
+    const int block = (int)region_size * g.scale;
     for (size_t i = 0; i <= columns; ++i) {
         const int pos = (int)i * block;
         fill_rect(code_left, code_top + pos, code_extent, 1, COLOR_DIM);
         fill_rect(code_left + pos, code_top, 1, code_extent, COLOR_DIM);
     }
-    /* A dim line over a QR module has one of two known backgrounds, black or
-     * white, so it always reads against at least one of them. A label is
-     * text, needed against both at once, and COLOR_DIM is too close to black
-     * to read on a black module - so each one gets a small solid plate under
-     * it first, sized to the block with a 1px gap from its boundary lines,
-     * and black-on-white text on top of that instead of straight onto
-     * whatever the code drew there. */
+    /* A label must read over black and white modules alike, so each gets a
+     * small white plate with black text. */
     for (size_t row = 0; row < columns; ++row) {
         for (size_t column = 0; column < columns; ++column) {
             char label[4];
@@ -1659,46 +1436,39 @@ bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const 
             draw_centered_in(tft_DefaultFont, label, label_x, block, label_y, COLOR_BLACK);
         }
     }
-    draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
     return true;
 }
 
-/* Same layout draw_qr uses (a square bound by the display's height, with a
- * label in the margin to its right), just at the block's own scale instead of
- * the whole code's: with only 5-7 cells to fill instead of 21-25, each cell
- * comes out much larger, which is the entire point of "zoomed". No quiet zone
- * is drawn around it, unlike draw_qr's full code: a block is meant to be
- * hand-copied, never scanned on its own. */
+/* draw_qr's layout at a region's own scale: 5-7 cells rather than 21-25, so
+ * each is much larger. No quiet zone: a region is copied by hand, never
+ * scanned. */
 static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, const size_t region_size,
     const size_t columns, const size_t region_index, const size_t selected)
 {
     const size_t row = region_index / columns;
     const size_t column = region_index % columns;
     const qr_geometry_t g = qr_geometry((int)region_size);
-    const int scale = g.scale;
-    const int extent = g.extent;
-    const int top = g.top;
-    const int title_x = g.title_x;
-    const int title_width = g.title_width;
     seedtool_render_clear();
     for (size_t y = 0; y < region_size; ++y) {
         for (size_t x = 0; x < region_size; ++x) {
             const size_t qx = column * region_size + x;
             const size_t qy = row * region_size + y;
             const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
-            fill_rect(g.code_x + (int)x * scale, top + (int)y * scale, scale, scale, set ? COLOR_BLACK : qr_light());
+            fill_rect(g.code_x + (int)x * g.scale, g.top + (int)y * g.scale, g.scale, g.scale,
+                set ? COLOR_BLACK : qr_light());
         }
     }
     for (size_t i = 0; i <= region_size; ++i) {
-        fill_rect(g.code_x, top + (int)i * scale, extent, 1, COLOR_DIM);
-        fill_rect(g.code_x + (int)i * scale, top, 1, extent, COLOR_DIM);
+        fill_rect(g.code_x, g.top + (int)i * g.scale, g.extent, 1, COLOR_DIM);
+        fill_rect(g.code_x + (int)i * g.scale, g.top, 1, g.extent, COLOR_DIM);
     }
-    const int label_y = draw_centered_box(tft_DefaultFont, title, title_x, title_width, QR_TITLE_Y);
+    const int label_y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
     char label[24];
     (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
-    draw_centered_box(tft_DefaultFont, label, title_x, title_width, label_y + 4);
+    draw_centered_box(tft_DefaultFont, label, g.title_x, g.title_width, label_y + 4);
     draw_qr_chrome(g.code_x, selected);
     memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
 }
@@ -1706,20 +1476,9 @@ static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, cons
 bool seedtool_render_qr_bytes_region(
     const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
 {
-    if (len > UINT16_MAX) {
-        return false;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
-        return false;
-    }
     uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
     QRCode qr;
-    if (qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        /* `data` here is raw seed entropy (Compact SeedQR's only caller); a
-         * failed encode may already have written some of it into `modules`
-         * before the encoder gave up. */
-        memset(modules, 0, sizeof(modules));
+    if (!encode_bytes(&qr, modules, data, len)) {
         return false;
     }
     const size_t region_size = qr_region_size(qr.size);

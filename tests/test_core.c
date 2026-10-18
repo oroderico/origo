@@ -12,18 +12,10 @@
 #include <string.h>
 #include <wally_core.h>
 
-/* Eleven flips name one word, most significant bit first, and the words they
- * name are handed to seedtool_complete_checksum - the same call the typed-word
- * flow makes. The screen that shows the reader "these eleven flips are word
- * 0819" is only telling the truth if that index survives into the finished
- * mnemonic unchanged, so that is what is checked, for every one of the 2048
- * words rather than for a chosen few.
- *
- * The all-zero case is pinned to the published vectors the rest of this file
- * already uses: eleven words of index 0 plus seven zero bits are 128 zero
- * entropy bits, and twenty-three plus three zero bits are 256 - `mnemonic` and
- * `mnemonic24`. That is the one case where the whole chain, checksum included,
- * is fixed by something outside this project. */
+/* Eleven flips name one word, most significant bit first, and that index must
+ * survive seedtool_complete_checksum into the finished mnemonic, for all 2048
+ * words. The all-zero case is pinned to the published vectors: eleven (or
+ * twenty-three) index-0 words plus zero bits are `mnemonic` (or `mnemonic24`). */
 static bool coin_words_build_the_entropy(const size_t words, const uint16_t index, char* out, const size_t out_len)
 {
     const size_t word_count = words == 12 ? 11 : 23;
@@ -80,20 +72,13 @@ static bool coin_word_encoding_is_sound(void)
         }
     }
 
-    /* An eleven-bit index is the whole wordlist and nothing past it: the top
-     * index must be reachable, and the encoding must not overflow into a
-     * twelfth bit. */
+    /* The top index must be reachable without overflowing into a twelfth bit. */
     return SEEDTOOL_WORDLIST_LEN == (1u << 11);
 }
 
 /* `count` words, all "abandon" when `spread` is zero and a spread of the
- * wordlist otherwise.
- *
- * The all-"abandon" prefix is the one the published vectors use, but every one
- * of its word indices is zero - so every bit it contributes to the entropy is
- * zero too, and a prefix packed at the wrong bit offset would still hash to the
- * right thing. It cannot catch a packing bug on its own, which is why the
- * checks below run over a spread prefix as well. */
+ * wordlist otherwise. An all-zero prefix cannot catch a packing offset, hence
+ * the spread. */
 static bool build_prefix(const size_t count, const unsigned spread, char* out, const size_t out_len)
 {
     out[0] = '\0';
@@ -114,18 +99,10 @@ static bool build_prefix(const size_t count, const unsigned spread, char* out, c
     return true;
 }
 
-/* The last word of a mnemonic carries the checksum, so most of the wordlist
- * cannot end it. The entry keyboard narrows to the ones that can, which is only
- * safe if the narrowing is *exact*: a word left out must genuinely fail
- * seedtool_validate_mnemonic, and a word left in must genuinely pass. Both
- * directions are checked against every one of the 2048 words, for a 12-word
- * prefix and a 24-word one, because a filter that is merely nearly right would
- * turn a restorable seed into an unrestorable one - a far worse failure than
- * the mistyped checksum it exists to prevent.
- *
- * The counts are arithmetic, not observation: 12 words leave 7 free entropy
- * bits before 4 checksum bits, so 2^7 = 128 words can end them; 24 words leave
- * 3 before 8, so only 8 can. */
+/* The final-word filter must be exact both ways, for all 2048 words and both
+ * lengths: a word left out must fail validation and a word left in must pass,
+ * or a restorable seed becomes unrestorable. 12 words leave 2^7 = 128
+ * candidates, 24 leave 2^3 = 8. */
 static bool final_word_filter_is_exact(void)
 {
     static const struct {
@@ -151,13 +128,9 @@ static bool final_word_filter_is_exact(void)
                 return false;
             }
         }
-        /* Every word the set holds must stay reachable letter by letter, and
-         * no word outside it may be selectable at the end. Those are two
-         * different claims: a word outside the set can share a prefix with one
-         * inside it - "above" is not a candidate but starts like "about",
-         * which is - so reachability of a prefix says nothing on its own. What
-         * must not happen is arriving at the whole word and being able to pick
-         * it. */
+        /* Every word in the set stays reachable letter by letter, and no word
+         * outside it can be picked at the end, even where it shares a prefix
+         * with one inside ("above" and "about"). */
         for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
             const char* const word = seedtool_word(index);
             const size_t length = strlen(word);
@@ -173,10 +146,7 @@ static bool final_word_filter_is_exact(void)
                 }
             }
             /* Whether the word itself can be picked, not whether anything
-             * matches its letters: "act" is not a candidate but is a prefix of
-             * "action", which may be, so a match count says nothing here. What
-             * entry offers is the candidate list, so the question is whether
-             * this index is in it. */
+             * matches its letters. */
             const size_t matches
                 = seedtool_words_with_prefix_in(&set, word, length, candidates, SEEDTOOL_MAX_WORD_CHOICES);
             bool selectable = false;
@@ -211,9 +181,8 @@ static bool final_word_filter_is_exact(void)
         && seedtool_final_word_candidates("abandon", &set) != SEEDTOOL_OK;
 }
 
-/* The word-entry keyboard is only usable if every reachable letter really does
- * lead to a word, and if narrowing always terminates in a listable candidate
- * set. Both are checked exhaustively rather than by example. */
+/* Every reachable letter leads to a word, and narrowing always ends in a
+ * listable candidate set. Checked exhaustively. */
 static bool wordlist_completion_is_sound(void)
 {
     uint16_t candidates[SEEDTOOL_MAX_WORD_CHOICES];
@@ -247,9 +216,8 @@ static bool wordlist_completion_is_sound(void)
     return true;
 }
 
-/* Type `digits` one key at a time and require that the keyboard offered every
- * digit along the way, that accept stayed off until the number was whole, and
- * that the number then resolves to `expected`. */
+/* Types `digits` one key at a time: every digit must be offered, accept must
+ * stay off until the number is whole, and it must resolve to `expected`. */
 static bool word_number_types_out(const char* digits, const size_t digits_len, const unsigned expected)
 {
     bool enabled[SEEDTOOL_DIGITS];
@@ -259,18 +227,14 @@ static bool word_number_types_out(const char* digits, const size_t digits_len, c
         }
         if (seedtool_word_number_in(NULL, digits, typed) != 0 && typed + 1 < digits_len
             && seedtool_word_number_in(NULL, digits, typed + 1) == 0) {
-            /* A prefix that is itself a word number may only be extended into
-             * another one, or accept would be offered for a number the user is
-             * still in the middle of typing. */
+            /* A prefix that is a word number may only extend into another one. */
             return false;
         }
     }
     return seedtool_word_number_in(NULL, digits, digits_len) == expected && seedtool_word(expected - 1) != NULL;
 }
 
-/* Numbers are the whole input for a backup that records them, so every one of
- * the 2048 has to be typeable, both plainly and padded to four digits the way a
- * printed wordlist prints it. */
+/* All 2048 word numbers are typeable, plainly and padded to four digits. */
 static bool word_numbers_are_reachable(void)
 {
     for (unsigned number = 1; number <= SEEDTOOL_WORDLIST_LEN; ++number) {
@@ -315,12 +279,8 @@ static bool word_numbers_round_trip_is_sound(void)
     return seedtool_mnemonic_word_numbers("abandon notaword", numbers, 2, &count) != SEEDTOOL_OK;
 }
 
-/* seedtool_generate must actually succeed at every source/word-count pairing
- * this app offers, run at the *real* seedtool_required_events count - not a
- * smaller stand-in. This is what caught SEEDTOOL_MAX_TRANSCRIPT_LEN being too
- * small for a full 256-flip Coin/24-word transcript: partial_transcripts_are_
- * prefixes above only ever exercises up to 40 events, so it structurally
- * could not have caught a bug that only bites near the true maximum. */
+/* seedtool_generate succeeds for every source and word count at the real
+ * required event count, which is where a too-small buffer would show. */
 static bool full_entropy_events_generate(void)
 {
     static const seedtool_source_t sources[]
@@ -403,19 +363,10 @@ static bool invalid_runs_do_not_generate(void)
     return true;
 }
 
-/* Checked against BIP380's own published example (bip-0380.mediawiki,
- * "Checksum" section: raw(deadbeef) -> raw(deadbeef)#89f8spxm) rather than a
- * vector this project invented for itself, plus a real wpkh() descriptor
- * built from this file's own published BIP84 xpub vector, its checksum
- * cross-checked independently against a from-scratch Python transcription of
- * the same bip-0380.mediawiki pseudocode before this C version was written -
- * two independent implementations of the spec agreeing is the actual
- * confidence here, not either one alone. The descriptor carries BIP389's
- * multipath "<0;1>" chain step, which is exactly what show_descriptor writes:
- * "<", ";" and ">" are all in BIP380's INPUT_CHARSET, so this also pins that
- * the checksum covers a multipath descriptor rather than rejecting one. Also
- * checks EINVAL on a character outside the checksum's charset and ENOSPACE on
- * a buffer too small for the result. */
+/* BIP380's published example (raw(deadbeef)#89f8spxm) and a wpkh() descriptor
+ * over the BIP84 vector with BIP389's "<0;1>" step, cross-checked against an
+ * independent Python transcription of the spec. Also EINVAL on a character
+ * outside the charset and ENOSPACE on a short buffer. */
 static bool descriptor_checksum_matches_bip380_vector(void)
 {
     char out[256];
@@ -442,25 +393,12 @@ static bool descriptor_checksum_matches_bip380_vector(void)
     return seedtool_descriptor_checksum("raw(deadbeef)", tiny, sizeof(tiny)) == SEEDTOOL_ENOSPACE;
 }
 
-/* collect_entropy() gathers a run into values[256], entropy_quality() copies
- * it into faces[256], and seedtool_generate() renders it into the
- * SEEDTOOL_MAX_TRANSCRIPT_LEN-wide transcript field of seedtool_generated_t.
- * None of the three is bounds-checked - the collection loop is simply
- * `while (i < required)` - so they stay in range only because
- * seedtool_required_events happens never to hand out more than they hold.
- * The margin is not comfortable: coin at 24 words fills the transcript to the
- * last byte. Nothing enforced that before this check, so a future count could
- * cross the line silently and write past a stack array on a device with a
- * live seed in memory.
- *
- * Both ceilings are exercised, because they bind different sources: the event
- * count limits coin, while the rendered length limits D20, which spends three
- * characters on a roll that costs the array one byte. */
-/* The compile-time half of this lives in seedtool_core.h, beside
- * SEEDTOOL_MAX_EVENTS itself, so it binds the firmware rather than only this
- * test binary. What is left for runtime is the half a C compiler cannot see:
- * seedtool_required_events' returns are function results, not constant
- * expressions, so every source and word count has to be asked. */
+/* Every buffer a run passes through (values[], faces[] and the transcript) is
+ * sized by SEEDTOOL_MAX_EVENTS or SEEDTOOL_MAX_TRANSCRIPT_LEN and not checked
+ * again, so every source's count must fit both: coin binds the event count, D20
+ * the transcript length. */
+/* The compile-time half is in seedtool_core.h; the counts are function results,
+ * so this asks every source and word count. */
 static bool required_events_fit_the_collection_buffers(void)
 {
     const seedtool_source_t sources[]
@@ -475,9 +413,8 @@ static bool required_events_fit_the_collection_buffers(void)
             if (required > SEEDTOOL_MAX_EVENTS) {
                 return false;
             }
-            /* The widest transcript the source can print at that length: the
-             * highest face of a die, and distinct cards for the deck that
-             * rejects a repeat. */
+            /* The widest transcript a source can print: its highest face, or
+             * distinct cards. */
             uint8_t values[SEEDTOOL_MAX_EVENTS];
             for (size_t i = 0; i < required; ++i) {
                 values[i] = sources[s] == SEEDTOOL_D6 ? 6
@@ -494,11 +431,8 @@ static bool required_events_fit_the_collection_buffers(void)
     return true;
 }
 
-/* Known-good vectors straight from Krux's own base32 test suite
- * (tests/test_bbqr.py, B32_TEST_BYTES/B32_ENCODED_STRINGS, unpadded form):
- * proof this encoder produces byte-for-byte the same output a BBQr-reading
- * wallet already interoperates with, not just an internally self-consistent
- * one. */
+/* Vectors from Krux's base32 tests (tests/test_bbqr.py, unpadded), so the
+ * output matches what BBQr readers already accept. */
 static bool bbqr_base32_is_sound(void)
 {
     static const struct {
