@@ -754,6 +754,15 @@ const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES] = {
     ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
 };
 
+/* The letter pages in alphabetical rows; punctuation has no such order, so
+ * the digit and symbol pages are the same. */
+const char* const seedtool_passphrase_layouts_abc[SEEDTOOL_PASSPHRASE_PAGES] = {
+    "abcdefghij\nklmnopqrst\nuvwxyz \b\t\r",
+    "ABCDEFGHIJ\nKLMNOPQRST\nUVWXYZ \b\t\r",
+    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
+    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
+};
+
 size_t seedtool_layout_keys(const char* layout)
 {
     size_t count = 0;

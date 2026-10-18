@@ -79,19 +79,16 @@ static bool layout_is_well_formed(const char* layout)
     return row && seedtool_layout_center(layout) < seedtool_layout_keys(layout);
 }
 
-static bool layouts_are_complete(void)
+/* Every letter exactly once, and exactly one backspace: a row with a letter
+ * dropped would make some BIP39 words impossible to type. */
+static bool word_layout_is_complete(const char* const layout)
 {
     bool seen[128] = { false };
-
-    if (!layout_is_well_formed(SEEDTOOL_WORD_LAYOUT) || !layout_is_well_formed(SEEDTOOL_WORD_NUMBER_LAYOUT)
-        || seedtool_layout_keys(SEEDTOOL_WORD_LAYOUT) != SEEDTOOL_LETTERS + 1
-        || seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT) != SEEDTOOL_DIGITS + 2) {
+    if (!layout_is_well_formed(layout) || seedtool_layout_keys(layout) != SEEDTOOL_LETTERS + 1) {
         return false;
     }
-    /* Every letter exactly once, and exactly one backspace: a QWERTY row with a
-     * letter dropped would make some BIP39 words impossible to type. */
-    for (size_t i = 0; i < seedtool_layout_keys(SEEDTOOL_WORD_LAYOUT); ++i) {
-        const unsigned char key = (unsigned char)seedtool_layout_key(SEEDTOOL_WORD_LAYOUT, i);
+    for (size_t i = 0; i < seedtool_layout_keys(layout); ++i) {
+        const unsigned char key = (unsigned char)seedtool_layout_key(layout, i);
         if (key != SEEDTOOL_KEY_BACKSPACE && (key < 'a' || key > 'z')) {
             return false;
         }
@@ -104,6 +101,39 @@ static bool layouts_are_complete(void)
         if (!seen[letter]) {
             return false;
         }
+    }
+    return true;
+}
+
+/* One arrangement's pages reach all 95 printable characters, so a passphrase
+ * can always be retyped, under either setting. */
+static bool passphrase_pages_are_complete(const char* const* const pages)
+{
+    bool seen[128] = { false };
+    for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
+        if (!layout_is_well_formed(pages[page])) {
+            return false;
+        }
+        for (size_t i = 0; i < seedtool_layout_keys(pages[page]); ++i) {
+            seen[(unsigned char)seedtool_layout_key(pages[page], i)] = true;
+        }
+    }
+    for (unsigned char character = 0x20; character <= 0x7e; ++character) {
+        if (!seen[character]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool layouts_are_complete(void)
+{
+    bool seen[128] = { false };
+
+    if (!word_layout_is_complete(SEEDTOOL_WORD_LAYOUT) || !word_layout_is_complete(SEEDTOOL_WORD_LAYOUT_ABC)
+        || !layout_is_well_formed(SEEDTOOL_WORD_NUMBER_LAYOUT)
+        || seedtool_layout_keys(SEEDTOOL_WORD_NUMBER_LAYOUT) != SEEDTOOL_DIGITS + 2) {
+        return false;
     }
     /* The number keyboard's characters, not just its count: enter_word_number
      * indexes reachable[key - '0'], so a non-digit would read past the array. */
@@ -123,24 +153,8 @@ static bool layouts_are_complete(void)
             return false;
         }
     }
-    /* The passphrase pages together reach all 95 printable characters, so a
-     * passphrase can always be retyped. */
-    memset(seen, 0, sizeof(seen));
-    for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
-        const char* const layout = seedtool_passphrase_layouts[page];
-        if (!layout_is_well_formed(layout)) {
-            return false;
-        }
-        for (size_t i = 0; i < seedtool_layout_keys(layout); ++i) {
-            seen[(unsigned char)seedtool_layout_key(layout, i)] = true;
-        }
-    }
-    for (unsigned char character = 0x20; character <= 0x7e; ++character) {
-        if (!seen[character]) {
-            return false;
-        }
-    }
-    return true;
+    return passphrase_pages_are_complete(seedtool_passphrase_layouts)
+        && passphrase_pages_are_complete(seedtool_passphrase_layouts_abc);
 }
 
 /* The selection is always on screen and the end of a list looks like the end,
@@ -1137,9 +1151,13 @@ static bool remaining_screens_render(void)
         "Word 1/12", "aba", SEEDTOOL_WORD_LAYOUT, letters, seedtool_layout_center(SEEDTOOL_WORD_LAYOUT), 1, 12);
     seedtool_render_keyboard("Word 12/12", "4", SEEDTOOL_WORD_NUMBER_LAYOUT, NULL,
         seedtool_layout_center(SEEDTOOL_WORD_NUMBER_LAYOUT), 12, 12);
+    seedtool_render_keyboard("Word 1/12", "aba", SEEDTOOL_WORD_LAYOUT_ABC, letters,
+        seedtool_layout_center(SEEDTOOL_WORD_LAYOUT_ABC), 1, 12);
     for (size_t page = 0; page < SEEDTOOL_PASSPHRASE_PAGES; ++page) {
         seedtool_render_keyboard("BIP39 passphrase", "", seedtool_passphrase_layouts[page], NULL,
             seedtool_layout_center(seedtool_passphrase_layouts[page]), 0, 0);
+        seedtool_render_keyboard("BIP39 passphrase", "", seedtool_passphrase_layouts_abc[page], NULL,
+            seedtool_layout_center(seedtool_passphrase_layouts_abc[page]), 0, 0);
     }
     return true;
 }
