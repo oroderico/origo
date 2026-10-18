@@ -13,14 +13,21 @@
 
 #define HARDENED BIP32_INITIAL_HARDENED_CHILD
 
-/* SLIP-132 zpub version bytes. libwally has no notion of SLIP-132: it only
- * serialises the four plain BIP32 versions, so a zpub is built by serialising
- * the standard way and then patching these four bytes into the output. */
+/* SLIP-132 zpub version bytes, patched over a plain BIP32 serialisation
+ * because libwally knows only the BIP32 versions. */
 static const uint8_t ZPUB_VERSION[4] = { 0x04, 0xb2, 0x47, 0x46 };
 
 static bool valid_words(const size_t words)
 {
     return words == 12 || words == 24;
+}
+
+/* Bytes of BIP39 entropy behind a 12- or 24-word mnemonic. */
+static size_t entropy_len(const size_t words) { return words == 12 ? 16 : 32; }
+
+static bool valid_account(const seedtool_address_type_t type, const uint32_t account_index)
+{
+    return (type == SEEDTOOL_BIP84 || type == SEEDTOOL_BIP86) && account_index <= SEEDTOOL_MAX_ACCOUNT_INDEX;
 }
 
 void seedtool_zero(void* ptr, const size_t len)
@@ -37,36 +44,21 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
     }
     switch (source) {
     case SEEDTOOL_D6:
-        /* 50 and 99 sat right on the line - 50 rolls can carry at most
-         * 50*log2(6) = 129.2 bits against a 128-bit minimum, and 99 at most
-         * 255.9 against 256, which the estimator cannot even reach. Simulated
-         * over 20000 honest runs, 21.9% of 50-roll runs and 36.6% of 99-roll
-         * ones reported fewer bits than the seed needs. Most cleared the
-         * quality gate anyway on DICE_ENTROPY_TOLERANCE, so they generated
-         * normally, but a reader who has just been asked to trust a number
-         * should not be shown one that reads short one time in three. At 60
-         * and 120 that is 0.0% of 20000, and the counts stay round: 120 is
-         * twice 60, as 256 bits is twice 128. */
+        /* Margin over the 50/99-roll minimum so an honest run's estimate
+         * does not read short of 128/256 bits (see
+         * honest_runs_report_at_least_the_minimum). */
         return words == 12 ? 60 : 120;
     case SEEDTOOL_D20:
-        /* Padded well past the 128/256-bit theoretical minimum (30/60 rolls
-         * would only just clear it): the empirical Shannon estimate the
-         * quality gate grades against is a biased estimator (see
-         * seedtool_dice_entropy_bias_bits) with the least sampling margin of
-         * any source here, so D20 gets the largest cushion. */
+        /* Well past the 30/60-roll minimum: the biased estimator has the
+         * least sampling margin on D20. */
         return words == 12 ? 36 : 68;
     case SEEDTOOL_COIN:
         return words == 12 ? 128 : 256;
     case SEEDTOOL_CARDS:
         return words == 12 ? 25 : 0;
     case SEEDTOOL_CARDS_REPLACE:
-        /* Monte-Carlo checked (host/origo_simulator.c's
-         * dice_entropy_false_positive_rate_is_bounded). 48 was the smallest
-         * count that cleared the false-positive bound, but on the same
-         * 20000-run simulation that moved D6 above it still reported short
-         * of 256 bits on 2.0% of honest draws; 50 brings that to 0.01% for
-         * two more cards. Not offered for 12 words - SEEDTOOL_CARDS already
-         * covers that case, without needing replacement. */
+        /* Chosen by simulation, like D6 (see
+         * dice_entropy_false_positive_rate_is_bounded). 24 words only. */
         return words == 24 ? 50 : 0;
     default:
         return 0;
@@ -75,17 +67,10 @@ size_t seedtool_required_events(const seedtool_source_t source, const size_t wor
 
 size_t seedtool_min_entropy_bits(const size_t words) { return valid_words(words) ? (words == 12 ? 128 : 256) : 0; }
 
-/* The largest side count any recognised dice_source() can return
- * (SEEDTOOL_CARDS_REPLACE, a full 52-card draw with replacement) - the
- * fixed-size buffers below are sized off this one constant so they can
- * never fall out of sync with what dice_source() actually hands out. */
+/* Largest side count dice_source() returns; sizes the buffers below. */
 #define DICE_SOURCE_MAX_SIDES 52
 
-/* D6, D20, a coin flip, or a with-replacement card draw, each read as an
- * N-sided die: the same plug-in Shannon estimator and pattern check apply
- * unmodified to any of them. SEEDTOOL_CARDS (without replacement) is not a
- * die - its entropy is exact rather than estimated, see
- * seedtool_card_entropy_bits - and is deliberately not recognised here. */
+/* Every source that is an N-sided die. SEEDTOOL_CARDS is not one. */
 static bool dice_source(const seedtool_source_t source, size_t* sides)
 {
     if (source == SEEDTOOL_D6) {
@@ -155,20 +140,14 @@ double seedtool_dice_entropy_bias_bits(const seedtool_source_t source)
     return ((double)sides - 1.0) / (2.0 * log(2.0));
 }
 
-/* Below this many rolls, the derivative-entropy estimate below is too noisy to
- * judge: a handful of rolls can look "patterned" by chance alone. */
+/* Fewer rolls than this are too noisy to call patterned. */
 #define PATTERN_MIN_ROLLS 10
 /* How far derivative entropy must fall below its maximum, as a percentage of
  * that maximum, to call the run patterned. Krux's PATTERN_DETECT_TOLERANCE. */
 #define PATTERN_DETECT_TOLERANCE 30.0
 
-/* Shared by seedtool_dice_pattern_detected and seedtool_card_pattern_detected:
- * consecutive differences of a `sides`-valued 1-indexed sequence range over
- * -(sides-1)..(sides-1), and an operator lazily counting up (or down) through
- * the faces leaves a run of derivatives that all land on the same value or
- * two, which collapses this distribution's entropy far below its maximum.
- * `sides` must be at most DICE_SOURCE_MAX_SIDES (12-word cards call this
- * with rank alone, 13 sides, not the full 52-card value). */
+/* Entropy of consecutive differences, which collapses when someone counts
+ * through the faces instead of rolling. `sides` <= DICE_SOURCE_MAX_SIDES. */
 static bool derivative_pattern_detected(const uint8_t* values_1indexed, const size_t values_len, const size_t sides)
 {
     const size_t derivative_range = 2 * sides - 1;
@@ -207,12 +186,6 @@ seedtool_result_t seedtool_dice_pattern_detected(
     return SEEDTOOL_OK;
 }
 
-/* A card draw is without replacement, so unlike a die's distribution its
- * exact information content is known rather than estimated: there are
- * exactly 52!/(52-drawn_count)! equally likely ordered draws of that length,
- * so specifying which one occurred conveys log2 of that count, full stop -
- * no Miller-Madow correction, because there is nothing here being estimated
- * from a sample. */
 seedtool_result_t seedtool_card_entropy_bits(const size_t drawn_count, int* bits_out)
 {
     if (!bits_out || drawn_count > 52) {
@@ -226,12 +199,7 @@ seedtool_result_t seedtool_card_entropy_bits(const size_t drawn_count, int* bits
     return SEEDTOOL_OK;
 }
 
-/* Cards are not a die, so this does not go through dice_source/derivative_
- * pattern_detected's sides=52 - suit carries real information (it is part
- * of what the deterministic bits above count), but is not itself vulnerable
- * to the "counting through the faces" pattern this check exists to catch;
- * rank is. Ranks are re-indexed 1..13 for derivative_pattern_detected's
- * 1-indexed contract. */
+/* Rank alone (1..13): counting through a deck walks ranks, not suits. */
 seedtool_result_t seedtool_card_pattern_detected(
     const uint8_t* values, const size_t values_len, bool* detected_out)
 {
@@ -317,8 +285,7 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
             item[2] = '\0';
             break;
         case SEEDTOOL_CARDS_REPLACE:
-            /* Drawn with replacement: unlike SEEDTOOL_CARDS, a repeat is
-             * expected and valid, not a data-integrity error. */
+            /* With replacement, so repeats are valid. */
             if (values[i] >= 52) {
                 return SEEDTOOL_EINVAL;
             }
@@ -358,8 +325,7 @@ seedtool_result_t seedtool_generate(const seedtool_source_t source, const size_t
         return SEEDTOOL_ECRYPTO;
     }
     char* mnemonic = NULL;
-    const size_t entropy_len = words == 12 ? 16 : 32;
-    if (bip39_mnemonic_from_bytes(NULL, output->hash, entropy_len, &mnemonic) != WALLY_OK || !mnemonic) {
+    if (bip39_mnemonic_from_bytes(NULL, output->hash, entropy_len(words), &mnemonic) != WALLY_OK || !mnemonic) {
         seedtool_zero(output, sizeof(*output));
         return SEEDTOOL_ECRYPTO;
     }
@@ -392,53 +358,84 @@ static seedtool_result_t mnemonic_indices(const char* mnemonic, uint16_t* indice
             seedtool_zero(copy, sizeof(copy));
             return SEEDTOOL_EINVAL;
         }
-        size_t i = 0;
-        for (; i < 2048; ++i) {
-            if (strcmp(word, bip39_get_word_by_index(NULL, i)) == 0) {
-                indices[(*count)++] = (uint16_t)i;
-                break;
-            }
-        }
-        if (i == 2048) {
+        const int index = seedtool_word_index(word);
+        if (index < 0) {
             seedtool_zero(copy, sizeof(copy));
             return SEEDTOOL_EINVAL;
         }
+        indices[(*count)++] = (uint16_t)index;
     }
     seedtool_zero(copy, sizeof(copy));
     return SEEDTOOL_OK;
 }
 
+/* Writes the low `bits` of `value` into `bytes` at bit `pos`, most significant
+ * first, as BIP39 packs word indices. */
+static void put_bits(uint8_t* bytes, size_t pos, const size_t bits, const unsigned value)
+{
+    for (size_t b = 0; b < bits; ++b, ++pos) {
+        const uint8_t mask = (uint8_t)(1u << (7 - pos % 8));
+        if ((value >> (bits - 1 - b)) & 1u) {
+            bytes[pos / 8] |= mask;
+        } else {
+            bytes[pos / 8] &= (uint8_t)~mask;
+        }
+    }
+}
+
+/* The last word of a 12- or 24-word mnemonic: `free_bits` of entropy followed
+ * by `checksum_bits` of SHA256 over the whole entropy. */
+typedef struct {
+    size_t packed_bits;
+    size_t free_bits;
+    size_t checksum_bits;
+    size_t entropy_len;
+} prefix_t;
+
+/* Packs an 11- or 23-word prefix into the leading bits of `entropy`. */
+static seedtool_result_t pack_prefix(const char* prefix_mnemonic, uint8_t entropy[32], prefix_t* prefix)
+{
+    uint16_t indices[23];
+    size_t count = 0;
+    seedtool_result_t ret = mnemonic_indices(prefix_mnemonic, indices, 23, &count);
+    if (ret == SEEDTOOL_OK && count != 11 && count != 23) {
+        ret = SEEDTOOL_EINVAL;
+    }
+    if (ret == SEEDTOOL_OK) {
+        prefix->packed_bits = count * 11;
+        prefix->free_bits = count == 11 ? 7 : 3;
+        prefix->checksum_bits = 11 - prefix->free_bits;
+        prefix->entropy_len = entropy_len(count + 1);
+        memset(entropy, 0, 32);
+        for (size_t i = 0; i < count; ++i) {
+            put_bits(entropy, i * 11, 11, indices[i]);
+        }
+    }
+    seedtool_zero(indices, sizeof(indices));
+    return ret;
+}
+
 seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const uint8_t* coin_bits,
     const size_t coin_bits_len, char* output, const size_t output_len)
 {
-    uint16_t indices[23];
-    uint8_t entropy[32] = { 0 };
-    size_t count = 0;
-    seedtool_result_t ret = mnemonic_indices(prefix_mnemonic, indices, 23, &count);
-    const size_t required_bits = count == 11 ? 7 : count == 23 ? 3 : 0;
-    const size_t entropy_len = count == 11 ? 16 : count == 23 ? 32 : 0;
-    if (ret != SEEDTOOL_OK || !required_bits || !coin_bits || coin_bits_len != required_bits || !output) {
+    uint8_t entropy[32];
+    prefix_t prefix;
+    char* mnemonic = NULL;
+    unsigned tail = 0;
+    seedtool_result_t ret = pack_prefix(prefix_mnemonic, entropy, &prefix);
+    if (ret != SEEDTOOL_OK || !coin_bits || coin_bits_len != prefix.free_bits || !output) {
         ret = SEEDTOOL_EINVAL;
         goto done;
     }
-
-    size_t bitpos = 0;
-    for (size_t i = 0; i < count; ++i) {
-        for (int bit = 10; bit >= 0; --bit, ++bitpos) {
-            entropy[bitpos / 8] |= ((indices[i] >> bit) & 1u) << (7 - (bitpos % 8));
-        }
-    }
-    for (size_t i = 0; i < required_bits; ++i, ++bitpos) {
+    for (size_t i = 0; i < coin_bits_len; ++i) {
         if (coin_bits[i] > 1) {
             ret = SEEDTOOL_EINVAL;
             goto done;
         }
-        entropy[bitpos / 8] |= coin_bits[i] << (7 - (bitpos % 8));
+        tail = tail << 1 | coin_bits[i];
     }
-
-    char* mnemonic = NULL;
-    if (bitpos != entropy_len * 8 || bip39_mnemonic_from_bytes(NULL, entropy, entropy_len, &mnemonic) != WALLY_OK
-        || !mnemonic) {
+    put_bits(entropy, prefix.packed_bits, prefix.free_bits, tail);
+    if (bip39_mnemonic_from_bytes(NULL, entropy, prefix.entropy_len, &mnemonic) != WALLY_OK || !mnemonic) {
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
@@ -448,68 +445,36 @@ seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const 
         strcpy(output, mnemonic);
         ret = SEEDTOOL_OK;
     }
-    wally_free_string(mnemonic);
 done:
-    seedtool_zero(indices, sizeof(indices));
+    if (mnemonic) {
+        wally_free_string(mnemonic);
+    }
+    seedtool_zero(&tail, sizeof(tail));
     seedtool_zero(entropy, sizeof(entropy));
     return ret;
 }
 
 seedtool_result_t seedtool_final_word_candidates(const char* prefix_mnemonic, seedtool_wordset_t* allowed)
 {
-    uint16_t indices[23];
-    uint8_t entropy[32] = { 0 };
+    uint8_t entropy[32];
     uint8_t hash[SEEDTOOL_HASH_LEN];
-    size_t count = 0;
-    seedtool_result_t ret = mnemonic_indices(prefix_mnemonic, indices, 23, &count);
-    /* The same 11/23 split seedtool_complete_checksum works to, and for the
-     * same reason: those are the prefixes a 12- or 24-word mnemonic has. */
-    const size_t free_bits = count == 11 ? 7 : count == 23 ? 3 : 0;
-    const size_t checksum_bits = count == 11 ? 4 : count == 23 ? 8 : 0;
-    const size_t entropy_len = count == 11 ? 16 : count == 23 ? 32 : 0;
-    if (ret != SEEDTOOL_OK || !free_bits || !allowed) {
+    prefix_t prefix;
+    seedtool_result_t ret = pack_prefix(prefix_mnemonic, entropy, &prefix);
+    if (ret != SEEDTOOL_OK || !allowed) {
         ret = SEEDTOOL_EINVAL;
         goto done;
     }
-
-    size_t bitpos = 0;
-    for (size_t i = 0; i < count; ++i) {
-        for (int bit = 10; bit >= 0; --bit, ++bitpos) {
-            entropy[bitpos / 8] |= ((indices[i] >> bit) & 1u) << (7 - (bitpos % 8));
-        }
-    }
-    if (bitpos + free_bits != entropy_len * 8) {
-        ret = SEEDTOOL_ECRYPTO;
-        goto done;
-    }
-
     seedtool_wordset_clear(allowed);
-    for (unsigned tail = 0; tail < (1u << free_bits); ++tail) {
-        /* The free bits are rewritten in place each round rather than the
-         * whole prefix being repacked: they are the only part that varies. */
-        for (size_t b = 0; b < free_bits; ++b) {
-            const size_t p = bitpos + b;
-            const uint8_t mask = (uint8_t)(1u << (7 - (p % 8)));
-            if ((tail >> (free_bits - 1 - b)) & 1u) {
-                entropy[p / 8] |= mask;
-            } else {
-                entropy[p / 8] &= (uint8_t)~mask;
-            }
-        }
-        if (wally_sha256(entropy, entropy_len, hash, sizeof(hash)) != WALLY_OK) {
+    for (unsigned tail = 0; tail < (1u << prefix.free_bits); ++tail) {
+        put_bits(entropy, prefix.packed_bits, prefix.free_bits, tail);
+        if (wally_sha256(entropy, prefix.entropy_len, hash, sizeof(hash)) != WALLY_OK) {
             ret = SEEDTOOL_ECRYPTO;
             goto done;
         }
-        /* The last word is the free entropy bits with the checksum bits that
-         * BIP39 appends to them, in that order - so the word is decided, not
-         * searched for. Distinct tails differ in their high bits, so the
-         * candidates are distinct and there are exactly 1 << free_bits. */
-        const unsigned checksum = hash[0] >> (8 - checksum_bits);
-        seedtool_wordset_add(allowed, (tail << checksum_bits) | checksum);
+        const unsigned checksum = hash[0] >> (8 - prefix.checksum_bits);
+        seedtool_wordset_add(allowed, (tail << prefix.checksum_bits) | checksum);
     }
-    ret = SEEDTOOL_OK;
 done:
-    seedtool_zero(indices, sizeof(indices));
     seedtool_zero(entropy, sizeof(entropy));
     seedtool_zero(hash, sizeof(hash));
     return ret;
@@ -537,13 +502,7 @@ seedtool_result_t seedtool_mnemonic_word_numbers(
     if (ret != SEEDTOOL_OK) {
         return ret;
     }
-    /* A string of nothing but spaces is long enough to clear
-     * mnemonic_indices' length check and yields no strtok_r tokens, so it
-     * reports success with a count of zero. Callers step through the words
-     * with `% count`, which is a division by zero on that input. Every caller
-     * today passes a mnemonic that already validated, so this was never
-     * reachable - but "no words" is not a successful parse of a mnemonic
-     * under any reading, and the callers should not each have to know that. */
+    /* All spaces parses to zero words; callers divide by the count. */
     if (!*count_out) {
         return SEEDTOOL_EINVAL;
     }
@@ -566,7 +525,7 @@ seedtool_result_t seedtool_mnemonic_entropy(
     size_t written = 0;
     seedtool_result_t ret = SEEDTOOL_ECRYPTO;
     if (bip39_mnemonic_to_bytes(NULL, mnemonic, entropy, capacity, &written) == WALLY_OK
-        && written == (words == 12 ? 16u : 32u)) {
+        && written == entropy_len(words)) {
         *len_out = written;
         ret = SEEDTOOL_OK;
     }
@@ -618,27 +577,40 @@ seedtool_result_t seedtool_master_fingerprint(
     return ret;
 }
 
+/* The watch-only account node m/type'/0'/account'. */
+static seedtool_result_t account_from_mnemonic(const char* mnemonic, const char* passphrase,
+    const seedtool_address_type_t type, const uint32_t account_index, struct ext_key* account)
+{
+    uint8_t seed[64];
+    struct ext_key root;
+    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
+    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
+    if (ret == SEEDTOOL_OK
+        && bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, account)
+            != WALLY_OK) {
+        ret = SEEDTOOL_ECRYPTO;
+    }
+    seedtool_zero(seed, sizeof(seed));
+    seedtool_zero(&root, sizeof(root));
+    return ret;
+}
+
 seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase,
     const seedtool_address_type_t type, const uint32_t account_index, const seedtool_key_format_t format,
     char* output, const size_t output_len)
 {
-    if (!output || !output_len || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)
-        || account_index > SEEDTOOL_MAX_ACCOUNT_INDEX || (format != SEEDTOOL_XPUB && format != SEEDTOOL_ZPUB)
-        || (format == SEEDTOOL_ZPUB && type != SEEDTOOL_BIP84)) {
+    if (!output || !output_len || !valid_account(type, account_index)
+        || (format != SEEDTOOL_XPUB && format != SEEDTOOL_ZPUB) || (format == SEEDTOOL_ZPUB && type != SEEDTOOL_BIP84)) {
         return SEEDTOOL_EINVAL;
     }
-    uint8_t seed[64];
-    struct ext_key root, account;
+    struct ext_key account;
     unsigned char bytes[BIP32_SERIALIZED_LEN];
     char* base58 = NULL;
-    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
-    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
+    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, account_index, &account);
     if (ret != SEEDTOOL_OK) {
         goto done;
     }
-    if (bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &account)
-            != WALLY_OK
-        || bip32_key_serialize(&account, BIP32_FLAG_KEY_PUBLIC, bytes, sizeof(bytes)) != WALLY_OK) {
+    if (bip32_key_serialize(&account, BIP32_FLAG_KEY_PUBLIC, bytes, sizeof(bytes)) != WALLY_OK) {
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
@@ -653,14 +625,11 @@ seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passph
         ret = SEEDTOOL_ENOSPACE;
     } else {
         strcpy(output, base58);
-        ret = SEEDTOOL_OK;
     }
 done:
     if (base58) {
         wally_free_string(base58);
     }
-    seedtool_zero(seed, sizeof(seed));
-    seedtool_zero(&root, sizeof(root));
     seedtool_zero(&account, sizeof(account));
     seedtool_zero(bytes, sizeof(bytes));
     return ret;
@@ -711,29 +680,11 @@ done:
     return ret;
 }
 
-static seedtool_result_t account_from_mnemonic(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, const uint32_t account_index, struct ext_key* account)
-{
-    uint8_t seed[64];
-    struct ext_key root;
-    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
-    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
-    if (ret == SEEDTOOL_OK
-        && bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, account)
-            != WALLY_OK) {
-        ret = SEEDTOOL_ECRYPTO;
-    }
-    seedtool_zero(seed, sizeof(seed));
-    seedtool_zero(&root, sizeof(root));
-    return ret;
-}
-
 seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
     const seedtool_address_type_t type, const uint32_t account_index, const seedtool_chain_t chain,
     const uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN])
 {
-    if (!addresses || !count || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1
-        || account_index > SEEDTOOL_MAX_ACCOUNT_INDEX || (type != SEEDTOOL_BIP84 && type != SEEDTOOL_BIP86)
+    if (!addresses || !count || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1 || !valid_account(type, account_index)
         || (chain != SEEDTOOL_RECEIVE && chain != SEEDTOOL_CHANGE)) {
         return SEEDTOOL_EINVAL;
     }
@@ -742,15 +693,14 @@ seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* p
     for (uint32_t i = 0; ret == SEEDTOOL_OK && i < count; ++i) {
         ret = address_from_account(&account, type, chain, i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
     }
+    if (ret != SEEDTOOL_OK) {
+        seedtool_zero(addresses, count * SEEDTOOL_MAX_ADDRESS_LEN);
+    }
     seedtool_zero(&account, sizeof(account));
     return ret;
 }
 
-/* bip-0380.mediawiki's own reference charsets and generator constants,
- * transcribed verbatim - this is the entire spec, not an approximation of
- * it. INPUT_CHARSET is the checksum's structural alphabet (every character a
- * descriptor can legally contain); CHECKSUM_CHARSET is bech32's own 32-symbol
- * alphabet, reused here as BIP380 itself reuses it. */
+/* Charsets and generator transcribed verbatim from bip-0380.mediawiki. */
 static const char DESCRIPTOR_INPUT_CHARSET[]
     = "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
 static const char DESCRIPTOR_CHECKSUM_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -765,11 +715,7 @@ static int descriptor_charset_index(const char c)
     return -1;
 }
 
-/* One step of BIP380's polymod, over the same GF(2)-polynomial construction
- * bech32's own checksum uses (a different generator, but the identical
- * shape) - a 35-bit state clocked in 5 bits per symbol, folded through five
- * fixed 40-bit generator polynomials whenever the top 5 bits that fall off
- * are set. */
+/* One step of BIP380's polymod (bech32's construction, other generator). */
 static uint64_t descriptor_polymod_step(uint64_t chk, const uint32_t value)
 {
     static const uint64_t generator[5]
@@ -793,11 +739,8 @@ seedtool_result_t seedtool_descriptor_checksum(const char* descriptor, char* out
     if (len + 1 + 8 + 1 > output_len) {
         return SEEDTOOL_ENOSPACE;
     }
-    /* descsum_expand: every character contributes its low 5 bits as one
-     * symbol; its top bits (0-3, since the charset has under 128 entries)
-     * accumulate three at a time into a base-4 "class" symbol clocked in
-     * separately - BIP380's own way of folding a >32-symbol alphabet through
-     * a 5-bit-per-step polymod without a symbol ever exceeding 5 bits. */
+    /* BIP380's descsum_expand: low 5 bits per character, plus the high bits
+     * of each group of three folded into one extra symbol. */
     uint64_t chk = 1;
     unsigned cls = 0;
     unsigned clscount = 0;

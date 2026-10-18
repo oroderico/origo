@@ -64,4 +64,7 @@ size_t seedtool_next_digits_in(
 
 const char* seedtool_word(size_t index);
 
+/* Zero-based index of `word` in the wordlist, or -1 if it is not in it. */
+int seedtool_word_index(const char* word);
+
 #endif
