@@ -313,11 +313,12 @@ undoes the card before it.
 ### Going back
 
 Three gestures is all two buttons afford, and all three are spoken for, so going
-back cannot be a button: it is a place on the screen. Every screen has one, and
-it steps back exactly one stage rather than abandoning the flow. Menus carry a
-`Back` row; the word list carries `[delete]`; deleting past the start of a word
-returns to the previous word, and past the first word to the menu before it. The
-numeric carousel carries `[back]` one step below its lowest value, so a misread
+back cannot be a button: it is a place on the screen. Every screen with a stage
+above it carries a back arrow at the left of its title bar, and it steps back
+exactly one stage rather than abandoning the flow. On the word keyboard,
+backspace deletes a letter; deleting past the start of a word returns to the
+previous word, and past the first word to the menu before it. The numeric
+carousel carries `[back]` one step below its lowest value, so a misread
 roll 29 of 60 is corrected by stepping back to it rather than by waiting out the
 session timeout and starting the transcript again. Coin flips are the one
 exception: both a value and its confirmation used to cost two of the three
@@ -330,7 +331,7 @@ The main menu's `Settings` entry carries `About` (the safety disclaimer),
 `Flip Orientation`, which toggles the panel 180 degrees in place, and
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted. The display settings are session-only - like every other
-piece of UI state, they reset to their defaults (unflipped, full brightness)
+piece of UI state, they reset to their defaults (unflipped, brightness 3 of 5)
 on the next boot, since Origo has nothing to save them to.
 
 ### Lists and scrolling
@@ -347,13 +348,10 @@ how much is below them; the thumb says how much and where. The end of a list is
 never padded with blank rows. Only labels are listed. Values meant to be transcribed are paged
 instead, split by what fits the display.
 
-The last row of every list with somewhere to return to is the way out of it —
-`Back`, `Erase and restart`, `[delete]` — and a rule is drawn above it so it is not
-read as one more choice. That row is always last, in every such list, so
-leaving a screen is always in the same place. The one list with nowhere to
-return to is the main menu itself: there is no `Back` row there, and the
-session-timeout wipe (`BOTH extend   Up/Down erase`) is the only way out of it
-short of the board's own physical reset.
+The way out of a list is the arrow in its title bar, in the same place on every
+screen. Two lists have none: the main menu, which has nothing above it, and the
+wallet, whose only exit is its `Erase and restart` row, kept a row the reader
+travels to because leaving erases the session.
 
 ## Entering words and passphrases
 
@@ -596,23 +594,15 @@ sudo apt install build-essential cmake pkg-config libsdl2-dev
 
 Use `Left` or `A` for the left TTGO button and `Right` or `D` for the right one.
 Select with `Enter` or `Space`, or by holding one arrow and pressing the other
-as you would on the device. `Q` or `Escape` closes the simulator. Run the
-non-graphical compiled-core check with `./tools/run-simulator.sh --self-test`;
-it verifies the published BIP84/BIP86 address and account xpub vectors, the
-published SLIP-132 zpub vector for the same BIP84 account and that BIP86
-rejects a zpub request outright, that every prefix of every BIP39 word and all
-2048 word numbers are reachable through their keyboards, that every one of
-those 2048 words round-trips back to the same one-based number, that paged text
-reassembles byte for byte, that a scrolling list always keeps the selection on
-screen and never pads its end with blank rows, at every list length up to
-well past the longest one the firmware builds, that the rearranged keyboards
-still hold every letter and every printable character, that an account key
-with its origin still fits a single QR code, that every one of the 2048
-Stackbit 1248 punch grids lights exactly the cells its digits' bits call for
-in both the simple and the physical layout, and that the Compact SeedQR
-payload for the published 12- and 24-word zero-entropy vectors is exactly
-their raw entropy, drawn at QR version 1 and 2 respectively rather than the
-larger fixed version the account-key and address QR codes use.
+as you would on the device. `Q` or `Escape` closes the simulator.
+
+The tests need no SDL: `cmake -S host -B build-host && cmake --build build-host
+&& ctest --test-dir build-host`. `tests/test_core.c` checks the published BIP39,
+BIP84, BIP86, SLIP-132 and BIP380 vectors and exhaustive wordlist properties;
+`tests/test_render.c` checks that what the screens draw is the value held (paged
+text, grouped addresses, Stackbit grids, Compact SeedQR payloads) and that the
+keyboards reach every character; `tests/test_entropy_stats.c` checks the
+entropy quality signal by simulation.
 
 The simulator is for development with published test vectors. Do not enter a
 real mnemonic, passphrase or entropy transcript on a network-connected PC.
@@ -748,10 +738,9 @@ what is in RAM is what the screen in front of you needs and not what three
 screens ago needed. Power the board down when you are done rather than leaving
 a session open.
 
-The ten-minute inactivity timer gives a 60-second extend-or-erase warning.
-Cancel, error and timeout paths wipe their session buffers before returning,
-and the timeout at the main menu reboots. One path does not wipe: an internal
-assertion failure reboots immediately (`__wrap_abort` in
-`main/seedtool_platform_esp.c`) without unwinding, so whatever was live stays
-in RAM until startup re-zeroes it. That is a bug's exit, not a normal one, but
-it is the one hole in the sentence above.
+The ten-minute inactivity timer gives a 60-second extend-or-erase warning, and
+anything but extending restarts the device, from any screen; so does leaving the
+wallet. A software restart leaves RAM as it was, so every boot zeroes the free
+heap, where the previous session's stacks lived, and C startup zeroes the
+rest. That covers an internal assertion failure too (`__wrap_abort` in
+`main/seedtool_platform_esp.c`), which restarts without unwinding.
