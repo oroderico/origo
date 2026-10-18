@@ -28,6 +28,22 @@
  * versions 4-6 give 3px and 1-2 double the frame count. */
 #define BBQR_FRAME_MAX_VERSION 3
 
+/* One key on a QR screen's two controls, the arrow and the sun: up and down
+ * move between them, the chord on the sun cycles the shade. Returns true for
+ * the chord on the arrow. */
+static bool qr_key(const seedtool_key_t key, size_t* const selected)
+{
+    if (key == KEY_PREV || key == KEY_NEXT) {
+        *selected = *selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
+        return false;
+    }
+    if (key == KEY_SELECT && *selected == SEEDTOOL_NAV_SHADE) {
+        seedtool_render_qr_cycle_shade();
+        return false;
+    }
+    return key == KEY_SELECT;
+}
+
 /* An account key or descriptor as animated BBQr parts
  * (github.com/coinkite/BBQr), the wire format Krux reads (src/krux/bbqr.py):
  * too long for a legible single frame. Always the plain base32 "2" encoding,
@@ -70,18 +86,9 @@ static void show_account_key_qr(const char* title, const char* value)
             part = (part + 1) % parts;
             continue;
         }
-        if (key == KEY_REDRAW) {
-            continue;
+        if (qr_key(key, &selected)) {
+            return;
         }
-        if (key == KEY_PREV || key == KEY_NEXT) {
-            selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
-            continue;
-        }
-        if (selected == SEEDTOOL_NAV_SHADE) {
-            seedtool_render_qr_cycle_shade();
-            continue;
-        }
-        return;
     }
 }
 
@@ -194,19 +201,10 @@ static void show_address_qr(const char* title, const char* address)
     size_t fallback = SEEDTOOL_NAV_BACK;
     for (;;) {
         if (show_qr(seedtool_render_qr_address(title, address, selected))) {
-            const seedtool_key_t key = wait_key();
-            if (key == KEY_PREV || key == KEY_NEXT) {
-                selected = selected == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
-                continue;
+            if (qr_key(wait_key(), &selected)) {
+                return;
             }
-            if (key == KEY_REDRAW) {
-                continue;
-            }
-            if (key == KEY_SELECT && selected == SEEDTOOL_NAV_SHADE) {
-                seedtool_render_qr_cycle_shade();
-                continue;
-            }
-            return;
+            continue;
         }
         if (!show_qr(seedtool_render_qr(title, address, fallback))) {
             notice("Too long for a QR", title, "Read it as text instead");
@@ -214,23 +212,10 @@ static void show_address_qr(const char* title, const char* address)
         }
         /* The fallback answers the same keys; the chord on the arrow goes on to
          * the text. */
-        for (;;) {
-            const seedtool_key_t key = wait_key();
-            if (key == KEY_PREV || key == KEY_NEXT) {
-                fallback = fallback == SEEDTOOL_NAV_BACK ? SEEDTOOL_NAV_SHADE : SEEDTOOL_NAV_BACK;
-                break;
-            }
-            if (key == KEY_REDRAW) {
-                break;
-            }
-            if (key == KEY_SELECT && fallback == SEEDTOOL_NAV_SHADE) {
-                seedtool_render_qr_cycle_shade();
-                break;
-            }
+        if (qr_key(wait_key(), &fallback)) {
             (void)page_text_impl(title, address, false, true);
             return;
         }
-        continue;
     }
 }
 
@@ -471,24 +456,9 @@ static void show_stackbit(const char* mnemonic)
             seedtool_render_stackbit_physical_screen(&nav, "Stackbit 1248", numbers[selected], word, footer);
         }
         seedtool_display_flush();
-        switch (wait_key()) {
-        case KEY_SELECT:
-            /* On the arrow the chord leaves; on a word it reads on, the same
-             * answer page_text gives the chord on a page. */
-            if (!position) {
-                seedtool_zero(numbers, sizeof(numbers));
-                return;
-            }
-            position = page_step(position, count, true, false);
-            break;
-        case KEY_NEXT:
-            position = page_step(position, count, true, false);
-            break;
-        case KEY_PREV:
-            position = page_step(position, count, false, false);
-            break;
-        default:
-            break;
+        if (page_key(&position, count, false) == NAV_BACK) {
+            seedtool_zero(numbers, sizeof(numbers));
+            return;
         }
     }
 }
@@ -509,10 +479,10 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
     const size_t pages = (count + 3) / 4;
     /* Opens on the first page. `cursor`, since `position` is the word's place. */
     size_t cursor = 1;
-    bool advanced;
+    int answer = NAV_STAY;
     /* Outside the loop so the one exit can wipe them. */
     char lines[4][24] = { { 0 } };
-    for (;;) {
+    while (answer == NAV_STAY) {
         memset(lines, 0, sizeof(lines));
         const size_t page = page_shown(cursor, pages);
         const size_t first = page * 4;
@@ -535,32 +505,11 @@ static bool show_numbered_list_impl(const char* mnemonic, const bool show_words,
         const char* const rows[] = { lines[0], lines[1], lines[2], lines[3] };
         seedtool_render_nav_rows(&nav, show_words ? "BIP39 words" : "BIP39 word numbers", rows, 4);
         seedtool_display_flush();
-        switch (wait_key()) {
-        case KEY_SELECT:
-            if (!cursor) {
-                advanced = false;
-                goto done;
-            }
-            if (cursor > pages) {
-                advanced = true;
-                goto done;
-            }
-            cursor = page_step(cursor, pages, true, confirmable);
-            break;
-        case KEY_NEXT:
-            cursor = page_step(cursor, pages, true, confirmable);
-            break;
-        case KEY_PREV:
-            cursor = page_step(cursor, pages, false, confirmable);
-            break;
-        default:
-            break;
-        }
+        answer = page_key(&cursor, pages, confirmable);
     }
-done:
     seedtool_zero(numbers, sizeof(numbers));
     seedtool_zero(lines, sizeof(lines));
-    return advanced;
+    return answer == NAV_CONFIRM;
 }
 
 /* The list as a step in a sequence: the caller goes on to the next screen only

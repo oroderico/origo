@@ -82,7 +82,8 @@ extern bool chord_learned;
 extern bool orientation_flipped;
 extern unsigned backlight_level;
 
-/* choose_nav's outcomes other than an item index. */
+/* choose_nav's outcomes other than an item index. page_key adds NAV_STAY. */
+#define NAV_STAY (-1)
 #define NAV_BACK (-2)
 #define NAV_CONFIRM (-3)
 
@@ -104,6 +105,7 @@ int choose_nav(const char* title, const char* const* items, const size_t count, 
     const bool confirm_enabled, const bool back, size_t* const cursor);
 size_t page_step(const size_t position, const size_t pages, const bool forward, const bool confirmable);
 size_t page_shown(const size_t position, const size_t pages);
+int page_key(size_t* const position, const size_t pages, const bool confirmable);
 seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* counter, const bool confirmable,
     const seedtool_confirm_t style);
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor);

@@ -264,6 +264,33 @@ size_t page_shown(const size_t position, const size_t pages)
     return !position ? 0 : position > pages ? pages - 1 : position - 1;
 }
 
+/* One key on a paged screen. The chord on the arrow or the confirm answers
+ * NAV_BACK or NAV_CONFIRM; anything else moves `*position`, the chord on a page
+ * reading on, and answers NAV_STAY. */
+int page_key(size_t* const position, const size_t pages, const bool confirmable)
+{
+    switch (wait_key()) {
+    case KEY_SELECT:
+        if (!*position) {
+            return NAV_BACK;
+        }
+        if (*position > pages) {
+            return NAV_CONFIRM;
+        }
+        *position = page_step(*position, pages, true, confirmable);
+        break;
+    case KEY_NEXT:
+        *position = page_step(*position, pages, true, confirmable);
+        break;
+    case KEY_PREV:
+        *position = page_step(*position, pages, false, confirmable);
+        break;
+    default:
+        break;
+    }
+    return NAV_STAY;
+}
+
 static size_t page_selection(const size_t position, const size_t pages)
 {
     if (!position) {
@@ -500,11 +527,11 @@ bool page_text_impl(const char* title, const char* text, const bool confirmable,
     /* Opens on the first page, not on the confirm bar: reading is what this
      * screen is for, so the cursor starts where the reading does. */
     size_t position = 1;
-    bool advanced;
+    int answer = NAV_STAY;
     /* Outside the loop so the one exit can wipe them: they hold whatever is
      * paged, the mnemonic included. */
     char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1];
-    for (;;) {
+    while (answer == NAV_STAY) {
         char footer[48];
         const size_t page = page_shown(position, pages);
         const size_t first = page * 3;
@@ -534,34 +561,12 @@ bool page_text_impl(const char* title, const char* text, const bool confirmable,
             seedtool_render_nav_text(&nav, title, line1, line2, line3);
         }
         seedtool_display_flush();
-        switch (wait_key()) {
-        case KEY_SELECT:
-            if (!position) {
-                advanced = false;
-                goto done;
-            }
-            if (position > pages) {
-                advanced = true;
-                goto done;
-            }
-            /* The chord on a page reads on. */
-            position = page_step(position, pages, true, confirmable);
-            break;
-        case KEY_NEXT:
-            position = page_step(position, pages, true, confirmable);
-            break;
-        case KEY_PREV:
-            position = page_step(position, pages, false, confirmable);
-            break;
-        default:
-            break;
-        }
+        answer = page_key(&position, pages, confirmable);
     }
-done:
     seedtool_zero(line1, sizeof(line1));
     seedtool_zero(line2, sizeof(line2));
     seedtool_zero(line3, sizeof(line3));
-    return advanced;
+    return answer == NAV_CONFIRM;
 }
 
 /* Paged text with something to take at the end of it - the descriptor, the
