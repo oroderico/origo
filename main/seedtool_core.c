@@ -548,56 +548,51 @@ seedtool_result_t seedtool_validate_passphrase(const char* passphrase)
     return SEEDTOOL_OK;
 }
 
-static seedtool_result_t root_from_mnemonic(
-    const char* mnemonic, const char* passphrase, struct ext_key* root, uint8_t seed[64])
+seedtool_result_t seedtool_root_from_mnemonic(const char* mnemonic, const char* passphrase, seedtool_root_t* root)
 {
-    size_t written = 0;
-    if (!root || !seed || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
+    if (!root || seedtool_validate_mnemonic(mnemonic, NULL) != SEEDTOOL_OK
         || seedtool_validate_passphrase(passphrase) != SEEDTOOL_OK) {
         return SEEDTOOL_EINVAL;
     }
-    if (bip39_mnemonic_to_seed(mnemonic, passphrase, seed, 64, &written) != WALLY_OK || written != 64
-        || bip32_key_from_seed(seed, written, BIP32_VER_MAIN_PRIVATE, 0, root) != WALLY_OK) {
-        return SEEDTOOL_ECRYPTO;
+    uint8_t seed[BIP39_SEED_LEN_512];
+    size_t written = 0;
+    seedtool_result_t ret = SEEDTOOL_OK;
+    if (bip39_mnemonic_to_seed(mnemonic, passphrase, seed, sizeof(seed), &written) != WALLY_OK
+        || written != sizeof(seed)
+        || bip32_key_from_seed(seed, written, BIP32_VER_MAIN_PRIVATE, 0, &root->key) != WALLY_OK) {
+        seedtool_zero(root, sizeof(*root));
+        ret = SEEDTOOL_ECRYPTO;
+    }
+    seedtool_zero(seed, sizeof(seed));
+    return ret;
+}
+
+seedtool_result_t seedtool_master_fingerprint(const seedtool_root_t* root, uint8_t fingerprint[4])
+{
+    if (!root || !fingerprint) {
+        return SEEDTOOL_EINVAL;
+    }
+    /* What bip32_key_get_fingerprint returns for a key whose hash160 was not
+     * skipped, without its non-const parameter. */
+    memcpy(fingerprint, root->key.hash160, 4);
+    return SEEDTOOL_OK;
+}
+
+/* The watch-only account node m/type'/0'/account'. */
+static seedtool_result_t account_from_root(const seedtool_root_t* root, const seedtool_address_type_t type,
+    const uint32_t account_index, struct ext_key* account)
+{
+    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
+    if (!root
+        || bip32_key_from_parent_path(&root->key, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, account)
+            != WALLY_OK) {
+        return root ? SEEDTOOL_ECRYPTO : SEEDTOOL_EINVAL;
     }
     return SEEDTOOL_OK;
 }
 
-seedtool_result_t seedtool_master_fingerprint(
-    const char* mnemonic, const char* passphrase, uint8_t fingerprint[4])
-{
-    uint8_t seed[64];
-    struct ext_key root;
-    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
-    if (ret == SEEDTOOL_OK && bip32_key_get_fingerprint(&root, fingerprint, 4) != WALLY_OK) {
-        ret = SEEDTOOL_ECRYPTO;
-    }
-    seedtool_zero(seed, sizeof(seed));
-    seedtool_zero(&root, sizeof(root));
-    return ret;
-}
-
-/* The watch-only account node m/type'/0'/account'. */
-static seedtool_result_t account_from_mnemonic(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, const uint32_t account_index, struct ext_key* account)
-{
-    uint8_t seed[64];
-    struct ext_key root;
-    const uint32_t path[] = { ((uint32_t)type) | HARDENED, 0 | HARDENED, account_index | HARDENED };
-    seedtool_result_t ret = root_from_mnemonic(mnemonic, passphrase, &root, seed);
-    if (ret == SEEDTOOL_OK
-        && bip32_key_from_parent_path(&root, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, account)
-            != WALLY_OK) {
-        ret = SEEDTOOL_ECRYPTO;
-    }
-    seedtool_zero(seed, sizeof(seed));
-    seedtool_zero(&root, sizeof(root));
-    return ret;
-}
-
-seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, const uint32_t account_index, const seedtool_key_format_t format,
-    char* output, const size_t output_len)
+seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, const seedtool_address_type_t type,
+    const uint32_t account_index, const seedtool_key_format_t format, char* output, const size_t output_len)
 {
     if (!output || !output_len || !valid_account(type, account_index)
         || (format != SEEDTOOL_XPUB && format != SEEDTOOL_ZPUB) || (format == SEEDTOOL_ZPUB && type != SEEDTOOL_BIP84)) {
@@ -606,7 +601,7 @@ seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passph
     struct ext_key account;
     unsigned char bytes[BIP32_SERIALIZED_LEN];
     char* base58 = NULL;
-    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, account_index, &account);
+    seedtool_result_t ret = account_from_root(root, type, account_index, &account);
     if (ret != SEEDTOOL_OK) {
         goto done;
     }
@@ -680,16 +675,16 @@ done:
     return ret;
 }
 
-seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
-    const seedtool_address_type_t type, const uint32_t account_index, const seedtool_chain_t chain,
-    const uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN])
+seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, const seedtool_address_type_t type,
+    const uint32_t account_index, const seedtool_chain_t chain, const uint32_t count,
+    char addresses[][SEEDTOOL_MAX_ADDRESS_LEN])
 {
     if (!addresses || !count || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1 || !valid_account(type, account_index)
         || (chain != SEEDTOOL_RECEIVE && chain != SEEDTOOL_CHANGE)) {
         return SEEDTOOL_EINVAL;
     }
     struct ext_key account;
-    seedtool_result_t ret = account_from_mnemonic(mnemonic, passphrase, type, account_index, &account);
+    seedtool_result_t ret = account_from_root(root, type, account_index, &account);
     for (uint32_t i = 0; ret == SEEDTOOL_OK && i < count; ++i) {
         ret = address_from_account(&account, type, chain, i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
     }

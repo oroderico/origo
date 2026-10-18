@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <wally_bip32.h>
+
 #include "seedtool_wordlist.h"
 
 #define SEEDTOOL_HASH_LEN 32
@@ -150,22 +152,28 @@ seedtool_result_t seedtool_mnemonic_word_numbers(
 seedtool_result_t seedtool_mnemonic_entropy(
     const char* mnemonic, uint8_t* entropy, size_t capacity, size_t* len_out);
 
-seedtool_result_t seedtool_master_fingerprint(
-    const char* mnemonic, const char* passphrase, uint8_t fingerprint[4]);
+/* The BIP32 master key of a mnemonic and passphrase. PBKDF2 is the slow step
+ * of every derivation, so it runs once here and everything below derives from
+ * the result. This is the private key: zero it with seedtool_zero. */
+typedef struct {
+    struct ext_key key;
+} seedtool_root_t;
+
+seedtool_result_t seedtool_root_from_mnemonic(const char* mnemonic, const char* passphrase, seedtool_root_t* root);
+
+seedtool_result_t seedtool_master_fingerprint(const seedtool_root_t* root, uint8_t fingerprint[4]);
 
 /* Watch-only account key at m/type'/0'/account', as an xpub or (BIP84 only)
  * a SLIP-132 zpub. */
-seedtool_result_t seedtool_account_xpub(const char* mnemonic, const char* passphrase, seedtool_address_type_t type,
-    uint32_t account, seedtool_key_format_t format, char* output, size_t output_len);
+seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, seedtool_address_type_t type, uint32_t account,
+    seedtool_key_format_t format, char* output, size_t output_len);
 
-/* Mainnet addresses at m/type'/0'/account'/chain/0..count-1. PBKDF2 and the
- * hardened account derivation run once rather than per address, which would
- * be slow enough on the ESP32 to look like a hang. `chain` outside
+/* Mainnet addresses at m/type'/0'/account'/chain/0..count-1. The hardened
+ * account derivation runs once rather than per address. `chain` outside
  * seedtool_chain_t is EINVAL. `addresses` must hold `count` rows, and is
  * zeroed on failure. */
-seedtool_result_t seedtool_mainnet_addresses(const char* mnemonic, const char* passphrase,
-    seedtool_address_type_t type, uint32_t account, seedtool_chain_t chain, uint32_t count,
-    char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, seedtool_address_type_t type,
+    uint32_t account, seedtool_chain_t chain, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
 /* Writes `descriptor` + "#" + its 8-character BIP380 checksum to `output`,
  * which must not overlap it. EINVAL for a character outside BIP380's charset,

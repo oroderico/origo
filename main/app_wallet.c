@@ -5,6 +5,33 @@
 #include <stdio.h>
 #include <string.h>
 
+/* What a wallet session derives from: the mnemonic it opened with, the
+ * passphrase, type and account set in Derivation, and the master key and
+ * fingerprint those give. The key is derived once per passphrase rather than
+ * per screen, since PBKDF2 is the slow step; it is no more secret than the
+ * mnemonic beside it. Zeroed as one when the session ends. */
+typedef struct {
+    const char* mnemonic;
+    char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1];
+    seedtool_root_t root;
+    char fphex[9];
+    seedtool_address_type_t type;
+    uint32_t account;
+} wallet_session_t;
+
+/* Derives the master key and fingerprint for the passphrase now set. */
+static bool derive_root(wallet_session_t* const session)
+{
+    uint8_t fp[4];
+    const bool ok = seedtool_root_from_mnemonic(session->mnemonic, session->passphrase, &session->root) == SEEDTOOL_OK
+        && seedtool_master_fingerprint(&session->root, fp) == SEEDTOOL_OK;
+    if (ok) {
+        hexstr(fp, sizeof(fp), session->fphex);
+    }
+    seedtool_zero(fp, sizeof(fp));
+    return ok;
+}
+
 /* The account key carries its key origin, so a scan does not have to be told
  * the derivation path afterwards. The account component's "999" is
  * SEEDTOOL_MAX_ACCOUNT_INDEX's own width, not a placeholder. */
@@ -132,33 +159,26 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
 /* The account key's own QR, warned about up front since a photo of it reveals
  * every address it can derive -- unlike a single address's QR below, which
  * reveals nothing more than itself. */
-static void export_qr(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
+static void export_qr(const wallet_session_t* const session, const seedtool_key_format_t format, const char* xpub)
 {
     /* Opens on the arrow: a photo of this reveals every address of the account. */
     if (!nav_acknowledge("QR export", "Account key included", "A photo reveals every address", "Show QR", true)) {
         return;
     }
     char title[24];
-    (void)snprintf(title, sizeof(title), "BIP%u %s", (unsigned)type, format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
-    char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
+    (void)snprintf(
+        title, sizeof(title), "BIP%u %s", (unsigned)session->type, format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
     char value[ACCOUNT_KEY_LEN] = { 0 };
-    if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
-        (void)snprintf(value, sizeof(value), "[%s/%u'/0'/%u']%s", fphex, (unsigned)type, (unsigned)account, xpub);
-        seedtool_zero(xpub, sizeof(xpub));
-        show_account_key_qr(title, value);
-    } else {
-        seedtool_zero(xpub, sizeof(xpub));
-        notice("Error", "Could not derive", NULL);
-    }
+    (void)snprintf(value, sizeof(value), "[%s/%u'/0'/%u']%s", session->fphex, (unsigned)session->type,
+        (unsigned)session->account, xpub);
+    show_account_key_qr(title, value);
     seedtool_zero(value, sizeof(value));
 }
 
 /* The account as a BIP380 descriptor, for a watch-only wallet to import. Always
  * xpub, since BIP380 has no SLIP-132. The chain step is BIP389's "<0;1>", so
  * one descriptor covers receive and change. */
-static void show_descriptor(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const uint32_t account)
+static void show_descriptor(const wallet_session_t* const session)
 {
     /* On the arrow, for the reason the QR export above gives: it carries the
      * same account key and so the same warning. */
@@ -169,10 +189,11 @@ static void show_descriptor(const char* mnemonic, const char* passphrase, const 
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
     char body[DESCRIPTOR_LEN] = { 0 };
     char value[DESCRIPTOR_LEN] = { 0 };
-    if (seedtool_account_xpub(mnemonic, passphrase, type, account, SEEDTOOL_XPUB, xpub, sizeof(xpub))
+    if (seedtool_account_xpub(&session->root, session->type, session->account, SEEDTOOL_XPUB, xpub, sizeof(xpub))
         == SEEDTOOL_OK) {
-        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/<0;1>/*)", type == SEEDTOOL_BIP84 ? "wpkh" : "tr",
-            fphex, (unsigned)type, (unsigned)account, xpub);
+        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/<0;1>/*)",
+            session->type == SEEDTOOL_BIP84 ? "wpkh" : "tr", session->fphex, (unsigned)session->type,
+            (unsigned)session->account, xpub);
         seedtool_zero(xpub, sizeof(xpub));
         if (seedtool_descriptor_checksum(body, value, sizeof(value)) == SEEDTOOL_OK) {
             if (page_text("Descriptor", value)) {
@@ -229,13 +250,14 @@ static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Bac
 /* Fills the cache for one type, account and branch: every index is derived (Go
  * to index can reach any), the first ADDRESS_SHOWN_ROWS labelled. Returns
  * false, having told the reader, on a derivation error. */
-static bool derive_addresses(const char* mnemonic, const char* passphrase, const seedtool_address_type_t type,
-    const uint32_t account, const seedtool_chain_t chain, const char* const prefix)
+static bool derive_addresses(
+    const wallet_session_t* const session, const seedtool_chain_t chain, const char* const prefix)
 {
     /* Cleared on the way in too, so a failed derivation leaves no earlier rows. */
     seedtool_zero(address_labels, sizeof(address_labels));
     screen_text(prefix, "Deriving addresses...", NULL, NULL);
-    if (seedtool_mainnet_addresses(mnemonic, passphrase, type, account, chain, ADDRESS_LIST_ROWS, addresses)
+    if (seedtool_mainnet_addresses(
+            &session->root, session->type, session->account, chain, ADDRESS_LIST_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         notice("Error", "Could not derive addresses", NULL);
@@ -336,15 +358,16 @@ static bool choose_address_type(seedtool_address_type_t* type)
 
 /* The watch-only account key for the type and account currently set, in the
  * format asked for. */
-static void show_account_key(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const uint32_t account, const seedtool_key_format_t format)
+static void show_account_key(const wallet_session_t* const session, const seedtool_key_format_t format)
 {
     char xpub[SEEDTOOL_MAX_XPUB_LEN] = { 0 };
     char origin[32];
-    (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", fphex, (unsigned)type, (unsigned)account);
-    if (seedtool_account_xpub(mnemonic, passphrase, type, account, format, xpub, sizeof(xpub)) == SEEDTOOL_OK) {
+    (void)snprintf(origin, sizeof(origin), "[%s/%u'/0'/%u']", session->fphex, (unsigned)session->type,
+        (unsigned)session->account);
+    if (seedtool_account_xpub(&session->root, session->type, session->account, format, xpub, sizeof(xpub))
+        == SEEDTOOL_OK) {
         if (page_text(origin, xpub)) {
-            export_qr(mnemonic, passphrase, fphex, type, account, format);
+            export_qr(session, format, xpub);
         }
     } else {
         notice("Error", "Could not derive account key", NULL);
@@ -355,15 +378,14 @@ static void show_account_key(const char* mnemonic, const char* passphrase, const
 /* xpub, zpub and the descriptor: the same key three ways, behind one row since
  * each reveals every address. SLIP-132 has no taproot prefix, so zpub is BIP84
  * only. */
-static void show_extended_keys(const char* mnemonic, const char* passphrase, const char* fphex,
-    const seedtool_address_type_t type, const uint32_t account)
+static void show_extended_keys(const wallet_session_t* const session)
 {
     size_t cursor = 0;
     for (;;) {
         const char* items[4];
         size_t count = 0;
         items[count++] = "xpub";
-        if (type == SEEDTOOL_BIP84) {
+        if (session->type == SEEDTOOL_BIP84) {
             items[count++] = "zpub";
         }
         items[count++] = "Descriptor";
@@ -372,19 +394,18 @@ static void show_extended_keys(const char* mnemonic, const char* passphrase, con
             return;
         }
         if (selected == 0) {
-            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_XPUB);
-        } else if (type == SEEDTOOL_BIP84 && selected == 1) {
-            show_account_key(mnemonic, passphrase, fphex, type, account, SEEDTOOL_ZPUB);
+            show_account_key(session, SEEDTOOL_XPUB);
+        } else if (session->type == SEEDTOOL_BIP84 && selected == 1) {
+            show_account_key(session, SEEDTOOL_ZPUB);
         } else {
-            show_descriptor(mnemonic, passphrase, fphex, type, account);
+            show_descriptor(session);
         }
     }
 }
 
 /* The address list for the type and account currently set, on whichever
  * branch is asked for first. */
-static void show_addresses(
-    const char* mnemonic, const char* passphrase, const seedtool_address_type_t type, const uint32_t account)
+static void show_addresses(const wallet_session_t* const session)
 {
     /* Which branch, asked before the list, as xpub/zpub is. */
     const char* const branches[] = { "Receive", "Change" };
@@ -396,9 +417,9 @@ static void show_addresses(
     /* The path every row shares, as the title, so a long list never loses what
      * it shows. Each address's own path is this plus its index. */
     char prefix[24];
-    (void)snprintf(
-        prefix, sizeof(prefix), "m/%u'/0'/%u'/%u", (unsigned)type, (unsigned)account, (unsigned)chain);
-    if (!derive_addresses(mnemonic, passphrase, type, account, chain, prefix)) {
+    (void)snprintf(prefix, sizeof(prefix), "m/%u'/0'/%u'/%u", (unsigned)session->type, (unsigned)session->account,
+        (unsigned)chain);
+    if (!derive_addresses(session, chain, prefix)) {
         return;
     }
     /* Back to the list after each address, with the cursor where it was; only
@@ -607,19 +628,18 @@ static void show_backup_menu(const char* mnemonic)
 }
 
 /* Derivation: the passphrase, the script type and the account, the inputs to
- * everything the wallet derives. `fp`/`fphex` come in by pointer because the
- * passphrase changes the fingerprint titling the wallet. */
-static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedtool_address_type_t* type,
-    char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1], uint8_t fp[4], char fphex[9])
+ * everything the wallet derives. */
+static void show_derivation_menu(wallet_session_t* const session)
 {
     size_t cursor = 0;
     for (;;) {
         char account_item[16];
-        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)*account);
+        (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)session->account);
         char type_item[32];
-        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(*type));
+        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(session->type));
         /* Says whether one is set, never anything about what it is. */
-        const char* const passphrase_item = passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
+        const char* const passphrase_item
+            = session->passphrase[0] ? "Passphrase: session only" : "Passphrase: none";
         /* Widest consequence first: the passphrase changes the seed, the type
          * the path, the account a branch of it. */
         const char* items[] = { passphrase_item, type_item, account_item };
@@ -628,19 +648,19 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
             return;
         }
         if (selected == 0) {
-            if (edit_session_passphrase(passphrase)) {
-                if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
-                    notice("Error", "Derivation failed", NULL);
-                } else {
-                    hexstr(fp, 4, fphex);
-                }
+            /* The keyboard types only what seedtool_validate_passphrase
+             * accepts, so a failure here is not a reader's mistake, and the
+             * session cannot go on deriving from the old key under the new
+             * passphrase. */
+            if (edit_session_passphrase(session->passphrase)) {
+                seedtool_require(derive_root(session));
             }
         } else if (selected == 1) {
-            (void)choose_address_type(type);
+            (void)choose_address_type(&session->type);
         } else {
-            uint32_t chosen = *account;
+            uint32_t chosen = session->account;
             if (enter_number("Account", ACCOUNT_DIGITS, &chosen)) {
-                *account = chosen;
+                session->account = chosen;
             }
         }
     }
@@ -648,28 +668,21 @@ static void show_derivation_menu(const char* mnemonic, uint32_t* account, seedto
 
 void show_wallet_data(const char* mnemonic)
 {
-    uint8_t fp[4] = { 0 };
-    char fphex[9] = { 0 };
-    char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-
     /* No passphrase to start. It is set from Derivation like the account and
      * type, and the fingerprint in the title shows which seed is in force. */
-    if (seedtool_master_fingerprint(mnemonic, passphrase, fp) != SEEDTOOL_OK) {
+    wallet_session_t session = { .mnemonic = mnemonic, .type = SEEDTOOL_BIP84 };
+    if (!derive_root(&session)) {
         notice("Error", "Derivation failed", NULL);
-        goto done;
+        seedtool_zero(&session, sizeof(session));
+        return;
     }
-    hexstr(fp, sizeof(fp), fphex);
 
-    /* The path, live for the whole session: set in Derivation and used by every
-     * derived screen. */
-    uint32_t account = 0;
-    seedtool_address_type_t type = SEEDTOOL_BIP84;
     /* The fingerprint titles the menu, so a reader who knows their wallet's
      * sees at a glance which one is being derived. */
     char wallet_title[sizeof("Wallet @") + 8];
     _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
         "the wallet title must hold its label and all eight fingerprint hex digits");
-    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
     enum { WALLET_BACKUP, WALLET_KEYS, WALLET_DERIVATION, WALLET_ADDRESSES, WALLET_ERASE };
     size_t cursor = 0;
     for (;;) {
@@ -686,9 +699,7 @@ void show_wallet_data(const char* mnemonic)
          * .bss, and scrub_free_heap zeroes the old stacks, which a reset
          * alone leaves in DRAM. Display settings go back to their defaults. */
         if (selected == WALLET_ERASE) {
-            seedtool_zero(fp, sizeof(fp));
-            seedtool_zero(fphex, sizeof(fphex));
-            seedtool_zero(passphrase, sizeof(passphrase));
+            seedtool_zero(&session, sizeof(session));
             seedtool_platform_restart();
         }
         switch (selected) {
@@ -696,23 +707,19 @@ void show_wallet_data(const char* mnemonic)
             show_backup_menu(mnemonic);
             break;
         case WALLET_KEYS:
-            show_extended_keys(mnemonic, passphrase, fphex, type, account);
+            show_extended_keys(&session);
             break;
         case WALLET_DERIVATION:
-            show_derivation_menu(mnemonic, &account, &type, passphrase, fp, fphex);
+            show_derivation_menu(&session);
             /* The passphrase may have changed under it, and with it the
              * fingerprint this title states. */
-            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", fphex);
+            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
             break;
         default:
-            show_addresses(mnemonic, passphrase, type, account);
+            show_addresses(&session);
             break;
         }
     }
-done:
-    seedtool_zero(fp, sizeof(fp));
-    seedtool_zero(fphex, sizeof(fphex));
-    seedtool_zero(passphrase, sizeof(passphrase));
 }
 
 /* A backup is only as good as its transcription. Quizzes the middle word of
