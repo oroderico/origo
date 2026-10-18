@@ -11,9 +11,8 @@
 #include <string.h>
 #include <wally_core.h>
 
-/* Vectors for the live dice-roll quality readout, adapted from Krux's
- * dice-roll entropy screen (github.com/selfcustody/krux). A UI signal only:
- * these never touch what seedtool_generate hashes into the seed. */
+/* Vectors for the entropy quality readout, adapted from Krux. A UI signal: none
+ * of this reaches the seed. */
 static bool dice_quality_is_sound(void)
 {
     uint8_t all_same[50];
@@ -28,9 +27,8 @@ static bool dice_quality_is_sound(void)
         return false;
     }
 
-    /* A perfect round-robin: every face equally often, which alone would look
-     * like enough entropy, but entirely predictable, which only the
-     * derivative check below catches. */
+    /* A round-robin: every face equally often, but predictable, which only the
+     * pattern check catches. */
     uint8_t round_robin[50];
     for (size_t i = 0; i < sizeof(round_robin); ++i) {
         round_robin[i] = (uint8_t)((i % 6) + 1);
@@ -68,27 +66,20 @@ static bool dice_quality_is_sound(void)
     return seedtool_dice_entropy_bits(SEEDTOOL_CARDS, &card, 1, &bits) == SEEDTOOL_EINVAL;
 }
 
-/* Vectors for the live card-draw quality readout. Bits are exact (see
- * seedtool_card_entropy_bits' doc comment), not estimated, so this checks
- * boundaries and monotonicity rather than restating the log2 formula the
- * function itself computes - a check on its loop/off-by-one behavior, not a
- * tautology. */
+/* Card draws: the bits are exact, so this checks the boundaries and that the
+ * count never decreases. */
 static bool card_quality_is_sound(void)
 {
     int bits = -1;
     if (seedtool_card_entropy_bits(0, &bits) != SEEDTOOL_OK || bits != 0) {
         return false;
     }
-    /* The required draw count for a 12-word seed (seedtool_required_events)
-     * must clear the 128-bit minimum by construction - nothing here is
-     * estimated, so there is no room for doubt the way a dice run has. */
+    /* 12-word cards clear 128 bits by construction. */
     if (seedtool_card_entropy_bits(25, &bits) != SEEDTOOL_OK || bits < (int)seedtool_min_entropy_bits(12)) {
         return false;
     }
-    /* Non-decreasing over the whole deck: every further card at least does
-     * not remove information, with equality only ever possible at the very
-     * last card, which is fully determined by the other 51 and so adds
-     * exactly zero. */
+    /* Non-decreasing over the deck; only the last card, fixed by the other 51,
+     * adds nothing. */
     int previous = 0;
     for (size_t drawn = 1; drawn <= 52; ++drawn) {
         if (seedtool_card_entropy_bits(drawn, &bits) != SEEDTOOL_OK || bits < previous) {
@@ -100,9 +91,8 @@ static bool card_quality_is_sound(void)
         return false;
     }
 
-    /* A fresh, unshuffled deck read off in order: rank climbs 0..12 within
-     * each suit before resetting, the same "counting through the faces"
-     * shape seedtool_dice_pattern_detected catches for dice. */
+    /* An unshuffled deck in order: ranks count up within each suit, the pattern
+     * the check exists for. */
     uint8_t ascending[25];
     for (size_t i = 0; i < sizeof(ascending); ++i) {
         ascending[i] = (uint8_t)i;
@@ -129,27 +119,14 @@ static uint32_t xorshift32(uint32_t* state)
     return x;
 }
 
-/* seedtool_dice_entropy_bits is a small-sample-biased estimator (see
- * seedtool_dice_entropy_bias_bits' doc comment); the "poor entropy" gate in
- * collect_entropy (main/seedtool_app.c) corrects for that bias before
- * comparing against seedtool_min_entropy_bits. This proves the correction
- * actually keeps genuinely random rolls, at the exact roll counts
- * seedtool_required_events hands out, from being flagged "poor" more than an
- * acceptable fraction of the time -- the false positive this whole mechanism
- * exists to fix (D20 was previously flagged on essentially every random
- * run). DICE_ENTROPY_TOLERANCE is duplicated here rather than exposed from
- * seedtool_app.c, since it is UI-gate policy, not core behaviour. */
+/* The poor-entropy gate corrects the estimator's small-sample bias
+ * (seedtool_dice_entropy_bias_bits). This proves honest runs at the required
+ * counts are rarely flagged. DICE_ENTROPY_TOLERANCE is copied from
+ * seedtool_app.c, being UI policy. */
 static bool dice_entropy_false_positive_rate_is_bounded(void)
 {
-    /* Coin included at its actual required count (128/256, exactly the
-     * theoretical minimum - no cushion past it the way dice's roll counts
-     * carry, a known, accepted trade-off): this is the empirical check that
-     * its false-positive rate still lands under the same bound, not just
-     * the back-of-envelope estimate that motivated accepting it. Same for
-     * SEEDTOOL_CARDS_REPLACE at whatever count it currently asks for, read
-     * from seedtool_required_events below rather than named here (12-word is
-     * skipped - that returns 0, since 24-word SEEDTOOL_CARDS already covers
-     * the case without needing replacement). */
+    /* Coin at its required count, which is exactly its minimum, and
+     * SEEDTOOL_CARDS_REPLACE at whatever count it asks for. */
     const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS_REPLACE };
     const size_t sides[] = { 6, 20, 2, 52 };
     const size_t words[] = { 12, 24 };
@@ -189,23 +166,10 @@ static bool dice_entropy_false_positive_rate_is_bounded(void)
     return true;
 }
 
-/* seedtool_required_events' counts are chosen so that an honest run does not
- * merely clear the poor-entropy gate but reports at or above the minimum on
- * screen - the number the reader has just been asked to trust. That is a
- * stricter property than the false-positive bound above, which counts only
- * runs pushed past DICE_ENTROPY_TOLERANCE, and the gap between the two is
- * wide enough to hide a regression: at D6's former counts of 50 and 99 rolls
- * an honest run read short 21.9% and 36.6% of the time while being flagged
- * just 3.0% and 5.3%, so the bound above passed comfortably and protected
- * nothing. Whichever of the two properties a future change means to hold,
- * both are now pinned.
- *
- * Coin is left out by name rather than by oversight. One flip is exactly one
- * bit, so its count is at once the theoretical minimum and the entire
- * transcript buffer, and about a quarter of honest coin runs report a bit
- * short with no room left to pad them - the trade-off README's entropy
- * section spells out. This exists to keep the other sources from drifting
- * into that state, not to hold coin to a standard its encoding forbids. */
+/* An honest run must also read at or above the minimum on screen, a stricter
+ * property than not being flagged. Coin is excluded: one flip is one bit, so
+ * its count is both the minimum and the whole buffer, and some honest runs read
+ * a bit short (see the README's entropy section). */
 static bool honest_runs_report_at_least_the_minimum(void)
 {
     const seedtool_source_t sources[] = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_CARDS_REPLACE };
@@ -247,18 +211,10 @@ static bool honest_runs_report_at_least_the_minimum(void)
     return true;
 }
 
-/* Both Monte-Carlo checks above bound the honest case: how often a good run is
- * wrongly flagged, and how often it reads short. Neither would notice a gate
- * that had stopped flagging anything at all. This is the other direction - a
- * source degraded far enough that its run genuinely carries fewer bits than
- * the seed needs must be caught.
- *
- * "Genuinely" is the load-bearing word, and getting it wrong is easy: a die
- * stuck on five of six faces still yields log2(5) = 2.32 bits a roll, so at
- * sixty rolls it carries 139 bits and passing it is the correct answer, not a
- * miss. Each case below is therefore chosen so the true entropy, `count *
- * log2(usable)`, falls below the minimum even before the estimator's error -
- * and the expected verdict is computed from that rather than written down. */
+/* The other direction: a source degraded so far that its run truly carries
+ * fewer bits than the seed needs must be flagged. Each case keeps `count *
+ * log2(usable)` below the minimum, and the expected verdict is computed from
+ * it. */
 static bool insufficient_runs_are_flagged(void)
 {
     static const struct {
