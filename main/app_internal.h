@@ -43,8 +43,7 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
  * two controls have nothing to attach to. */
 #define DIGIT_FOOTER "Up/Down set   BOTH take"
 
-/* Word entry keyboard: the letters plus backspace. */
-#define WORD_LAYOUT SEEDTOOL_WORD_LAYOUT
+/* Word entry keyboard: the letters plus backspace, in either arrangement. */
 #define WORD_KEYS (SEEDTOOL_LETTERS + 1)
 
 /* Word number keyboard, for a backup that records numbers rather than words. */
@@ -81,6 +80,12 @@ extern bool chord_learned;
 /* Display settings live only in RAM and reset every boot. */
 extern bool orientation_flipped;
 extern unsigned backlight_level;
+
+/* Letter keyboards in QWERTY rather than alphabetical rows. Settings is reached
+ * only from the Origo menu, and a wallet never returns there, so it cannot
+ * change while a seed is loaded: no passphrase is typed half on one
+ * arrangement and confirmed on the other. */
+extern bool qwerty_keys;
 
 /* choose_nav's outcomes other than an item index. page_key adds NAV_STAY. */
 #define NAV_STAY (-1)
@@ -124,6 +129,8 @@ void page_read(const char* title, const char* text);
 size_t step_key(const bool* enabled, const size_t count, size_t index, const bool forward);
 size_t nearest_enabled(const bool* enabled, const size_t count, const size_t index);
 size_t layout_key_index(const char* layout, const char target);
+const char* word_layout(void);
+const char* passphrase_layout(const size_t page);
 
 /* app_words.c */
 bool enter_word(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
