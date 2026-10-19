@@ -328,11 +328,12 @@ of a screen position, since a direct choice has nothing left to confirm.
 ### Settings
 
 The main menu's `Settings` entry carries `About` (the safety disclaimer),
-`Flip Orientation`, which toggles the panel 180 degrees in place, and
+`Flip Orientation`, which toggles the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
-as it is adjusted. The display settings are session-only - like every other
-piece of UI state, they reset to their defaults (unflipped, brightness 3 of 5)
-on the next boot, since Origo has nothing to save them to.
+as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
+are session-only - like every other piece of UI state, they reset to their
+defaults (unflipped, brightness 3 of 5, alphabetical) on the next boot, since
+Origo has nothing to save them to.
 
 ### Lists and scrolling
 
@@ -388,8 +389,14 @@ and padded to four digits.
 
 ### The keyboards
 
-The keyboards are QWERTY. The cursor opens on the middle key of the middle row —
-`g` on the letter keyboards, `5` on the number one — because on a ring of thirty
+The letter keyboards are alphabetical by default, in Jade's rows (`a`–`j`,
+`k`–`t`, `u`–`z`): on a ring walked with two buttons, a reader who does not
+touch-type finds a letter by where it falls in the alphabet. `Keyboard: QWERTY`
+in Settings switches them. Settings is reached only from the main menu, so the
+choice cannot change while a seed is loaded, and no passphrase is typed on one
+arrangement and confirmed on the other. The number keyboard has one order. The
+cursor opens on the middle key of the middle row — `o` on the alphabetical
+letters, `g` on QWERTY, `5` on the numbers — because on a ring of thirty
 keys walked with two buttons the corner is the furthest possible place to start
 from. It then keeps its place, so repeating a character is one press rather than
 a walk back, and returns to the centre when a keyboard is opened or a symbol page

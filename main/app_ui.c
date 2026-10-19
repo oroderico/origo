@@ -10,6 +10,14 @@ uint64_t last_action;
 bool chord_learned;
 bool orientation_flipped;
 unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT;
+bool qwerty_keys;
+
+const char* word_layout(void) { return qwerty_keys ? SEEDTOOL_WORD_LAYOUT : SEEDTOOL_WORD_LAYOUT_ABC; }
+
+const char* passphrase_layout(const size_t page)
+{
+    return qwerty_keys ? seedtool_passphrase_layouts[page] : seedtool_passphrase_layouts_abc[page];
+}
 
 void seedtool_require(const bool condition)
 {
