@@ -1,33 +1,91 @@
 #!/usr/bin/env python3
-"""Convert the Origo logo artwork into the C array the firmware draws.
+"""Draw the Origo logo from its cells into the C array the firmware shows, and
+into assets/logo.png.
 
-Authoring tool, run by hand when the artwork changes; the generated C file is
-committed and is what builds. Pillow is needed here and only here: the firmware,
-`origo_verify.py` and the tests stay dependency-free.
+The logo is pixel art, so its source is the cells themselves (assets/logo.txt),
+not a picture of them: each part - tree, wordmark, tagline - is a grid of
+colour letters drawn at its own whole number of display pixels per cell, so no
+cell is ever split across pixels or blended with its neighbour. Run by hand
+when the cells change; the generated C file is committed and is what builds.
+Standard library only, like the rest of tools/.
 
-The whole logo is used, wordmark and tagline included, so the opening screen
-shows the mark as it was drawn rather than a reassembly of it. That is also how
-Jade's splash works, and it is why the artwork is cropped to its ink rather than
-to the tree alone.
-
-    python3 tools/make_logo.py assets/logo.png main/seedtool_logo.c
+    python3 tools/make_logo.py
 """
 
 import argparse
 from pathlib import Path
-import sys
+import re
+import struct
+import zlib
 
-try:
-    from PIL import Image
-except ImportError:  # pragma: no cover - authoring-only dependency
-    sys.exit("this tool needs Pillow: pip install pillow")
+ROOT = Path(__file__).parents[1]
+# The firmware packs two pixels per byte.
+MAX_COLOURS = 16
+# assets/logo.png is the same picture at this many pixels per display pixel,
+# with a margin, for the README and anywhere else the logo is shown.
+PNG_SCALE = 8
+PNG_MARGIN = 12
 
 
-WIDTH = 98
-HEIGHT = 110
-COLOURS = 16
-# Anything brighter than this on any channel is artwork rather than background.
-INK_LEVEL = 45
+def parse(path):
+    """The palette and the parts, in order, as (name, scale, rows) or ("gap", n, None)."""
+    colours, parts, section = {}, [], None
+    for raw in path.read_text().splitlines():
+        line = raw.rstrip()
+        if not line or line.startswith("#"):
+            continue
+        header = re.fullmatch(r"\[(\w+)(?: (\d+))?\]", line)
+        if header:
+            name, number = header.group(1), header.group(2)
+            if name == "colours":
+                section = "colours"
+            elif name == "gap":
+                parts.append(("gap", int(number), None))
+                section = None
+            else:
+                parts.append((name, int(number), []))
+                section = "rows"
+            continue
+        if section == "colours":
+            key, value = line.split()
+            colours[key] = tuple(int(value[i : i + 2], 16) for i in (0, 2, 4))
+        elif section == "rows":
+            parts[-1][2].append(line)
+        else:
+            raise SystemExit(f"{path}: line outside a section: {raw!r}")
+    if "." not in colours or len(colours) > MAX_COLOURS:
+        raise SystemExit(f"{path}: needs a '.' background and at most {MAX_COLOURS} colours")
+    for name, scale, rows in parts:
+        if rows is None:
+            continue
+        if not rows or len({len(r) for r in rows}) != 1:
+            raise SystemExit(f"{path}: [{name}] rows must be non-empty and of one length")
+        unknown = set("".join(rows)) - set(colours)
+        if unknown:
+            raise SystemExit(f"{path}: [{name}] uses undefined colours {sorted(unknown)}")
+    return colours, parts
+
+
+def compose(colours, parts):
+    """Every part centred on one canvas of colour keys; the width is even."""
+    drawn = [(scale, rows) for _, scale, rows in parts if rows is not None]
+    width = max(len(rows[0]) * scale for scale, rows in drawn)
+    width += width % 2
+    height = sum(len(rows) * scale if rows is not None else scale for _, scale, rows in parts)
+    canvas = [["."] * width for _ in range(height)]
+    y = 0
+    for _, scale, rows in parts:
+        if rows is None:
+            y += scale
+            continue
+        left = (width - len(rows[0]) * scale) // 2
+        for row in rows:
+            for _ in range(scale):
+                for x, key in enumerate(row):
+                    for dx in range(scale):
+                        canvas[y][left + x * scale + dx] = key
+                y += 1
+    return canvas
 
 
 def rgb565(colour):
@@ -35,77 +93,71 @@ def rgb565(colour):
     return ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3)
 
 
-def artwork_box(image):
-    """The bounding box of everything drawn, background excluded."""
-    pixels = image.load()
-    width, height = image.size
-    rows = [
-        sum(1 for x in range(width) if max(pixels[x, y]) > INK_LEVEL)
-        for y in range(height)
-    ]
-    inked = [y for y, count in enumerate(rows) if count > 2]
-    if not inked:
-        raise SystemExit("no artwork found")
-    top, bottom = inked[0], inked[-1]
-    columns = [
-        x
-        for x in range(width)
-        if any(max(pixels[x, y]) > INK_LEVEL for y in range(top, bottom + 1))
-    ]
-    return columns[0], top, columns[-1] + 1, bottom + 1
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("output", type=Path)
-    args = parser.parse_args()
-
-    image = Image.open(args.source).convert("RGB")
-    tree = image.crop(artwork_box(image)).resize((WIDTH, HEIGHT), Image.LANCZOS)
-
-    # The artwork's background is a noisy near-black. Left alone it eats most of
-    # the palette on shades nobody can tell apart, so it is flattened to one
-    # black first and the sixteen slots go to the tree.
-    flattened = tree.load()
-    for y in range(HEIGHT):
-        for x in range(WIDTH):
-            if max(flattened[x, y]) <= INK_LEVEL:
-                flattened[x, y] = (0, 0, 0)
-    quantised = tree.quantize(colors=COLOURS, method=Image.MEDIANCUT, dither=Image.NONE)
-
-    palette = quantised.getpalette()[: COLOURS * 3]
-    entries = [rgb565(tuple(palette[i * 3 : i * 3 + 3])) for i in range(COLOURS)]
-    indices = list(quantised.tobytes())
-    if len(indices) != WIDTH * HEIGHT or max(indices) >= COLOURS:
-        raise SystemExit("quantisation produced an out-of-range index")
-
-    # Two pixels per byte, high nibble first. The width is even so no row is
-    # padded and a row start is always a byte boundary.
-    packed = bytearray()
-    for i in range(0, len(indices), 2):
-        packed.append((indices[i] << 4) | indices[i + 1])
-
+def write_c(canvas, colours, path):
+    keys = list(colours)
+    index = {key: i for i, key in enumerate(keys)}
+    entries = [rgb565(colours[key]) for key in keys] + [0] * (MAX_COLOURS - len(keys))
+    flat = [index[key] for row in canvas for key in row]
+    packed = bytes((flat[i] << 4) | flat[i + 1] for i in range(0, len(flat), 2))
     lines = [
-        "/* Generated by tools/make_logo.py from assets/logo.png. Do not edit. */",
+        "/* Generated by tools/make_logo.py from assets/logo.txt. Do not edit. */",
         "",
         '#include "seedtool_logo.h"',
         "",
-        f"const uint16_t seedtool_logo_palette[SEEDTOOL_LOGO_COLOURS] = {{",
+        "const uint16_t seedtool_logo_palette[SEEDTOOL_LOGO_COLOURS] = {",
     ]
-    lines += [
-        "    " + " ".join(f"0x{v:04x}," for v in entries[i : i + 8])
-        for i in range(0, COLOURS, 8)
-    ]
+    lines += ["    " + " ".join(f"0x{v:04x}," for v in entries[i : i + 8]) for i in range(0, MAX_COLOURS, 8)]
     lines += ["};", "", "const uint8_t seedtool_logo_pixels[SEEDTOOL_LOGO_BYTES] = {"]
-    lines += [
-        "    " + " ".join(f"0x{b:02x}," for b in packed[i : i + 12])
-        for i in range(0, len(packed), 12)
-    ]
+    lines += ["    " + " ".join(f"0x{b:02x}," for b in packed[i : i + 12]) for i in range(0, len(packed), 12)]
     lines += ["};", ""]
-    args.output.write_text("\n".join(lines))
-    print(f"{args.output}: {WIDTH}x{HEIGHT}, {COLOURS} colours, "
-          f"{len(packed)} pixel bytes + {COLOURS * 2} palette bytes")
+    path.write_text("\n".join(lines))
+    return len(packed)
+
+
+def write_png(canvas, colours, path):
+    width = (len(canvas[0]) + 2 * PNG_MARGIN) * PNG_SCALE
+    height = (len(canvas) + 2 * PNG_MARGIN) * PNG_SCALE
+    background = bytes(colours["."])
+    raw = bytearray()
+    for y in range(height):
+        cy = y // PNG_SCALE - PNG_MARGIN
+        row = bytearray(b"\0")
+        for x in range(width):
+            cx = x // PNG_SCALE - PNG_MARGIN
+            inside = 0 <= cy < len(canvas) and 0 <= cx < len(canvas[0])
+            row += bytes(colours[canvas[cy][cx]]) if inside else background
+        raw += row
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--cells", type=Path, default=ROOT / "assets/logo.txt")
+    parser.add_argument("--c", type=Path, default=ROOT / "main/seedtool_logo.c")
+    parser.add_argument("--png", type=Path, default=ROOT / "assets/logo.png")
+    args = parser.parse_args()
+
+    colours, parts = parse(args.cells)
+    canvas = compose(colours, parts)
+    # The header states the size the firmware draws; it is checked, not
+    # rewritten, so a change of size is a change someone makes on purpose.
+    header = (ROOT / "main/seedtool_logo.h").read_text()
+    declared = tuple(int(re.search(rf"#define SEEDTOOL_LOGO_{n} (\d+)", header).group(1)) for n in ("WIDTH", "HEIGHT"))
+    if declared != (len(canvas[0]), len(canvas)):
+        raise SystemExit(f"logo is {len(canvas[0])}x{len(canvas)}; main/seedtool_logo.h declares {declared[0]}x{declared[1]}")
+    size = write_c(canvas, colours, args.c)
+    write_png(canvas, colours, args.png)
+    print(f"{args.c}: {len(canvas[0])}x{len(canvas)}, {len(colours)} colours, {size} pixel bytes")
+    print(f"{args.png}: {PNG_SCALE}x, with a {PNG_MARGIN}-pixel margin")
 
 
 if __name__ == "__main__":
