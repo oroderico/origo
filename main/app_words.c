@@ -456,7 +456,13 @@ bool enter_passphrase_once(char* output, const size_t output_len)
             selected = seedtool_layout_center(layout);
         }
         const char* const tail = used > PASSPHRASE_TAIL ? output + used - PASSPHRASE_TAIL : output;
-        seedtool_render_keyboard("BIP39 passphrase", tail, layout, NULL, selected, 0, 0);
+        /* Which of the four pages is up, and the length so far: the field
+         * shows only the last PASSPHRASE_TAIL characters. */
+        static const char* const page_names[PASSPHRASE_PAGES] = { "abc", "ABC", "123", "#+=" };
+        char title[40];
+        (void)snprintf(title, sizeof(title), "Passphrase %s %u/%u", page_names[page], (unsigned)used,
+            (unsigned)(output_len - 1));
+        seedtool_render_keyboard(title, tail, layout, NULL, selected, 0, 0);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_PREV:
