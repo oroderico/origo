@@ -376,6 +376,15 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
     const unsigned last = step_value(first, min, max, false, allowed);
     unsigned current = first;
     bool on_back = false;
+    /* The way back is a stop on the ring with no label of its own until it is
+     * reached, so the footer says where it is. */
+    char footer[56], first_shown[24];
+    if (format) {
+        format(first, first_shown, sizeof(first_shown));
+    } else {
+        (void)snprintf(first_shown, sizeof(first_shown), "%u", first);
+    }
+    (void)snprintf(footer, sizeof(footer), "BOTH take   back is below %s", first_shown);
 
     for (;;) {
         char heading[48], shown[48];
@@ -389,10 +398,9 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
          * too wide for one and uses the text screen, with the running
          * transcript under it so a mis-keyed entry is caught against the paper. */
         if (!format) {
-            seedtool_render_value_box(heading, shown, on_back, chord_learned ? NULL : NAV_FOOTER, progress);
+            seedtool_render_value_box(heading, shown, on_back, footer, progress);
         } else {
-            seedtool_render_dice_screen(
-                heading, on_back ? "[back]" : shown, history, chord_learned ? NULL : NAV_FOOTER, progress);
+            seedtool_render_dice_screen(heading, on_back ? "[back]" : shown, history, footer, progress);
         }
         seedtool_display_flush();
         switch (wait_key()) {
@@ -439,7 +447,7 @@ bool enter_coin_flip(const char* title, const unsigned position, const unsigned 
     char heading[48];
     format_progress_heading(heading, sizeof(heading), title, position, total, progress);
     for (;;) {
-        seedtool_render_dice_screen(heading, "Heads (up)   Tails (down)", history, NULL, progress);
+        seedtool_render_dice_screen(heading, "Heads (up)   Tails (down)", history, COIN_FOOTER, progress);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
