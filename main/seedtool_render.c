@@ -149,7 +149,14 @@ _Static_assert(STACKBIT_PHYS_GRID_TOP + STACKBIT_PHYS_GRID_HEIGHT <= STACKBIT_PH
     "the physical punch grid runs into the number line");
 
 extern const unsigned char tft_DefaultFont[];
-extern const unsigned char tft_Ubuntu16[];
+extern const unsigned char tft_UbuntuRegular16[];
+extern const unsigned char tft_UbuntuMedium16[];
+
+/* Screen titles in the regular weight and what the screen holds - menu rows,
+ * words, numbers, addresses, keys - in the medium one, as Jade does: the
+ * weight marks what is read, not what labels it. */
+#define FONT_TITLE tft_UbuntuRegular16
+#define FONT_BODY tft_UbuntuMedium16
 
 typedef struct {
     uint8_t y_offset;
@@ -157,6 +164,8 @@ typedef struct {
     uint8_t height;
     int8_t x_offset;
     uint8_t x_advance;
+    /* 1 for an inked-or-not pixel, 4 for sixteen levels of coverage. */
+    uint8_t bits;
     const uint8_t* bitmap;
 } glyph_t;
 
@@ -191,9 +200,12 @@ static void fill_rect(int x, int y, int width, int height, const uint16_t color)
 
 static bool find_glyph(const uint8_t* font, const unsigned char character, glyph_t* glyph)
 {
+    /* The header's first byte is the bits per pixel, 0 in the one-bit fonts
+     * that predate it (whose other header bytes are in use). */
+    const uint8_t bits = font[0] ? font[0] : 1;
     const uint8_t* cursor = font + 4;
     while (*cursor != character && *cursor != 0xff) {
-        const size_t bitmap_size = cursor[2] ? ((size_t)cursor[2] * cursor[3] + 7) / 8 : 0;
+        const size_t bitmap_size = ((size_t)cursor[2] * cursor[3] * bits + 7) / 8;
         cursor += 6 + bitmap_size;
     }
     if (*cursor == 0xff) {
@@ -204,9 +216,15 @@ static bool find_glyph(const uint8_t* font, const unsigned char character, glyph
     glyph->height = cursor[3];
     glyph->x_offset = cursor[4] < 0x80 ? (int8_t)cursor[4] : (int8_t)(cursor[4] - 0x100);
     glyph->x_advance = cursor[5];
+    glyph->bits = bits;
     glyph->bitmap = cursor + 6;
     return true;
 }
+
+/* The widest paged or tailed line: the panel less a margin either side, so a
+ * line of a key or an address does not run edge to edge. */
+#define TEXT_MARGIN 6
+#define TEXT_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * TEXT_MARGIN)
 
 static int glyph_advance(const uint8_t* font, const unsigned char character)
 {
@@ -224,6 +242,22 @@ static int text_width(const uint8_t* font, const char* text, const size_t length
     return width ? width - 1 : 0;
 }
 
+/* `color` over the pixel already at (x, y), `coverage` sixteenths of the way:
+ * an antialiased glyph's edge takes the colour of whatever it is drawn on, a
+ * row's highlight as much as the black around it. */
+static void blend_pixel(const int x, const int y, const uint16_t color, const unsigned coverage)
+{
+    if (x < 0 || y < 0 || x >= SEEDTOOL_DISPLAY_WIDTH || y >= SEEDTOOL_DISPLAY_HEIGHT) {
+        return;
+    }
+    uint16_t* const pixel = &framebuffer[y * SEEDTOOL_DISPLAY_WIDTH + x];
+    const unsigned back = *pixel, keep = 15 - coverage;
+    const unsigned red = (((color >> 11) & 0x1f) * coverage + ((back >> 11) & 0x1f) * keep + 7) / 15;
+    const unsigned green = (((color >> 5) & 0x3f) * coverage + ((back >> 5) & 0x3f) * keep + 7) / 15;
+    const unsigned blue = ((color & 0x1f) * coverage + (back & 0x1f) * keep + 7) / 15;
+    *pixel = (uint16_t)((red << 11) | (green << 5) | blue);
+}
+
 static void draw_glyph(
     const uint8_t* font, const unsigned char character, const int x, const int y, const uint16_t color)
 {
@@ -231,11 +265,17 @@ static void draw_glyph(
     if (!find_glyph(font, character, &glyph)) {
         return;
     }
-    size_t bit = 0;
+    size_t index = 0;
     for (uint8_t row = 0; row < glyph.height; ++row) {
-        for (uint8_t col = 0; col < glyph.width; ++col, ++bit) {
-            if (glyph.bitmap[bit / 8] & (UINT8_C(0x80) >> (bit % 8))) {
-                fill_rect(x + glyph.x_offset + col, y + glyph.y_offset + row, 1, 1, color);
+        for (uint8_t col = 0; col < glyph.width; ++col, ++index) {
+            const int px = x + glyph.x_offset + col, py = y + glyph.y_offset + row;
+            if (glyph.bits == 4) {
+                const unsigned coverage = (glyph.bitmap[index / 2] >> (index % 2 ? 0 : 4)) & 0x0f;
+                if (coverage) {
+                    blend_pixel(px, py, color, coverage);
+                }
+            } else if (glyph.bitmap[index / 8] & (UINT8_C(0x80) >> (index % 8))) {
+                fill_rect(px, py, 1, 1, color);
             }
         }
     }
@@ -363,7 +403,7 @@ static void draw_typed(const uint8_t* font, const char* text, const int y)
 {
     const size_t length = strlen(text);
     size_t start = 0;
-    while (start < length && text_width(font, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
+    while (start < length && text_width(font, text + start, length - start) > TEXT_WIDTH) {
         ++start;
     }
     draw_centered_line(font, text + start, length - start, 0, SEEDTOOL_DISPLAY_WIDTH, y);
@@ -404,7 +444,7 @@ static size_t fit_in_wrapped(const uint8_t* font, const char* text, const size_t
 
 size_t seedtool_render_fit(const char* text, const size_t limit)
 {
-    return fit_in_wrapped(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+    return fit_in_wrapped(FONT_BODY, text, limit, TEXT_WIDTH);
 }
 
 /* An address has no word boundaries to keep one's place by, so it is drawn in
@@ -473,7 +513,7 @@ static size_t fit_grouped_in(const uint8_t* font, const char* text, const size_t
 
 size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 {
-    return fit_grouped_in(tft_Ubuntu16, text, limit, SEEDTOOL_DISPLAY_WIDTH - 4);
+    return fit_grouped_in(FONT_BODY, text, limit, TEXT_WIDTH);
 }
 
 
@@ -495,13 +535,13 @@ static void draw_row(const uint8_t* font, const char* text, const int x, const i
     draw_line_at(font, ROW_ELLIPSIS, strlen(ROW_ELLIPSIS), x + text_width(font, text, shortened), y, ink);
 }
 
-size_t seedtool_render_fit_row(const char* text) { return fit_in(tft_Ubuntu16, text, SIZE_MAX, LIST_TEXT_WIDTH); }
+size_t seedtool_render_fit_row(const char* text) { return fit_in(FONT_BODY, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
 size_t seedtool_render_fit_tail(const char* text)
 {
     const size_t length = strlen(text);
     size_t start = 0;
-    while (start < length && text_width(tft_Ubuntu16, text + start, length - start) > SEEDTOOL_DISPLAY_WIDTH - 4) {
+    while (start < length && text_width(FONT_BODY, text + start, length - start) > TEXT_WIDTH) {
         ++start;
     }
     return length - start;
@@ -537,11 +577,11 @@ void seedtool_render_splash(void)
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 5);
+    draw_centered(FONT_TITLE, title, 5);
     /* The body carries the values that get transcribed, so it takes the larger
      * face. The footer stays small or it would run off the display. */
-    draw_centered(tft_Ubuntu16, line1, 39);
-    draw_centered(tft_Ubuntu16, line2, 65);
+    draw_centered(FONT_BODY, line1, 39);
+    draw_centered(FONT_BODY, line2, 65);
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
 }
 
@@ -685,11 +725,11 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * (a key origin under a three-digit account) takes the smaller face, since
      * a second line would land on the body. */
     const int title_width = SEEDTOOL_DISPLAY_WIDTH - 2 * inset;
-    if (title && text_width(tft_Ubuntu16, title, strlen(title)) > title_width) {
+    if (title && text_width(FONT_TITLE, title, strlen(title)) > title_width) {
         (void)draw_centered_box(tft_DefaultFont, title, inset, title_width,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - tft_DefaultFont[1]) / 2);
     } else {
-        (void)draw_centered_box(tft_Ubuntu16, title, inset, title_width, LIST_TITLE_Y);
+        (void)draw_centered_box(FONT_TITLE, title, inset, title_width, LIST_TITLE_Y);
     }
     /* The rule under the header, which closes the arrow's box and the
      * confirm's, drawn here so every screen wearing the header gets it. */
@@ -725,12 +765,12 @@ void seedtool_render_nav_text(
     /* Two lines at 39 and 65, or three at 33, 58 and 83, pitched tighter to
      * clear the counter. */
     if (line3) {
-        draw_centered(tft_Ubuntu16, line1, 33);
-        draw_centered(tft_Ubuntu16, line2, 58);
-        draw_centered(tft_Ubuntu16, line3, 83);
+        draw_centered(FONT_BODY, line1, 33);
+        draw_centered(FONT_BODY, line2, 58);
+        draw_centered(FONT_BODY, line3, 83);
     } else {
-        draw_centered(tft_Ubuntu16, line1, 39);
-        draw_centered(tft_Ubuntu16, line2, 65);
+        draw_centered(FONT_BODY, line1, 39);
+        draw_centered(FONT_BODY, line2, 65);
     }
     nav_end(nav);
 }
@@ -745,7 +785,7 @@ void seedtool_render_nav_grouped(const seedtool_nav_t* nav, const char* title, c
     for (size_t i = 0; i < count && i < 3; ++i) {
         if (lines[i] && lines[i][0]) {
             draw_grouped_in(
-                tft_Ubuntu16, lines[i], strlen(lines[i]), 0, SEEDTOOL_DISPLAY_WIDTH, y[i], first_group[i]);
+                FONT_BODY, lines[i], strlen(lines[i]), 0, SEEDTOOL_DISPLAY_WIDTH, y[i], first_group[i]);
         }
     }
     nav_end(nav);
@@ -756,7 +796,7 @@ void seedtool_render_nav_rows(
 {
     nav_begin(nav, title);
     for (size_t row = 0; row < NAV_ROWS_SHOWN && row < count; ++row) {
-        draw_left(tft_Ubuntu16, rows[row], SCREEN4_TEXT_X, NAV_ROWS_TOP + (int)row * NAV_ROWS_HEIGHT);
+        draw_left(FONT_BODY, rows[row], SCREEN4_TEXT_X, NAV_ROWS_TOP + (int)row * NAV_ROWS_HEIGHT);
     }
     nav_end(nav);
 }
@@ -776,7 +816,7 @@ void seedtool_render_nav_list(
         if (highlighted) {
             fill_rect(LIST_BAR_X, y, LIST_BAR_WIDTH, NAV_ROW_HEIGHT - 2, COLOR_HIGHLIGHT);
         }
-        draw_row(tft_Ubuntu16, item, LIST_TEXT_X, y + (NAV_ROW_HEIGHT - tft_Ubuntu16[1]) / 2, LIST_TEXT_WIDTH,
+        draw_row(FONT_BODY, item, LIST_TEXT_X, y + (NAV_ROW_HEIGHT - FONT_BODY[1]) / 2, LIST_TEXT_WIDTH,
             highlighted ? COLOR_BLACK : COLOR_WHITE);
     }
     if (count > SEEDTOOL_LIST_ROWS) {
@@ -960,7 +1000,7 @@ void seedtool_render_value_box(
     const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
+    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
     /* Centred above the quality bar whether or not `progress` draws it, so the
      * box does not move between graded and ungraded runs. */
     const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
@@ -972,8 +1012,8 @@ void seedtool_render_value_box(
         draw_backspace(x + (VALUE_BOX_WIDTH - BACKSPACE_WIDTH) / 2,
             box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2, COLOR_BLACK, COLOR_HIGHLIGHT);
     } else {
-        draw_centered_in(tft_Ubuntu16, text, x, VALUE_BOX_WIDTH,
-            box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2, COLOR_BLACK);
+        draw_centered_in(FONT_BODY, text, x, VALUE_BOX_WIDTH,
+            box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2, COLOR_BLACK);
     }
     const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
     draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
@@ -988,7 +1028,7 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
     const char* footer, const seedtool_progress_t* progress)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, SCREEN_TITLE_Y);
+    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
 
     /* Nothing under this field but the footer, so it centres in that whole
      * band rather than sharing the value box's higher placement. */
@@ -1007,16 +1047,16 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
             selected ? COLOR_HIGHLIGHT : set ? COLOR_WHITE : COLOR_DIM);
 
         const char shown = digits[i];
-        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - tft_Ubuntu16[1]) / 2;
+        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2;
         if (shown == SEEDTOOL_KEY_ACCEPT) {
-            draw_centered_in(tft_Ubuntu16, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
+            draw_centered_in(FONT_BODY, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
             /* The way out rides the ring as the backspace glyph. */
             draw_backspace(x + (DIGIT_BOX_WIDTH - BACKSPACE_WIDTH) / 2, box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2,
                 COLOR_BLACK, COLOR_HIGHLIGHT);
         } else if (shown && shown != ' ') {
             const char text[2] = { shown, '\0' };
-            draw_centered_in(tft_Ubuntu16, text, x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
+            draw_centered_in(FONT_BODY, text, x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
         }
 
         if (selected) {
@@ -1054,8 +1094,8 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
     const size_t selected, const size_t position, const size_t total)
 {
     seedtool_render_clear();
-    draw_centered(tft_Ubuntu16, title, 2);
-    draw_typed(tft_Ubuntu16, text, 32);
+    draw_centered(FONT_TITLE, title, 2);
+    draw_typed(FONT_BODY, text, 32);
     if (total && position) {
         const size_t done = position > total ? total : position - 1;
         const int filled = (int)(DICE_BAR_WIDTH * done / total);
@@ -1081,7 +1121,7 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
              * one, or "OK" would fill its cell. */
             const bool worded = row[column] == SEEDTOOL_KEY_PAGE || row[column] == SEEDTOOL_KEY_ACCEPT
                 || row[column] == ' ';
-            const unsigned char* const face = worded ? tft_DefaultFont : tft_Ubuntu16;
+            const unsigned char* const face = worded ? tft_DefaultFont : FONT_BODY;
             if (highlighted) {
                 fill_rect(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, COLOR_HIGHLIGHT);
             } else {
@@ -1126,7 +1166,7 @@ void seedtool_render_stackbit_screen(
         const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL + (STACKBIT_CELL - tft_DefaultFont[1]) / 2;
         draw_line_at(tft_DefaultFont, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
     }
-    draw_centered_in(tft_Ubuntu16, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
+    draw_centered_in(FONT_BODY, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
     draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_SOFT);
     draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
 }
@@ -1176,7 +1216,7 @@ void seedtool_render_stackbit_physical_screen(
         x += STACKBIT_PHYS_BLOCK_WIDTH + STACKBIT_PHYS_GAP;
     }
 
-    draw_centered(tft_Ubuntu16, digits, STACKBIT_PHYS_NUMBER_Y);
+    draw_centered(FONT_BODY, digits, STACKBIT_PHYS_NUMBER_Y);
     draw_centered_in(tft_DefaultFont, word, 0, SEEDTOOL_DISPLAY_WIDTH, STACKBIT_PHYS_WORD_Y, COLOR_SOFT);
     draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
 }
