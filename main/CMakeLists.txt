@@ -20,6 +20,12 @@ idf_component_register(
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 
+# The version About shows: ESP-IDF's PROJECT_VER, `git describe --always --tags
+# --dirty` of the source, the same string the image's app description carries.
+# It is a fact about the source, so it keeps the build reproducible.
+idf_build_get_property(project_ver PROJECT_VER)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE ORIGO_VERSION="${project_ver}")
+
 idf_build_get_property(link_options LINK_OPTIONS)
 list(APPEND link_options "-Wl,--wrap=abort")
 idf_build_set_property(LINK_OPTIONS "${link_options}" APPEND)

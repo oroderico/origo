@@ -328,7 +328,9 @@ of a screen position, since a direct choice has nothing left to confirm.
 
 ### Settings
 
-The main menu's `Settings` entry carries `About` (the safety disclaimer),
+The main menu's `Settings` entry carries `About` (the firmware's version - the
+source's `git describe`, with `-dirty` if it was built from uncommitted changes -
+then the safety disclaimer),
 `Flip Orientation`, which toggles the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
