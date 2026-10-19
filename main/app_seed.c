@@ -330,6 +330,7 @@ static bool flip_words(const size_t words)
     const size_t word_count = coin_flipped_words(words);
     const size_t tail_count = coin_tail_bits(words);
     uint16_t indices[23] = { 0 };
+    char words_flipped[23][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
     uint8_t tail[7] = { 0 };
     char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
     char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
@@ -374,20 +375,11 @@ static bool flip_words(const size_t words)
             continue;
         }
 
-        prefix[0] = '\0';
-        size_t used = 0;
         for (size_t i = 0; i < word_count; ++i) {
-            const char* const word = seedtool_word(indices[i]);
-            const size_t len = strlen(word);
-            /* Checked, not assumed: a truncated prefix would be a wrong seed. */
-            seedtool_require(used + len + (i ? 1 : 0) < sizeof(prefix));
-            if (i) {
-                prefix[used++] = ' ';
-            }
-            memcpy(prefix + used, word, len);
-            used += len;
-            prefix[used] = '\0';
+            strcpy(words_flipped[i], seedtool_word(indices[i]));
         }
+        /* Checked, not assumed: a truncated prefix would be a wrong seed. */
+        seedtool_require(join_words(words_flipped, word_count, prefix, sizeof(prefix)));
 
         if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
             notice("Error", "Could not complete", "the mnemonic");
@@ -398,6 +390,7 @@ static bool flip_words(const size_t words)
     }
 
     seedtool_zero(indices, sizeof(indices));
+    seedtool_zero(words_flipped, sizeof(words_flipped));
     seedtool_zero(tail, sizeof(tail));
     seedtool_zero(prefix, sizeof(prefix));
     seedtool_zero(completed, sizeof(completed));
@@ -406,12 +399,11 @@ static bool flip_words(const size_t words)
 
 /* Flipped words or hashed flips. Only coins get this choice: theirs is the one
  * transcript a reader can turn into words by hand. Returns 0 for flipped words,
- * 1 for hashed, -1 for back. */
+ * 1 for hashed, NAV_BACK for back. */
 static int choose_coin_method(void)
 {
     const char* methods[] = { "Flip each word", "Flip and hash" };
-    const int selected = choose_menu("Coin method", methods, 2);
-    return selected == 2 ? -1 : selected;
+    return choose_menu("Coin method", methods, ARRAY_LEN(methods));
 }
 
 /* The "Entropy source" menu's rows are the sources, in enum order. */
@@ -426,14 +418,14 @@ static bool create_seed(void)
     size_t cursor = 0;
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
-        const int source = choose_menu_at("Entropy source", sources, sizeof(sources) / sizeof(sources[0]), &cursor);
-        if (source == 4) {
+        const int source = choose_menu_at("Entropy source", sources, ARRAY_LEN(sources), &cursor);
+        if (source == NAV_BACK) {
             return false;
         }
         for (;;) {
             const char* lengths[] = { "12 words", "24 words" };
-            const int length = choose_menu("Seed length", lengths, sizeof(lengths) / sizeof(lengths[0]));
-            if (length == 2) {
+            const int length = choose_menu("Seed length", lengths, ARRAY_LEN(lengths));
+            if (length == NAV_BACK) {
                 break;
             }
             const size_t words = length ? 24 : 12;
@@ -441,7 +433,7 @@ static bool create_seed(void)
                 bool run_hashed = false;
                 for (;;) {
                     const int method = choose_coin_method();
-                    if (method < 0) {
+                    if (method == NAV_BACK) {
                         break; /* Back: the length picker, one stage. */
                     }
                     if (method == 1) {
@@ -472,8 +464,8 @@ static bool complete_checksum(void)
     size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "11 words + 7 coins", "23 words + 3 coins" };
-        const int selected = choose_menu_at("Complete checksum", lengths, 2, &cursor);
-        if (selected == 2) {
+        const int selected = choose_menu_at("Complete checksum", lengths, ARRAY_LEN(lengths), &cursor);
+        if (selected == NAV_BACK) {
             return false;
         }
         const size_t count = selected ? 23 : 11;
@@ -532,8 +524,8 @@ void show_new_seed_menu(void)
     size_t cursor = 0;
     for (;;) {
         const char* items[] = { "From entropy", "Complete checksum" };
-        const int selected = choose_menu_at("New Seed", items, 2, &cursor);
-        if (selected == 2) {
+        const int selected = choose_menu_at("New Seed", items, ARRAY_LEN(items), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
         /* A generated seed returns home. Leaving the wallet reboots, so this
@@ -549,8 +541,8 @@ void restore_seed(void)
     size_t cursor = 0;
     for (;;) {
         const char* lengths[] = { "12 words", "24 words" };
-        const int selected = choose_menu_at("Restore mnemonic", lengths, 2, &cursor);
-        if (selected == 2) {
+        const int selected = choose_menu_at("Restore mnemonic", lengths, ARRAY_LEN(lengths), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
         const size_t count = selected ? 24 : 12;
