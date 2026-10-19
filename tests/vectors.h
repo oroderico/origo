@@ -24,6 +24,19 @@ static const char expected_xpub84[]
 static const char expected_xpub86[]
     = "xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ";
 
+/* The first BIP44 and BIP49 receive addresses for the same mnemonic, as every
+ * BIP39 reference wallet derives them, and the ypub of the BIP49 account
+ * (SLIP-132: the xpub's 78 bytes under ypub's version). The account xpubs are
+ * from tools/origo_verify.py, which shares no code with libwally. */
+static const char expected_address44[] = "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA";
+static const char expected_address49[] = "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf";
+static const char expected_xpub44[]
+    = "xpub6BosfCnifzxcFwrSzQiqu2DBVTshkCXacvNsWGYJVVhhawA7d4R5WSWGFNbi8Aw6ZRc1brxMyWMzG3DSSSSoekkudhUd9yLb6qx39T9nMdj";
+static const char expected_xpub49[]
+    = "xpub6C6nQwHaWbSrzs5tZ1q7m5R9cPK9eYpNMFesiXsYrgc1P8bvLLAet9JfHjYXKjToD8cBRswJXXbbFpXgwsswVPAZzKMa1jUp2kVkGVUaJa7";
+static const char expected_ypub49[]
+    = "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP";
+
 /* SLIP-132 zpub for the same account: the identical key, xpub's version bytes
  * swapped for zpub's, published in the SLIP-132 test vectors. */
 static const char expected_zpub84[]

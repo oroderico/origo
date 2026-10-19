@@ -514,6 +514,33 @@ static bool published_vectors_match(void)
     return true;
 }
 
+/* Legacy and nested segwit: the published first receive addresses, the account
+ * keys, and SLIP-132 offered only where it is defined - ypub for BIP49, zpub
+ * for BIP84, neither for BIP44. */
+static bool legacy_and_nested_vectors_match(void)
+{
+    char address[SEEDTOOL_MAX_ADDRESS_LEN];
+    char xpub[SEEDTOOL_MAX_XPUB_LEN];
+    const seedtool_root_t root = vector_root();
+    CHECK(address_at(SEEDTOOL_BIP44, SEEDTOOL_RECEIVE, 0, address) == SEEDTOOL_OK);
+    CHECK(strcmp(address, expected_address44) == 0);
+    CHECK(address_at(SEEDTOOL_BIP49, SEEDTOOL_RECEIVE, 0, address) == SEEDTOOL_OK);
+    CHECK(strcmp(address, expected_address49) == 0);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP44, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(strcmp(xpub, expected_xpub44) == 0);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP49, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(strcmp(xpub, expected_xpub49) == 0);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP49, 0, SEEDTOOL_YPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(strcmp(xpub, expected_ypub49) == 0);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP44, 0, SEEDTOOL_YPUB, xpub, sizeof(xpub)) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP44, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP49, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_YPUB, xpub, sizeof(xpub)) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_account_xpub(&root, (seedtool_address_type_t)45, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub))
+        == SEEDTOOL_EINVAL);
+    return true;
+}
+
 /* The account and chain are really threaded into the path - different values
  * give different keys - and both are bounded rather than taken on trust. */
 static bool account_and_chain_reach_the_path(void)
@@ -598,6 +625,7 @@ int main(void)
         TEST(bbqr_base32_is_sound),
         TEST(published_vectors_match),
         TEST(account_and_chain_reach_the_path),
+        TEST(legacy_and_nested_vectors_match),
         TEST(fingerprint_follows_the_passphrase),
         TEST(address_ranges_are_consistent),
     };

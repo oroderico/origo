@@ -51,8 +51,9 @@ Origo is a fourth answer: a development board costing about as much as lunch,
 running firmware that does this arithmetic and has no facility for anything
 else. It generates a 12- or 24-word mnemonic from dice, coins or cards;
 finishes a checksum from 11 or 23 words already known; validates a mnemonic
-you already have; shows that mnemonic's master fingerprint, its BIP84 or
-BIP86 account key — as `xpub`, as a SLIP-132 `zpub` where one is defined, or
+you already have; shows that mnemonic's master fingerprint, its BIP84, BIP86,
+BIP49 or BIP44 account key — as `xpub`, as a SLIP-132 `ypub` or `zpub` where one
+is defined, or
 as a QR code — its output descriptor, and the first ten thousand addresses of
 its receive or change branch; and exports a backup as words, as word numbers, as a
 Stackbit 1248 punch pattern, or as a Compact SeedQR.
@@ -434,7 +435,9 @@ fingerprint sees at a glance whether the device is deriving that wallet.
 A **Derivation** screen holds the three things that decide what everything else
 derives, ordered by how deep each one cuts: the optional passphrase, which
 decides the seed itself and so every key the device can produce; the wallet
-type — Native SegWit (BIP84) or Taproot (BIP86) — which picks a path from that
+type — Native SegWit (BIP84), Taproot (BIP86), Nested SegWit (BIP49) or Legacy
+(BIP44), the last two for checking and restoring older wallets — which picks a
+path from that
 seed; and the account index (`m/type'/0'/account'`, 0 through 999), which picks
 a branch of that path. All three last for the whole viewing session rather than
 one visit to a screen, so checking account 2 under both types means setting it
@@ -449,18 +452,20 @@ than leaving it to be remembered. The wallet menu itself then offers, for
 whatever is set:
 
 - **Extended public key**, holding every way the account's watch-only key at
-  `m/84'/0'/0'` or `m/86'/0'/0'` leaves the device — they are the same 78 bytes
+  `m/84'/0'/0'`, `m/86'/0'/0'`, `m/49'/0'/0'` or `m/44'/0'/0'` leaves the device — they are the same 78 bytes
   three ways, so they sit together rather than as separate rows that look
   unrelated while carrying identical risk. As `xpub`, titled with its key
-  origin such as `[73c5da0a/84'/0'/0']`; as SLIP-132's `zpub`, the same 78
-  bytes with the four version bytes swapped, since libwally serialises only the
-  plain BIP32 versions and has no notion of SLIP-132 — Native SegWit only,
-  since SLIP-132 defines no taproot prefix, and under Taproot that row is
-  absent rather than present and refusing; or as the output descriptor
+  origin such as `[73c5da0a/84'/0'/0']`; as SLIP-132's `zpub` (Native SegWit)
+  or `ypub` (Nested SegWit), the same 78 bytes with the four version bytes
+  swapped, since libwally serialises only the plain BIP32 versions and has no
+  notion of SLIP-132 — SLIP-132 defines no prefix for taproot or legacy, and
+  under those types that row is absent rather than present and refusing; or as
+  the output descriptor
   described below;
 - its mainnet addresses for indices 0 through 9999, on whichever branch is asked
   for: `Addresses` opens a Receive/Change choice first, and the list that
-  follows is `m/84'/0'/0'/0/i` or `m/86'/0'/0'/0/i` for receive,
+  follows is `m/84'/0'/0'/0/i`, `m/86'/0'/0'/0/i`, `m/49'/0'/0'/0/i` or
+  `m/44'/0'/0'/0/i` for receive,
   `.../1/i` for change, with each address titled by its own full path so the
   branch is never inferred from which menu it was reached through. The list
   shows the first fifty; a "Go to index" entry at the end of it takes any
@@ -476,8 +481,8 @@ whatever is set:
 - its BIP380 output descriptor, the third entry under Extended public key —
   script type, key origin, account key and an
   8-character checksum in the one string a watch-only wallet imports directly,
-  as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`
-  equivalent. The chain step is BIP389's multipath `<0;1>`, so the single
+  as `wpkh([73c5da0a/84'/0'/0']xpub.../<0;1>/*)#hpg6d6w2` or its `tr()`,
+  `sh(wpkh())` or `pkh()` equivalent. The chain step is BIP389's multipath `<0;1>`, so the single
   descriptor describes the receive and the change branch together: a wallet
   imported from a receive-only descriptor has nowhere to put its change. That
   is a deliberate trade rather than a free upgrade — BIP389 is newer than
@@ -485,7 +490,7 @@ whatever is set:
   others) rejects the `<0;1>` outright rather than reading half of it. Such a
   wallet wants the receive-only form, `.../0/*`, which is the same string with
   the multipath step replaced and its checksum recomputed; `tools/origo_verify.py`
-  is the offline way to produce one. Always plain `xpub`, never `zpub` —
+  is the offline way to produce one. Always plain `xpub`, never `ypub` or `zpub` —
   SLIP-132's version bytes are a display convention BIP380 has no notion of. It
   carries the same account key the QR does, so it reveals every address of the
   account exactly as that does, and the device says so before showing one.
@@ -500,7 +505,7 @@ spelled with a word: `OK` at 16px is 24px wide in a 24px cell. Backspace is draw
 as an arrow instead of spelled, since the fonts are 95 printable ASCII characters
 and have no glyph for it.
 
-The account key just shown — as `xpub` or `zpub`, whichever — and the address
+The account key just shown — as `xpub`, `ypub` or `zpub`, whichever — and the address
 last opened from its list (index 0 until one has been) can be shown as QR
 codes. The QR screen steps sideways between the two, each one named in the
 margin beside it, so an account key and the address it belongs to are one press
@@ -608,7 +613,7 @@ as you would on the device. `Q` or `Escape` closes the simulator.
 
 The tests need no SDL: `cmake -S host -B build-host && cmake --build build-host
 && ctest --test-dir build-host`. `tests/test_core.c` checks the published BIP39,
-BIP84, BIP86, SLIP-132 and BIP380 vectors and exhaustive wordlist properties;
+BIP44, BIP49, BIP84, BIP86, SLIP-132 and BIP380 vectors and exhaustive wordlist properties;
 `tests/test_render.c` checks that what the screens draw is the value held (paged
 text, grouped addresses, Stackbit grids, Compact SeedQR payloads) and that the
 keyboards reach every character; `tests/test_entropy_stats.c` checks the
@@ -698,7 +703,8 @@ build paths and project metadata out of it.
 ## Independent verification
 
 `tools/origo_verify.py` is dependency-free and independently implements
-BIP39, BIP32, BIP84, BIP86 and Bech32/Bech32m. Examples:
+BIP39, BIP32, BIP44, BIP49, BIP84, BIP86, Base58Check and Bech32/Bech32m.
+Examples:
 
 ```sh
 python3 tools/origo_verify.py generate d20 --words 12 1 2 3 ...

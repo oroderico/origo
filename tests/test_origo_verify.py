@@ -588,8 +588,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         root = Path(__file__).parents[1]
         app = app_source()
         for fragment, why in (
-            ("/<0;1>/*)", "the descriptor body is no longer BIP389 multipath"),
-            ("/<0;1>/*)#12345678", "DESCRIPTOR_LEN no longer bounds the multipath body"),
+            ("/<0;1>/*%s", "the descriptor body is no longer BIP389 multipath"),
+            ("/<0;1>/*))#12345678", "DESCRIPTOR_LEN no longer bounds the longest multipath body"),
             # The address list's title is the path prefix its rows share, and
             # each address's own path is that prefix plus an index - so the
             # branch is carried once, by the prefix, and both the title and
@@ -599,7 +599,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         ):
             self.assertTrue(fragment in app, why)
         for fragment, why in (
-            ("]%s/0/*)", "the descriptor body reverted to receive-only"),
+            ("]%s/0/*", "the descriptor body reverted to receive-only"),
             ("\"m/%u'/0'/%u'/0/%u\"", "the address title reverted to a hardcoded receive branch"),
         ):
             self.assertFalse(fragment in app, why)
@@ -767,6 +767,24 @@ class SeedToolVerifierTests(unittest.TestCase):
             accounts["84z"],
             "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
         )
+
+    def test_bip44_and_bip49_vectors(self):
+        # The first receive addresses every BIP39 reference wallet derives for
+        # this mnemonic on the legacy and nested-segwit paths.
+        _, addresses, accounts = verify.addresses(self.MNEMONIC, "", 0)
+        self.assertEqual(addresses[44], "1LqBGSKuX5yYUonjxT5qGfpUsXKYYWeabA")
+        self.assertEqual(addresses[49], "37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf")
+        # SLIP-132 ypub for the BIP49 account: the xpub's 78 bytes under
+        # ypub's version.
+        self.assertEqual(
+            accounts["49y"],
+            "ypub6Ww3ibxVfGzLrAH1PNcjyAWenMTbbAosGNB6VvmSEgytSER9azLDWCxoJwW7Ke7icmizBMXrzBx9979FfaHxHcrArf3zbeJJJUZPf663zsP",
+        )
+        fingerprint = "73c5da0a"
+        self.assertTrue(verify.descriptor(fingerprint, 44, accounts[44]).startswith(f"pkh([{fingerprint}/44'/0'/0']"))
+        nested = verify.descriptor(fingerprint, 49, accounts[49])
+        self.assertTrue(nested.startswith(f"sh(wpkh([{fingerprint}/49'/0'/0']"))
+        self.assertIn("/<0;1>/*))#", nested)
 
     def test_base58check_handles_leading_zero_bytes(self):
         # Version byte plus an all-zero hash160: every leading zero byte must

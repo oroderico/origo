@@ -57,7 +57,11 @@ typedef enum {
     SEEDTOOL_CARDS_REPLACE,
 } seedtool_source_t;
 
+/* Script types, each the BIP number its accounts use as the path's purpose:
+ * legacy P2PKH, nested segwit P2SH-P2WPKH, native segwit, taproot. */
 typedef enum {
+    SEEDTOOL_BIP44 = 44,
+    SEEDTOOL_BIP49 = 49,
     SEEDTOOL_BIP84 = 84,
     SEEDTOOL_BIP86 = 86,
 } seedtool_address_type_t;
@@ -73,11 +77,12 @@ typedef enum {
 _Static_assert(SEEDTOOL_RECEIVE == 0 && SEEDTOOL_CHANGE == 1,
     "BIP44 numbers the receive branch 0 and the change branch 1, and these values are the path component");
 
-/* SLIP-132 defines a zpub version prefix for native segwit (BIP84) accounts
- * and none for taproot: SEEDTOOL_BIP86 with SEEDTOOL_ZPUB is SEEDTOOL_EINVAL
- * rather than a silent fall-back to xpub. */
+/* SLIP-132 defines a ypub version prefix for nested segwit (BIP49) accounts, a
+ * zpub one for native segwit (BIP84), and none for legacy or taproot: any other
+ * pairing is SEEDTOOL_EINVAL rather than a silent fall-back to xpub. */
 typedef enum {
     SEEDTOOL_XPUB,
+    SEEDTOOL_YPUB,
     SEEDTOOL_ZPUB,
 } seedtool_key_format_t;
 
@@ -164,8 +169,8 @@ seedtool_result_t seedtool_root_from_mnemonic(const char* mnemonic, const char* 
 
 seedtool_result_t seedtool_master_fingerprint(const seedtool_root_t* root, uint8_t fingerprint[4]);
 
-/* Watch-only account key at m/type'/0'/account', as an xpub or (BIP84 only)
- * a SLIP-132 zpub. */
+/* Watch-only account key at m/type'/0'/account', as an xpub or its SLIP-132
+ * form: ypub for BIP49, zpub for BIP84. */
 seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, seedtool_address_type_t type, uint32_t account,
     seedtool_key_format_t format, char* output, size_t output_len);
 
