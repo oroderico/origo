@@ -275,7 +275,11 @@ static void draw_centered_line(
 /* Centred and wrapped inside the box of `width` pixels at `x`, breaking at the
  * last space rather than inside a word; a word wider than the box is split.
  * Returns the y just past the last line, for callers stacking text below. */
-static int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, int y)
+/* Lays `text` out centred in a box `width` wide from row `y`, wrapping as it
+ * goes, and returns the row below its last line. With `draw` false it only
+ * measures, so a screen can place what follows before drawing anything. */
+static int layout_centered_box(
+    const uint8_t* font, const char* text, const int x, const int width, int y, const bool draw)
 {
     if (!text) {
         return y;
@@ -314,11 +318,32 @@ static int draw_centered_box(const uint8_t* font, const char* text, const int x,
                 line_end = at_space;
             }
         }
-        draw_centered_line(font, cursor, (size_t)(line_end - cursor), x, width, y);
+        if (draw) {
+            draw_centered_line(font, cursor, (size_t)(line_end - cursor), x, width, y);
+        }
         cursor = *line_end == ' ' || *line_end == '\n' ? line_end + 1 : line_end;
         y += line_height;
     }
     return y;
+}
+
+static int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, const int y)
+{
+    return layout_centered_box(font, text, x, width, y, true);
+}
+
+/* The lowest row any glyph of `text` inks, from the top of its line: a font's
+ * declared height leaves out descenders. */
+static int text_ink_bottom(const uint8_t* font, const char* text, const size_t length)
+{
+    int bottom = 0;
+    for (size_t i = 0; i < length; ++i) {
+        glyph_t glyph;
+        if (find_glyph(font, (unsigned char)text[i], &glyph) && glyph.y_offset + glyph.height > bottom) {
+            bottom = glyph.y_offset + glyph.height;
+        }
+    }
+    return bottom;
 }
 
 static void draw_centered(const uint8_t* font, const char* text, const int y)
@@ -1291,6 +1316,9 @@ bool seedtool_render_qr(const char* title, const char* text, const size_t select
 /* Two groups to a line, so an address always falls into the same block; a
  * 42-character bech32 address is five full lines and a short sixth. */
 #define QR_ADDRESS_GROUPS 2
+/* Between the path and the address: they are two different facts, and run
+ * together they read as one wrapped string. */
+#define QR_ADDRESS_GAP 5
 
 /* The code, its derivation path and the address, on one screen: the way out,
  * then the path, then the address in groups of four, in the small face since it
@@ -1303,7 +1331,11 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
     }
     const qr_geometry_t g = qr_geometry(17 + 4 * version + 2);
 
-    const int text_top = NAV_BACK_Y + NAV_BACK_HEIGHT + 6 + 2 * tft_DefaultFont[1] + 2;
+    /* Where the address starts: under the path as it will actually wrap, then
+     * a gap that keeps the two facts apart without spending a whole line. */
+    const int title_y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
+    const int text_top
+        = layout_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, title_y, false) + QR_ADDRESS_GAP;
     const size_t total = strlen(text);
 
     /* A grid, not centred lines: the face is proportional, so each column is as
@@ -1324,20 +1356,21 @@ bool seedtool_render_qr_address(const char* title, const char* text, const size_
 
     /* Checked before anything is drawn, and why this returns a bool: an address
      * cut off at the margin looks like one that ended there. A taproot address
-     * (62 characters) does not fit the 48 two columns hold. */
+     * (62 characters) does not fit the 48 two columns hold. The last line is
+     * measured to its lowest inked row, descenders included. */
     const int step = tft_DefaultFont[1] + 2;
     const size_t lines = (total + QR_ADDRESS_GROUPS * GROUP_LEN - 1) / (QR_ADDRESS_GROUPS * GROUP_LEN);
-    if (block_width > g.title_width || text_top + (int)lines * step > SEEDTOOL_DISPLAY_HEIGHT) {
+    const size_t last_line = (lines - 1) * QR_ADDRESS_GROUPS * GROUP_LEN;
+    const int bottom
+        = text_top + (int)(lines - 1) * step + text_ink_bottom(tft_DefaultFont, text + last_line, total - last_line);
+    if (block_width > g.title_width || bottom > SEEDTOOL_DISPLAY_HEIGHT) {
         return false;
     }
 
     if (!seedtool_render_qr(NULL, text, selected)) {
         return false;
     }
-    int y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
-    /* A blank line between the path and the value: they are two different
-     * facts, and run together they read as one wrapped string. */
-    y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, y) + tft_DefaultFont[1] + 2;
+    int y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, title_y) + QR_ADDRESS_GAP;
 
     int left = g.title_x + (g.title_width - block_width) / 2;
     if (left < g.title_x) {
