@@ -121,7 +121,7 @@ static bool collect_entropy(const int source, const size_t words)
         /* One deck without replacement cannot reach 256 bits, so 24-word cards
          * say how they are drawn. One line, since two wrapped into the bar. */
         const char* const hint
-            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
+            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Bar turns red on a pattern";
         const seedtool_progress_t empty = { 0 };
         started = nav_dice_confirm(names[source], needed, hint, "Start", false, &empty);
     }
