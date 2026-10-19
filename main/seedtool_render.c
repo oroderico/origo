@@ -1024,6 +1024,43 @@ void seedtool_render_value_box(
     }
 }
 
+#define LEVEL_SEGMENT_GAP 4
+
+void seedtool_render_level(const char* title, const unsigned level, const unsigned max, const char* footer)
+{
+    seedtool_render_clear();
+    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
+    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
+    const int box_y = DIGIT_FIELD_BOX_Y(top);
+    const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
+    char text[24];
+    (void)snprintf(text, sizeof(text), "%u/%u", level, max);
+    fill_rect(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
+    draw_centered_in(FONT_BODY, text, x, VALUE_BOX_WIDTH, box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2,
+        COLOR_BLACK);
+    /* At either end the arrow that would go nowhere is left out, which is
+     * the screen's whole answer to a press that changes nothing. */
+    const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
+    if (level < max) {
+        draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
+    }
+    if (level > 1) {
+        draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
+    }
+    if (max) {
+        const int segment = (DICE_BAR_WIDTH - (int)(max - 1) * LEVEL_SEGMENT_GAP) / (int)max;
+        for (unsigned i = 0; i < max; ++i) {
+            const int sx = DICE_BAR_X + (int)i * (segment + LEVEL_SEGMENT_GAP);
+            if (i < level) {
+                fill_rect(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_HIGHLIGHT);
+            } else {
+                draw_border(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_DIM);
+            }
+        }
+    }
+    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+}
+
 void seedtool_render_digits(const char* title, const char* digits, const size_t count, const size_t active,
     const char* footer, const seedtool_progress_t* progress)
 {

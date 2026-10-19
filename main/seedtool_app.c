@@ -19,9 +19,8 @@ static void format_brightness(char* const buf, const size_t buf_len)
 static void show_brightness(void)
 {
     for (;;) {
-        char shown[8];
-        format_brightness(shown, sizeof(shown));
-        screen_text("Brightness", shown, "", chord_learned ? NULL : NAV_FOOTER);
+        seedtool_render_level("Brightness", backlight_level, SEEDTOOL_DISPLAY_BRIGHTNESS_MAX, "Up/Down set   BOTH done");
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_PREV:
             if (backlight_level < SEEDTOOL_DISPLAY_BRIGHTNESS_MAX) {
