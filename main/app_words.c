@@ -18,7 +18,7 @@ bool enter_word(const size_t position, const size_t total, const seedtool_wordse
     size_t stem_len = 0;
     /* The cursor opens at the centre and then keeps its place between letters,
      * so a word is not retyped from the far corner every time. */
-    size_t selected = seedtool_layout_center(WORD_LAYOUT);
+    size_t selected = seedtool_layout_center(word_layout());
     char title[24];
     (void)snprintf(title, sizeof(title), "Word %u/%u", (unsigned)position, (unsigned)total);
 
@@ -36,11 +36,11 @@ bool enter_word(const size_t position, const size_t total, const seedtool_wordse
                 items[i] = seedtool_word(candidates[i]);
             }
             /* The arrow deletes a letter, or leaves the word from an empty
-             * stem. It returns `matches`, one past the last row. */
+             * stem. */
             (void)snprintf(listing, sizeof(listing), "%s  %s", title, stem_len ? stem : "-");
             const int chosen = choose_menu(listing, items, matches);
             seedtool_zero(listing, sizeof(listing));
-            if ((size_t)chosen < matches) {
+            if (chosen != NAV_BACK) {
                 strcpy(output, items[chosen]);
                 seedtool_zero(stem, sizeof(stem));
                 seedtool_zero(candidates, sizeof(candidates));
@@ -53,13 +53,13 @@ bool enter_word(const size_t position, const size_t total, const seedtool_wordse
             bool enabled[WORD_KEYS] = { false };
             (void)seedtool_next_letters_in(allowed, stem, stem_len, letters);
             for (size_t i = 0; i < WORD_KEYS; ++i) {
-                const char key = seedtool_layout_key(WORD_LAYOUT, i);
+                const char key = seedtool_layout_key(word_layout(), i);
                 enabled[i] = key == SEEDTOOL_KEY_BACKSPACE || letters[key - 'a'];
             }
             selected = nearest_enabled(enabled, WORD_KEYS, selected);
             bool picked = false;
             while (!picked) {
-                seedtool_render_keyboard(title, stem_len ? stem : "-", WORD_LAYOUT, enabled, selected, position, total);
+                seedtool_render_keyboard(title, stem_len ? stem : "-", word_layout(), enabled, selected, position, total);
                 seedtool_display_flush();
                 switch (wait_key()) {
                 case KEY_SELECT:
@@ -75,7 +75,7 @@ bool enter_word(const size_t position, const size_t total, const seedtool_wordse
                     break;
                 }
             }
-            const char key = seedtool_layout_key(WORD_LAYOUT, selected);
+            const char key = seedtool_layout_key(word_layout(), selected);
             if (key == SEEDTOOL_KEY_BACKSPACE) {
                 erase = true;
             } else if (stem_len < SEEDTOOL_MAX_WORD_LEN) {
@@ -301,8 +301,8 @@ bool join_words(
 bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number)
 {
     const char* methods[] = { "Type the letters", "Enter word numbers" };
-    const int method = choose_menu("Word entry", methods, 2);
-    if (method == 2) {
+    const int method = choose_menu("Word entry", methods, ARRAY_LEN(methods));
+    if (method == NAV_BACK) {
         return false;
     }
     if (by_number) {
@@ -443,13 +443,14 @@ bool restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1
     }
 }
 
+/* The passphrase keyboard, editing what `output` already holds. Returns true
+ * on Accept, false on backspace with nothing left to delete. */
 bool enter_passphrase_once(char* output, const size_t output_len)
 {
-    size_t used = 0, page = 0;
-    size_t selected = seedtool_layout_center(seedtool_passphrase_layouts[0]);
-    output[0] = '\0';
+    size_t used = strlen(output), page = 0;
+    size_t selected = seedtool_layout_center(passphrase_layout(0));
     for (;;) {
-        const char* const layout = seedtool_passphrase_layouts[page];
+        const char* const layout = passphrase_layout(page);
         const size_t keys = seedtool_layout_keys(layout);
         if (selected >= keys) {
             selected = seedtool_layout_center(layout);
@@ -477,11 +478,12 @@ bool enter_passphrase_once(char* output, const size_t output_len)
             page = (page + 1) % PASSPHRASE_PAGES;
             /* A new page is a new keyboard, so the cursor starts from its centre
              * rather than from wherever the page key happened to sit. */
-            selected = seedtool_layout_center(seedtool_passphrase_layouts[page]);
+            selected = seedtool_layout_center(passphrase_layout(page));
         } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
-            if (used) {
-                output[--used] = '\0';
+            if (!used) {
+                return false;
             }
+            output[--used] = '\0';
         } else if (used + 1 < output_len) {
             output[used++] = pressed;
             output[used] = '\0';

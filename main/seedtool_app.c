@@ -37,6 +37,7 @@ static void show_brightness(void)
 
 static void show_settings_menu(void)
 {
+    enum { SETTINGS_ORIENTATION, SETTINGS_BRIGHTNESS, SETTINGS_KEYBOARD, SETTINGS_ABOUT };
     size_t cursor = 0;
     for (;;) {
         char orientation_item[32], brightness_fraction[8], brightness_item[24];
@@ -44,16 +45,26 @@ static void show_settings_menu(void)
             orientation_flipped ? "On" : "Off");
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
-        const char* items[] = { orientation_item, brightness_item, "About" };
-        const int selected = choose_menu_at("Settings", items, 3, &cursor);
-        if (selected == 3) {
+        const char* const keyboard_item = qwerty_keys ? "Keyboard: QWERTY" : "Keyboard: ABC";
+        const char* items[] = {
+            [SETTINGS_ORIENTATION] = orientation_item,
+            [SETTINGS_BRIGHTNESS] = brightness_item,
+            [SETTINGS_KEYBOARD] = keyboard_item,
+            [SETTINGS_ABOUT] = "About",
+        };
+        const int selected = choose_menu_at("Settings", items, ARRAY_LEN(items), &cursor);
+        if (selected == NAV_BACK) {
             return;
         }
-        if (selected == 0) {
+        if (selected == SETTINGS_ORIENTATION) {
             orientation_flipped = !orientation_flipped;
             seedtool_display_set_orientation(orientation_flipped);
-        } else if (selected == 1) {
+        } else if (selected == SETTINGS_BRIGHTNESS) {
             show_brightness();
+        } else if (selected == SETTINGS_KEYBOARD) {
+            /* Two arrangements and the row names the one in force, so it
+             * toggles in place. */
+            qwerty_keys = !qwerty_keys;
         } else {
             page_read("Safety",
                 "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
