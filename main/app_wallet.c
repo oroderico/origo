@@ -121,7 +121,11 @@ static void show_account_key_qr(const char* title, const char* value)
 
 /* The optional passphrase, set from Derivation; a session starts without one.
  * Returns true only when it changed, so the caller re-derives the fingerprint.
- * Back, a timeout and a mismatch leave it as it was. */
+ * Backing out leaves it as it was.
+ *
+ * Typed, read back whole, then typed again. Each step backs out to the one
+ * before it with what was typed still there, and a second entry that differs
+ * is retyped against the first rather than costing both. */
 static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN + 1])
 {
     const char* options[] = { "No passphrase", "Enter passphrase" };
@@ -139,17 +143,53 @@ static bool edit_session_passphrase(char passphrase[SEEDTOOL_MAX_PASSPHRASE_LEN 
     }
     char attempt[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
     char confirmation[SEEDTOOL_MAX_PASSPHRASE_LEN + 1] = { 0 };
-    const bool ok = enter_passphrase_once(attempt, sizeof(attempt))
-        && nav_acknowledge(
-               "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
-        && enter_passphrase_once(confirmation, sizeof(confirmation)) && strcmp(attempt, confirmation) == 0;
+    enum { STAGE_ENTER, STAGE_REVIEW, STAGE_INTRO, STAGE_CONFIRM, STAGE_MISMATCH, STAGE_DONE };
+    int stage = STAGE_ENTER;
+    bool ok = false;
+    while (stage != STAGE_DONE) {
+        switch (stage) {
+        case STAGE_ENTER:
+            stage = enter_passphrase_once(attempt, sizeof(attempt)) ? STAGE_REVIEW : STAGE_DONE;
+            break;
+        case STAGE_REVIEW: {
+            /* The count says what the page cannot show: a space at either
+             * end. */
+            char title[32];
+            (void)snprintf(title, sizeof(title), "Passphrase, %u chars", (unsigned)strlen(attempt));
+            stage = page_text(title, attempt) ? STAGE_INTRO : STAGE_ENTER;
+            break;
+        }
+        case STAGE_INTRO:
+            stage = nav_acknowledge(
+                        "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again", false)
+                ? STAGE_CONFIRM
+                : STAGE_REVIEW;
+            break;
+        case STAGE_CONFIRM:
+            seedtool_zero(confirmation, sizeof(confirmation));
+            if (!enter_passphrase_once(confirmation, sizeof(confirmation))) {
+                stage = STAGE_INTRO;
+            } else if (strcmp(attempt, confirmation) == 0) {
+                ok = true;
+                stage = STAGE_DONE;
+            } else {
+                stage = STAGE_MISMATCH;
+            }
+            break;
+        default:
+            /* The back arrow reads the first entry again, where a typo in it
+             * would show. */
+            stage = nav_acknowledge("Passphrase mismatch", "Second entry differs", "First entry kept", "Retype", false)
+                ? STAGE_CONFIRM
+                : STAGE_REVIEW;
+            break;
+        }
+    }
     if (ok) {
         /* The old value goes before the new one lands, not after: this buffer
          * holds a live session secret and must never briefly hold a mix. */
         seedtool_zero(passphrase, SEEDTOOL_MAX_PASSPHRASE_LEN + 1);
         memcpy(passphrase, attempt, sizeof(attempt));
-    } else {
-        notice("Passphrase mismatch", "Passphrase unchanged", "Try again");
     }
     seedtool_zero(attempt, sizeof(attempt));
     seedtool_zero(confirmation, sizeof(confirmation));
