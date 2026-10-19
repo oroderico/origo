@@ -4,6 +4,12 @@
 #include <stdio.h>
 #include <wally_core.h>
 
+/* The source's `git describe`, set by both builds (main/ and host/
+ * CMakeLists.txt). */
+#ifndef ORIGO_VERSION
+#error "ORIGO_VERSION is not defined"
+#endif
+
 static void format_brightness(char* const buf, const size_t buf_len)
 {
     (void)snprintf(buf, buf_len, "%u/%u", backlight_level, SEEDTOOL_DISPLAY_BRIGHTNESS_MAX);
@@ -41,7 +47,7 @@ static void show_settings_menu(void)
     size_t cursor = 0;
     for (;;) {
         char orientation_item[32], brightness_fraction[8], brightness_item[24];
-        (void)snprintf(orientation_item, sizeof(orientation_item), "Flip Orientation: %s",
+        (void)snprintf(orientation_item, sizeof(orientation_item), "Flip screen: %s",
             orientation_flipped ? "On" : "Off");
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);
@@ -66,8 +72,8 @@ static void show_settings_menu(void)
              * toggles in place. */
             qwerty_keys = !qwerty_keys;
         } else {
-            page_read("Safety",
-                "No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
+            page_read("About",
+                "Origo " ORIGO_VERSION ". No seed is stored. No radio, wallet signing, PIN, OTA or serial RPC. Verify the firmware hash and "
                 "record entropy independently. The two buttons sit one above the other; top and bottom move, both "
                 "together select. Origo is derived from parts of Blockstream Jade (github.com/Blockstream/Jade), "
                 "not affiliated with or endorsed by "

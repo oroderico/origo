@@ -39,6 +39,9 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= SEEDTOOL_MAX_ADDRESS_INDEX + 1, "more addre
 /* The digit field keeps a footer: up and down change the digit, so the chrome's
  * two controls have nothing to attach to. */
 #define DIGIT_FOOTER "Up/Down set   BOTH take"
+/* A coin flip's chord undoes rather than selects, and nothing else on the
+ * screen says so. */
+#define COIN_FOOTER "BOTH undoes the last flip"
 
 /* Word entry keyboard: the letters plus backspace, in either arrangement. */
 #define WORD_KEYS (SEEDTOOL_LETTERS + 1)

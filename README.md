@@ -324,12 +324,17 @@ roll 29 of 60 is corrected by stepping back to it rather than by waiting out the
 session timeout and starting the transcript again. Coin flips are the one
 exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
-of a screen position, since a direct choice has nothing left to confirm.
+of a screen position, since a direct choice has nothing left to confirm. Neither of
+these is visible until it is used, so the entry screens say where they are in
+a footer that stays: `BOTH take   back is below 1` (or the suit, or the rank)
+on a carousel, `BOTH undoes the last flip` on a coin.
 
 ### Settings
 
-The main menu's `Settings` entry carries `About` (the safety disclaimer),
-`Flip Orientation`, which toggles the panel 180 degrees in place,
+The main menu's `Settings` entry carries `About` (the firmware's version - the
+source's `git describe`, with `-dirty` if it was built from uncommitted changes -
+then the safety disclaimer),
+`Flip screen`, which turns the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
 are session-only - like every other piece of UI state, they reset to their

@@ -52,6 +52,28 @@ function(origo_target target)
     endif()
 endfunction()
 
+# The version About shows, as the firmware build derives it. -DORIGO_VERSION=...
+# fixes it instead, which comparing origo-replay output across commits needs.
+if(NOT DEFINED ORIGO_VERSION)
+    execute_process(COMMAND git -C "${ORIGO_ROOT}" describe --always --tags --dirty
+        OUTPUT_VARIABLE ORIGO_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(NOT ORIGO_VERSION)
+        set(ORIGO_VERSION "unknown")
+    endif()
+    # Re-run when the checkout moves, so the string does not go stale.
+    foreach(git_file HEAD index packed-refs)
+        if(EXISTS "${ORIGO_ROOT}/.git/${git_file}")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ORIGO_ROOT}/.git/${git_file}")
+        endif()
+    endforeach()
+    if(EXISTS "${ORIGO_ROOT}/.git/HEAD")
+        file(READ "${ORIGO_ROOT}/.git/HEAD" git_head)
+        if(git_head MATCHES "^ref: ([^\n]+)")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ORIGO_ROOT}/.git/${CMAKE_MATCH_1}")
+        endif()
+    endif()
+endif()
+
 set(CORE_SOURCES
     "${ORIGO_ROOT}/main/seedtool_bbqr.c"
     "${ORIGO_ROOT}/main/seedtool_core.c"
@@ -86,6 +108,7 @@ add_test(NAME qrcode COMMAND test_qrcode)
 # every screen as it was (see origo_replay.c).
 add_executable(origo-replay origo_replay.c ${APP_SOURCES} ${CORE_SOURCES} ${RENDER_SOURCES})
 origo_target(origo-replay)
+target_compile_definitions(origo-replay PRIVATE ORIGO_VERSION="${ORIGO_VERSION}")
 target_link_libraries(origo-replay PRIVATE wally_host m)
 
 # The simulator runs the firmware's app against an SDL window. The tests above
@@ -94,5 +117,6 @@ pkg_check_modules(SDL2 IMPORTED_TARGET sdl2)
 if(SDL2_FOUND)
     add_executable(origo-simulator origo_sdl.c ${APP_SOURCES} ${CORE_SOURCES} ${RENDER_SOURCES})
     origo_target(origo-simulator)
+    target_compile_definitions(origo-simulator PRIVATE ORIGO_VERSION="${ORIGO_VERSION}")
     target_link_libraries(origo-simulator PRIVATE wally_host PkgConfig::SDL2 m)
 endif()

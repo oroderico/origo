@@ -11,6 +11,9 @@
 #define COLOR_BLACK UINT16_C(0x0000)
 #define COLOR_WHITE UINT16_C(0xffff)
 #define COLOR_DIM UINT16_C(0x39e7)
+/* Secondary text that is still read: lighter than COLOR_DIM, which marks what
+ * is inactive or structural. */
+#define COLOR_SOFT UINT16_C(0xa514)
 #define COLOR_HIGHLIGHT UINT16_C(0xfd20)
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
@@ -1091,7 +1094,7 @@ void seedtool_render_stackbit_screen(
         draw_line_at(tft_DefaultFont, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
     }
     draw_centered_in(tft_Ubuntu16, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
-    draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_DIM);
+    draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_SOFT);
     draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
 }
 
@@ -1141,7 +1144,7 @@ void seedtool_render_stackbit_physical_screen(
     }
 
     draw_centered(tft_Ubuntu16, digits, STACKBIT_PHYS_NUMBER_Y);
-    draw_centered(tft_DefaultFont, word, STACKBIT_PHYS_WORD_Y);
+    draw_centered_in(tft_DefaultFont, word, 0, SEEDTOOL_DISPLAY_WIDTH, STACKBIT_PHYS_WORD_Y, COLOR_SOFT);
     draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
 }
 

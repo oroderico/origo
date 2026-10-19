@@ -121,7 +121,7 @@ static bool collect_entropy(const int source, const size_t words)
         /* One deck without replacement cannot reach 256 bits, so 24-word cards
          * say how they are drawn. One line, since two wrapped into the bar. */
         const char* const hint
-            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Red bar = non-random";
+            = source == SEEDTOOL_CARDS_REPLACE ? "Return & reshuffle each card" : "Bar turns red on a pattern";
         const seedtool_progress_t empty = { 0 };
         started = nav_dice_confirm(names[source], needed, hint, "Start", false, &empty);
     }
@@ -134,21 +134,26 @@ static bool collect_entropy(const int source, const size_t words)
             if (seedtool_transcript((seedtool_source_t)source, values, i, history, sizeof(history)) != SEEDTOOL_OK) {
                 history[0] = '\0';
             }
-            const size_t shown = strlen(history) - seedtool_render_fit_tail(history);
+            /* The entries only: a card transcript's prefix names its encoding
+             * for the hash, and on screen it reads as something entered. */
+            const size_t prefix_len = strlen(SEEDTOOL_CARDS_TRANSCRIPT_PREFIX);
+            const char* const entries
+                = strncmp(history, SEEDTOOL_CARDS_TRANSCRIPT_PREFIX, prefix_len) == 0 ? history + prefix_len : history;
+            const size_t shown = strlen(entries) - seedtool_render_fit_tail(entries);
             const seedtool_progress_t progress
                 = entropy_progress((seedtool_source_t)source, values, i, required, min_bits);
             const char* const label = names[source];
             bool entered;
             if (source == SEEDTOOL_COIN) {
-                entered = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, history + shown,
+                entered = enter_coin_flip(label, (unsigned)(i + 1), (unsigned)required, &value, entries + shown,
                     &progress);
             } else if (source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE) {
                 /* With replacement nothing is excluded. */
                 entered = enter_card((unsigned)(i + 1), (unsigned)required, &value,
-                    source == SEEDTOOL_CARDS ? available : NULL, history + shown, &progress);
+                    source == SEEDTOOL_CARDS ? available : NULL, entries + shown, &progress);
             } else {
                 entered = enter_value(label, (unsigned)(i + 1), (unsigned)required, 1, max, &value, NULL, NULL,
-                    history + shown, &progress);
+                    entries + shown, &progress);
             }
             if (!entered) {
                 if (!i) {
@@ -266,9 +271,11 @@ static bool flip_bits(const char* title, uint8_t* bits, const size_t count, cons
 static bool enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
 {
     uint8_t bits[COIN_WORD_BITS] = { 0 };
-    /* Sized for ten-digit counts, for -Wformat-truncation. */
+    /* The flip counter follows, so the two counts are told apart by name:
+     * "Word 3/11, flip 5/11". Sized for ten-digit counts, for
+     * -Wformat-truncation. */
     char title[48];
-    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    (void)snprintf(title, sizeof(title), "Word %u/%u, flip", position, total);
     const bool flipped_all = flip_bits(title, bits, COIN_WORD_BITS, 0);
     if (flipped_all) {
         uint16_t index = 0;
@@ -287,7 +294,7 @@ static bool enter_flipped_word(const unsigned position, const unsigned total, ui
 static bool confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
 {
     char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
-    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    (void)snprintf(title, sizeof(title), "Word %u/%u", position, total);
     for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
         bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
     }
