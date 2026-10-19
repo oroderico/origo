@@ -591,7 +591,7 @@ def main():
     check = sub.add_parser("inspect")
     check.add_argument("mnemonic")
     check.add_argument("--passphrase", default="")
-    check.add_argument("--index", type=int, choices=range(100), default=0)
+    check.add_argument("--index", type=int, choices=range(10000), default=0, metavar="0-9999")
     check.add_argument("--account", type=int, choices=range(1000), default=0)
     check.add_argument("--change", action="store_true", help="derive the change branch (chain 1) instead of receive")
     check.set_defaults(func=inspect)

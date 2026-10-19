@@ -31,8 +31,8 @@ device RNG is stubbed.
 ## What it replaces
 
 Almost everything a seed needs done to it is arithmetic. Turning dice into
-words, finishing a checksum, deriving an account key, reading off the first
-hundred addresses of a branch, working out which holes to punch in a metal plate —
+words, finishing a checksum, deriving an account key, reading off the
+addresses of a branch, working out which holes to punch in a metal plate —
 none of it needs a network, a signing key, or a general-purpose computer. It
 does need *somewhere to run*, and the usual answers each cost something:
 
@@ -53,8 +53,8 @@ else. It generates a 12- or 24-word mnemonic from dice, coins or cards;
 finishes a checksum from 11 or 23 words already known; validates a mnemonic
 you already have; shows that mnemonic's master fingerprint, its BIP84 or
 BIP86 account key — as `xpub`, as a SLIP-132 `zpub` where one is defined, or
-as a QR code — its output descriptor, and the first hundred addresses of its
-receive or change branch; and exports a backup as words, as word numbers, as a
+as a QR code — its output descriptor, and the first ten thousand addresses of
+its receive or change branch; and exports a backup as words, as word numbers, as a
 Stackbit 1248 punch pattern, or as a Compact SeedQR.
 
 The difference is not that Origo is careful where a PC is careless. It is
@@ -458,19 +458,19 @@ whatever is set:
   since SLIP-132 defines no taproot prefix, and under Taproot that row is
   absent rather than present and refusing; or as the output descriptor
   described below;
-- its mainnet addresses for indices 0 through 99, on whichever branch is asked
+- its mainnet addresses for indices 0 through 9999, on whichever branch is asked
   for: `Addresses` opens a Receive/Change choice first, and the list that
   follows is `m/84'/0'/0'/0/i` or `m/86'/0'/0'/0/i` for receive,
   `.../1/i` for change, with each address titled by its own full path so the
   branch is never inferred from which menu it was reached through. The list
   shows the first fifty; a "Go to index" entry at the end of it takes any
-  index in range on a keypad, since scrolling five rows at a time to reach
-  index 87 is not browsing. All hundred are derived when the screen is opened,
-  the same up-front derivation the QR carousel below already relies on, and
-  they stay derived until it is left — so neither scrolling the list nor
-  stepping back to it from an address re-runs BIP32. One branch is cached at a
-  time: switching between them re-derives, which costs what changing the
-  account already costs and keeps the cache the size it was. The chain step
+  index in range on a four-digit keypad, since scrolling five rows at a time
+  to reach index 87 is not browsing, and a wallet used for years passes a
+  hundred. The fifty are derived when the screen is opened and stay derived
+  until it is left, so neither scrolling the list nor stepping back to it from
+  an address re-runs BIP32; an index past them is derived on its own when it
+  is asked for. One branch is listed at a time: switching between them
+  re-derives, which costs what changing the account already costs. The chain step
   sits below the account key, so only the cheap half of the derivation
   actually repeats;
 - its BIP380 output descriptor, the third entry under Extended public key —

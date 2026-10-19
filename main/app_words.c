@@ -217,7 +217,7 @@ static bool enter_word_number(const size_t position, const size_t total, const s
  * digit. */
 bool enter_number(const char* title, const size_t max_digits, uint32_t* value)
 {
-    char digits[ACCOUNT_DIGITS + 1] = { 0 };
+    char digits[NUMBER_MAX_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
     size_t selected = seedtool_layout_center(WORD_NUMBER_LAYOUT);
     const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);

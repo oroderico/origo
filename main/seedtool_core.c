@@ -676,17 +676,18 @@ done:
 }
 
 seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, const seedtool_address_type_t type,
-    const uint32_t account_index, const seedtool_chain_t chain, const uint32_t count,
+    const uint32_t account_index, const seedtool_chain_t chain, const uint32_t first, const uint32_t count,
     char addresses[][SEEDTOOL_MAX_ADDRESS_LEN])
 {
-    if (!addresses || !count || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1 || !valid_account(type, account_index)
+    if (!addresses || !count || first > SEEDTOOL_MAX_ADDRESS_INDEX || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1 - first
+        || !valid_account(type, account_index)
         || (chain != SEEDTOOL_RECEIVE && chain != SEEDTOOL_CHANGE)) {
         return SEEDTOOL_EINVAL;
     }
     struct ext_key account;
     seedtool_result_t ret = account_from_root(root, type, account_index, &account);
     for (uint32_t i = 0; ret == SEEDTOOL_OK && i < count; ++i) {
-        ret = address_from_account(&account, type, chain, i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
+        ret = address_from_account(&account, type, chain, first + i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
     }
     if (ret != SEEDTOOL_OK) {
         seedtool_zero(addresses, count * SEEDTOOL_MAX_ADDRESS_LEN);

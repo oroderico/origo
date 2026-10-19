@@ -13,6 +13,11 @@ static const char expected_address[] = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306f
  * this project did not invent either. */
 static const char expected_change_address[] = "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el";
 
+/* m/84'/0'/0'/0/9999, the last index the viewer derives, from
+ * tools/origo_verify.py: a pure-Python derivation sharing no code with
+ * libwally. */
+static const char expected_address_9999[] = "bc1qhr6g4qhtaqlu8jvfex80gexwmxca2p65ujuwt8";
+
 static const char expected_xpub84[]
     = "xpub6CatWdiZiodmUeTDp8LT5or8nmbKNcuyvz7WyksVFkKB4RHwCD3XyuvPEbvqAQY3rAPshWcMLoP2fMFMKHPJ4ZeZXYVUhLv1VMrjPC7PW6V";
 

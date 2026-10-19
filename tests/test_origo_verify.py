@@ -559,18 +559,16 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertIn("left_seen && right_seen", platform)
         self.assertIn("left_seen != right_seen", platform)
 
-    def test_go_to_index_cannot_read_past_the_address_cache(self):
-        # "Go to index" indexes the static address cache directly, so no core
-        # function range-checks the index on the way. Two things stand in for that, and a compiler
-        # can only see one of them: the _Static_assert holding the keypad width
-        # and the derived range together fails the build on its own, but the
-        # runtime reject can be deleted with the build still passing, so it is
-        # pinned here instead.
-        root = Path(__file__).parents[1]
+    def test_go_to_index_reads_the_list_only_below_its_length(self):
+        # "Go to index" reads the static address list directly below
+        # ADDRESS_SHOWN_ROWS and derives anything else through the core, which
+        # range-checks it. The read is bounded by one comparison a compiler
+        # cannot see the purpose of, so it is pinned here, with the assertion
+        # holding the keypad width and the derived range together.
         app = app_source()
-        self.assertIn("index > SEEDTOOL_MAX_ADDRESS_INDEX", app)
-        self.assertIn("ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS", app)
-        self.assertIn("ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99", app)
+        self.assertIn("if (index < ADDRESS_SHOWN_ROWS) {", app)
+        self.assertIn("ADDRESS_INDEX_DIGITS == 4 && SEEDTOOL_MAX_ADDRESS_INDEX == 9999", app)
+        self.assertIn("ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS", app)
         # The keypad's own cap is what the assertion above is asserting about;
         # if it stops bounding the digits, the pair being pinned means nothing.
         self.assertIn("digits_len < max_digits", app)

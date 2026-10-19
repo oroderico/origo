@@ -280,16 +280,15 @@ static void show_address_qr(const char* title, const char* address)
     }
 }
 
-/* The Addresses screen's cache: derived once per visit rather than on every
- * return from a QR, which would repeat PBKDF2. Addresses are public, so keeping
- * them for the visit trades privacy, not the seed. */
-static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+/* The listed addresses, derived once per visit rather than on every return
+ * from a QR. Addresses are public, so keeping them for the visit trades
+ * privacy, not the seed. */
+static char addresses[ADDRESS_SHOWN_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
 static char address_labels[ADDRESS_SHOWN_ROWS][ADDRESS_LABEL_LEN];
 static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Back */
 
-/* Fills the cache for one type, account and branch: every index is derived (Go
- * to index can reach any), the first ADDRESS_SHOWN_ROWS labelled. Returns
- * false, having told the reader, on a derivation error. */
+/* Fills the list for one type, account and branch. Returns false, having told
+ * the reader, on a derivation error. */
 static bool derive_addresses(
     const wallet_session_t* const session, const seedtool_chain_t chain, const char* const prefix)
 {
@@ -297,7 +296,7 @@ static bool derive_addresses(
     seedtool_zero(address_labels, sizeof(address_labels));
     screen_text(prefix, "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(
-            &session->root, session->type, session->account, chain, ADDRESS_LIST_ROWS, addresses)
+            &session->root, session->type, session->account, chain, 0, ADDRESS_SHOWN_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         notice("Error", "Could not derive addresses", NULL);
@@ -314,11 +313,12 @@ static bool derive_addresses(
     return true;
 }
 
-/* Browses the cache. Returns the chosen index with its address in address_out,
- * or NAV_BACK. `cursor` is where the list opens and where it is
- * left; Go to index moves it only within the shown rows. */
-static int browse_addresses(
-    const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
+/* Browses the list. Returns the chosen index with its address in
+ * address_out, or NAV_BACK. `cursor` is where the list opens and where it is
+ * left; Go to index moves it only within the listed rows, and derives an index
+ * past them on its own. */
+static int browse_addresses(const wallet_session_t* const session, const seedtool_chain_t chain,
+    const char* const prefix, char address_out[SEEDTOOL_MAX_ADDRESS_LEN], size_t* cursor)
 {
     for (;;) {
         const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
@@ -327,25 +327,25 @@ static int browse_addresses(
             if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, &index)) {
                 continue;
             }
-            /* `index` addresses the static cache directly, so it is checked
-             * here even though the keypad cannot type past it. */
-            if (index > SEEDTOOL_MAX_ADDRESS_INDEX) {
-                continue;
-            }
             if (index < ADDRESS_SHOWN_ROWS) {
                 *cursor = index;
+                memcpy(address_out, addresses[index], SEEDTOOL_MAX_ADDRESS_LEN);
+                return (int)index;
             }
-            /* %.*s, for the same reason as in derive_addresses. */
-            (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
-                addresses[index]);
+            char one[1][SEEDTOOL_MAX_ADDRESS_LEN];
+            if (seedtool_mainnet_addresses(&session->root, session->type, session->account, chain, index, 1, one)
+                != SEEDTOOL_OK) {
+                notice("Error", "Could not derive address", NULL);
+                continue;
+            }
+            memcpy(address_out, one[0], SEEDTOOL_MAX_ADDRESS_LEN);
             return (int)index;
         }
         if (selected == NAV_BACK) {
             return NAV_BACK;
         }
         /* choose_menu_at has already left the cursor on what was taken. */
-        (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
-            addresses[selected]);
+        memcpy(address_out, addresses[selected], SEEDTOOL_MAX_ADDRESS_LEN);
         return selected;
     }
 }
@@ -467,7 +467,7 @@ static void show_addresses(const wallet_session_t* const session)
     size_t cursor = 0;
     for (;;) {
         char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        const int index = browse_addresses(prefix, address, sizeof(address), &cursor);
+        const int index = browse_addresses(session, chain, prefix, address, &cursor);
         if (index == NAV_BACK) {
             seedtool_zero(address, sizeof(address));
             break;

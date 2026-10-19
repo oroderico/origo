@@ -481,11 +481,11 @@ static seedtool_root_t vector_root(void)
 static seedtool_result_t address_at(const seedtool_address_type_t type, const seedtool_chain_t chain,
     const uint32_t index, char output[SEEDTOOL_MAX_ADDRESS_LEN])
 {
-    char rows[SEEDTOOL_MAX_ADDRESS_INDEX + 1][SEEDTOOL_MAX_ADDRESS_LEN];
+    char row[1][SEEDTOOL_MAX_ADDRESS_LEN];
     const seedtool_root_t root = vector_root();
-    const seedtool_result_t ret = seedtool_mainnet_addresses(&root, type, 0, chain, index + 1, rows);
+    const seedtool_result_t ret = seedtool_mainnet_addresses(&root, type, 0, chain, index, 1, row);
     if (ret == SEEDTOOL_OK) {
-        memcpy(output, rows[index], SEEDTOOL_MAX_ADDRESS_LEN);
+        memcpy(output, row[0], SEEDTOOL_MAX_ADDRESS_LEN);
     }
     return ret;
 }
@@ -534,8 +534,30 @@ static bool account_and_chain_reach_the_path(void)
     CHECK(address_at(SEEDTOOL_BIP86, SEEDTOOL_CHANGE, 3, change) == SEEDTOOL_OK);
     CHECK(strcmp(receive, change) != 0);
     CHECK(address_at(SEEDTOOL_BIP84, (seedtool_chain_t)2, 0, receive) == SEEDTOOL_EINVAL);
-    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 2, batch)
+    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 0, 2, batch)
         == SEEDTOOL_EINVAL);
+    return true;
+}
+
+/* A batch starting past zero is the same addresses as one at a time, the last
+ * index is reachable, and nothing past it is. Go to index derives one address
+ * at a time, the list a batch from zero, and the two must agree. */
+static bool address_ranges_are_consistent(void)
+{
+    const seedtool_root_t root = vector_root();
+    char batch[3][SEEDTOOL_MAX_ADDRESS_LEN];
+    char one[SEEDTOOL_MAX_ADDRESS_LEN];
+    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_RECEIVE, 48, 3, batch) == SEEDTOOL_OK);
+    for (uint32_t i = 0; i < 3; ++i) {
+        CHECK(address_at(SEEDTOOL_BIP84, SEEDTOOL_RECEIVE, 48 + i, one) == SEEDTOOL_OK);
+        CHECK(strcmp(one, batch[i]) == 0);
+    }
+    CHECK(address_at(SEEDTOOL_BIP84, SEEDTOOL_RECEIVE, SEEDTOOL_MAX_ADDRESS_INDEX, one) == SEEDTOOL_OK);
+    CHECK(strcmp(one, expected_address_9999) == 0);
+    CHECK(address_at(SEEDTOOL_BIP84, SEEDTOOL_RECEIVE, SEEDTOOL_MAX_ADDRESS_INDEX + 1, one) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_RECEIVE, SEEDTOOL_MAX_ADDRESS_INDEX, 2, batch)
+        == SEEDTOOL_EINVAL);
+    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_RECEIVE, 0, 0, batch) == SEEDTOOL_EINVAL);
     return true;
 }
 
@@ -577,6 +599,7 @@ int main(void)
         TEST(published_vectors_match),
         TEST(account_and_chain_reach_the_path),
         TEST(fingerprint_follows_the_passphrase),
+        TEST(address_ranges_are_consistent),
     };
     const int ret = run_tests("core", tests, sizeof(tests) / sizeof(tests[0]));
     wally_cleanup(0);

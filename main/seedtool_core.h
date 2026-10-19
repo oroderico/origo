@@ -29,8 +29,9 @@ _Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
 #define SEEDTOOL_MAX_ADDRESS_LEN 96
 #define SEEDTOOL_MAX_XPUB_LEN 112
 
-/* Highest address index the viewer derives. */
-#define SEEDTOOL_MAX_ADDRESS_INDEX 99
+/* Highest address index the viewer derives: four digits on the keypad, past
+ * the hundred or so a long-used wallet reaches. */
+#define SEEDTOOL_MAX_ADDRESS_INDEX 9999
 
 /* Highest account (m/type'/0'/account') the viewer derives: three digits,
  * so it is entered on a fixed-width keypad like every other number. */
@@ -168,12 +169,13 @@ seedtool_result_t seedtool_master_fingerprint(const seedtool_root_t* root, uint8
 seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, seedtool_address_type_t type, uint32_t account,
     seedtool_key_format_t format, char* output, size_t output_len);
 
-/* Mainnet addresses at m/type'/0'/account'/chain/0..count-1. The hardened
- * account derivation runs once rather than per address. `chain` outside
- * seedtool_chain_t is EINVAL. `addresses` must hold `count` rows, and is
- * zeroed on failure. */
+/* Mainnet addresses at m/type'/0'/account'/chain/first..first+count-1. The
+ * hardened account derivation runs once rather than per address. `chain`
+ * outside seedtool_chain_t, or an index past SEEDTOOL_MAX_ADDRESS_INDEX, is
+ * EINVAL. `addresses` must hold `count` rows, and is zeroed on failure. */
 seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, seedtool_address_type_t type,
-    uint32_t account, seedtool_chain_t chain, uint32_t count, char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+    uint32_t account, seedtool_chain_t chain, uint32_t first, uint32_t count,
+    char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
 
 /* Writes `descriptor` + "#" + its 8-character BIP380 checksum to `output`,
  * which must not overlap it. EINVAL for a character outside BIP380's charset,
