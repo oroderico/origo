@@ -630,18 +630,21 @@ Presses are discarded while it is up: it is where the user is still learning tha
 both buttons together mean select, and a screen that offers no choice must not
 turn a stray press into one.
 
-That artwork is the only picture in the firmware: a 98x110 array of sixteen
-palette entries at two pixels per byte, about 5.4 KiB, written straight into the
-framebuffer by indexing that palette. It is deliberately not compressed. Deflate
-would take it to roughly 2 KiB, but the decompressor is one of the components the
-audit rejects by name, and trading an audited absence for two kilobytes in an
-image that already has twelve to spare is a bad exchange. Sixteen colours are the
-compression: they differ from full RGB565 by well under one percent on this
-artwork, which is drawn with a limited palette to begin with.
+That artwork is the only picture in the firmware: a 102x124 array of palette
+indices at two pixels per byte, about 6.2 KiB, written straight into the
+framebuffer by indexing a palette of ten colours. It is deliberately not
+compressed. Deflate would take it to well under half, but the decompressor is
+one of the components the audit rejects by name, and trading an audited absence
+for a few kilobytes is a bad exchange.
 
-`tools/make_logo.py` regenerates `main/seedtool_logo.c` from `assets/logo.png`
-and is the one place Pillow is used; the firmware, the verifier and the tests
-stay dependency-free.
+The logo is pixel art, and its source is its cells, not a picture of them:
+`assets/logo.txt` holds the tree, the wordmark and the tagline as grids of
+colour letters, each drawn at its own whole number of display pixels per cell -
+3 for the tree, 2 for the wordmark, 1 for the tagline - so no cell is split
+across pixels or blended into its neighbour. `tools/make_logo.py` turns those
+cells into `main/seedtool_logo.c` and into `assets/logo.png`, the same picture
+at eight times the size; edit the cells and run it. It needs only the standard
+library, like the rest of `tools/`.
 
 ## Build and flash
 
