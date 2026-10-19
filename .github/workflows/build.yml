@@ -14,8 +14,10 @@ permissions:
   contents: read
 
 jobs:
+  # Runners are pinned rather than ubuntu-latest: the host job builds with
+  # -Werror, so a new image's compiler could fail CI with no change here.
   host:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out source and pinned submodules
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3
@@ -56,7 +58,7 @@ jobs:
           ./fuzz-parsers -max_total_time=60
 
   deterministic-firmware:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: espressif/idf:v5.5.4
     steps:
       - name: Check out source and pinned submodules

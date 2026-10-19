@@ -10,6 +10,14 @@ uint64_t last_action;
 bool chord_learned;
 bool orientation_flipped;
 unsigned backlight_level = SEEDTOOL_DISPLAY_BRIGHTNESS_DEFAULT;
+bool qwerty_keys;
+
+const char* word_layout(void) { return qwerty_keys ? SEEDTOOL_WORD_LAYOUT : SEEDTOOL_WORD_LAYOUT_ABC; }
+
+const char* passphrase_layout(const size_t page)
+{
+    return qwerty_keys ? seedtool_passphrase_layouts[page] : seedtool_passphrase_layouts_abc[page];
+}
 
 void seedtool_require(const bool condition)
 {
@@ -55,17 +63,18 @@ static seedtool_key_t wait_key_raw(const uint32_t timeout_ms)
     return key;
 }
 
-/* Anything but an extension ends the session by restarting, wherever it was:
- * unwinding back to the menu would repaint every screen on the way, secrets
- * included. The restart is the erase (see scrub_free_heap). An extended
- * session returns KEY_REDRAW, because the warning replaced the caller's
- * screen. */
+/* The timer is for a reader who walked away, so any press says they are
+ * still here and extends the session; only silence ends it, by restarting
+ * wherever it was: unwinding back to the menu would repaint every screen on
+ * the way, secrets included. The restart is the erase (see scrub_free_heap).
+ * An extended session returns KEY_REDRAW, because the warning replaced the
+ * caller's screen. */
 static seedtool_key_t session_timeout(void)
 {
-    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "BOTH extend   Up/Down erase");
+    screen_text("Session timeout", "Secrets will be erased", "in 60 seconds", "Press any button to stay");
     /* A press begun before this screen existed cannot be an answer to it. */
     seedtool_platform_flush_keys();
-    if (wait_key_raw(WARNING_TIMEOUT_MS) != KEY_SELECT) {
+    if (wait_key_raw(WARNING_TIMEOUT_MS) == KEY_TIMEOUT) {
         seedtool_platform_restart();
     }
     return KEY_REDRAW;
@@ -264,6 +273,33 @@ size_t page_shown(const size_t position, const size_t pages)
     return !position ? 0 : position > pages ? pages - 1 : position - 1;
 }
 
+/* One key on a paged screen. The chord on the arrow or the confirm answers
+ * NAV_BACK or NAV_CONFIRM; anything else moves `*position`, the chord on a page
+ * reading on, and answers NAV_STAY. */
+int page_key(size_t* const position, const size_t pages, const bool confirmable)
+{
+    switch (wait_key()) {
+    case KEY_SELECT:
+        if (!*position) {
+            return NAV_BACK;
+        }
+        if (*position > pages) {
+            return NAV_CONFIRM;
+        }
+        *position = page_step(*position, pages, true, confirmable);
+        break;
+    case KEY_NEXT:
+        *position = page_step(*position, pages, true, confirmable);
+        break;
+    case KEY_PREV:
+        *position = page_step(*position, pages, false, confirmable);
+        break;
+    default:
+        break;
+    }
+    return NAV_STAY;
+}
+
 static size_t page_selection(const size_t position, const size_t pages)
 {
     if (!position) {
@@ -288,12 +324,11 @@ seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* c
     return nav;
 }
 
-/* A menu: its rows are its actions, so it has no confirm. The arrow returns
- * `count`, one past the last row. */
+/* A menu: its rows are its actions, so it has no confirm. Returns a row index
+ * or NAV_BACK. */
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
-    const int selected = choose_nav(title, items, count, NULL, false, true, cursor);
-    return selected == NAV_BACK ? (int)count : selected;
+    return choose_nav(title, items, count, NULL, false, true, cursor);
 }
 
 int choose_menu(const char* title, const char* const* items, const size_t count)
@@ -501,11 +536,11 @@ bool page_text_impl(const char* title, const char* text, const bool confirmable,
     /* Opens on the first page, not on the confirm bar: reading is what this
      * screen is for, so the cursor starts where the reading does. */
     size_t position = 1;
-    bool advanced;
+    int answer = NAV_STAY;
     /* Outside the loop so the one exit can wipe them: they hold whatever is
      * paged, the mnemonic included. */
     char line1[MAX_LINE_CHARS + 1], line2[MAX_LINE_CHARS + 1], line3[MAX_LINE_CHARS + 1];
-    for (;;) {
+    while (answer == NAV_STAY) {
         char footer[48];
         const size_t page = page_shown(position, pages);
         const size_t first = page * 3;
@@ -535,34 +570,12 @@ bool page_text_impl(const char* title, const char* text, const bool confirmable,
             seedtool_render_nav_text(&nav, title, line1, line2, line3);
         }
         seedtool_display_flush();
-        switch (wait_key()) {
-        case KEY_SELECT:
-            if (!position) {
-                advanced = false;
-                goto done;
-            }
-            if (position > pages) {
-                advanced = true;
-                goto done;
-            }
-            /* The chord on a page reads on. */
-            position = page_step(position, pages, true, confirmable);
-            break;
-        case KEY_NEXT:
-            position = page_step(position, pages, true, confirmable);
-            break;
-        case KEY_PREV:
-            position = page_step(position, pages, false, confirmable);
-            break;
-        default:
-            break;
-        }
+        answer = page_key(&position, pages, confirmable);
     }
-done:
     seedtool_zero(line1, sizeof(line1));
     seedtool_zero(line2, sizeof(line2));
     seedtool_zero(line3, sizeof(line3));
-    return advanced;
+    return answer == NAV_CONFIRM;
 }
 
 /* Paged text with something to take at the end of it - the descriptor, the

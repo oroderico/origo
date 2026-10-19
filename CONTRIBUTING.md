@@ -58,7 +58,8 @@ and never needs a flashed board. A change to the app (`main/app_*.c`,
 `main/seedtool_app.c`) that is not meant to change what the device shows can be
 checked with `origo-replay`, which runs the app from a key script and prints a
 hash of every frame: replay the same random scripts on the parent commit and on
-yours, and the outputs must match. A change to hardware-facing code (display
+yours, and the outputs must match. Given a directory as a second argument, it also
+writes every frame there as a PPM, for a change that is meant to alter a screen. A change to hardware-facing code (display
 driver, input, backlight) still needs a real TTGO T-Display: the simulator
 deliberately does not reach the SPI path or the panel's byte order, and a
 colour that is right on host has been wrong on hardware before.

@@ -467,12 +467,23 @@ static bool bbqr_base32_is_sound(void)
     return true;
 }
 
+/* The vector mnemonic's master key, with no passphrase. */
+static seedtool_root_t vector_root(void)
+{
+    seedtool_root_t root;
+    if (seedtool_root_from_mnemonic(mnemonic, "", &root) != SEEDTOOL_OK) {
+        memset(&root, 0, sizeof(root));
+    }
+    return root;
+}
+
 /* One address, through the batch derivation the firmware uses. */
 static seedtool_result_t address_at(const seedtool_address_type_t type, const seedtool_chain_t chain,
     const uint32_t index, char output[SEEDTOOL_MAX_ADDRESS_LEN])
 {
     char rows[SEEDTOOL_MAX_ADDRESS_INDEX + 1][SEEDTOOL_MAX_ADDRESS_LEN];
-    const seedtool_result_t ret = seedtool_mainnet_addresses(mnemonic, "", type, 0, chain, index + 1, rows);
+    const seedtool_root_t root = vector_root();
+    const seedtool_result_t ret = seedtool_mainnet_addresses(&root, type, 0, chain, index + 1, rows);
     if (ret == SEEDTOOL_OK) {
         memcpy(output, rows[index], SEEDTOOL_MAX_ADDRESS_LEN);
     }
@@ -485,18 +496,20 @@ static bool published_vectors_match(void)
 {
     char address[SEEDTOOL_MAX_ADDRESS_LEN];
     char xpub[SEEDTOOL_MAX_XPUB_LEN];
+    seedtool_root_t root;
     CHECK(seedtool_validate_mnemonic(mnemonic, NULL) == SEEDTOOL_OK);
+    CHECK(seedtool_root_from_mnemonic(mnemonic, "", &root) == SEEDTOOL_OK);
     CHECK(address_at(SEEDTOOL_BIP84, SEEDTOOL_RECEIVE, 0, address) == SEEDTOOL_OK);
     CHECK(strcmp(address, expected_address) == 0);
     CHECK(address_at(SEEDTOOL_BIP84, SEEDTOOL_CHANGE, 0, address) == SEEDTOOL_OK);
     CHECK(strcmp(address, expected_change_address) == 0);
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
     CHECK(strcmp(xpub, expected_xpub84) == 0);
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP86, 0, SEEDTOOL_XPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
     CHECK(strcmp(xpub, expected_xpub86) == 0);
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub)) == SEEDTOOL_OK);
     CHECK(strcmp(xpub, expected_zpub84) == 0);
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP86, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub))
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP86, 0, SEEDTOOL_ZPUB, xpub, sizeof(xpub))
         == SEEDTOOL_EINVAL);
     return true;
 }
@@ -507,11 +520,11 @@ static bool account_and_chain_reach_the_path(void)
 {
     char zero[SEEDTOOL_MAX_XPUB_LEN];
     char one[SEEDTOOL_MAX_XPUB_LEN];
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, zero, sizeof(zero)) == SEEDTOOL_OK);
-    CHECK(seedtool_account_xpub(mnemonic, "", SEEDTOOL_BIP84, 1, SEEDTOOL_XPUB, one, sizeof(one)) == SEEDTOOL_OK);
+    const seedtool_root_t root = vector_root();
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, 0, SEEDTOOL_XPUB, zero, sizeof(zero)) == SEEDTOOL_OK);
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, 1, SEEDTOOL_XPUB, one, sizeof(one)) == SEEDTOOL_OK);
     CHECK(strcmp(zero, one) != 0);
-    CHECK(seedtool_account_xpub(
-              mnemonic, "", SEEDTOOL_BIP84, SEEDTOOL_MAX_ACCOUNT_INDEX + 1, SEEDTOOL_XPUB, one, sizeof(one))
+    CHECK(seedtool_account_xpub(&root, SEEDTOOL_BIP84, SEEDTOOL_MAX_ACCOUNT_INDEX + 1, SEEDTOOL_XPUB, one, sizeof(one))
         == SEEDTOOL_EINVAL);
 
     char receive[SEEDTOOL_MAX_ADDRESS_LEN];
@@ -521,8 +534,27 @@ static bool account_and_chain_reach_the_path(void)
     CHECK(address_at(SEEDTOOL_BIP86, SEEDTOOL_CHANGE, 3, change) == SEEDTOOL_OK);
     CHECK(strcmp(receive, change) != 0);
     CHECK(address_at(SEEDTOOL_BIP84, (seedtool_chain_t)2, 0, receive) == SEEDTOOL_EINVAL);
-    CHECK(seedtool_mainnet_addresses(mnemonic, "", SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 2, batch)
+    CHECK(seedtool_mainnet_addresses(&root, SEEDTOOL_BIP84, 0, (seedtool_chain_t)2, 2, batch)
         == SEEDTOOL_EINVAL);
+    return true;
+}
+
+/* The fingerprint the BIP84 vector's key origin states, and one that moves
+ * with the passphrase: the wallet title is the reader's only sign of which
+ * seed is in force. */
+static bool fingerprint_follows_the_passphrase(void)
+{
+    static const uint8_t expected[4] = { 0x73, 0xc5, 0xda, 0x0a };
+    uint8_t fp[4], with_passphrase[4];
+    seedtool_root_t root;
+    CHECK(seedtool_root_from_mnemonic(mnemonic, "", &root) == SEEDTOOL_OK);
+    CHECK(seedtool_master_fingerprint(&root, fp) == SEEDTOOL_OK);
+    CHECK(memcmp(fp, expected, sizeof(fp)) == 0);
+    CHECK(seedtool_root_from_mnemonic(mnemonic, "TREZOR", &root) == SEEDTOOL_OK);
+    CHECK(seedtool_master_fingerprint(&root, with_passphrase) == SEEDTOOL_OK);
+    CHECK(memcmp(fp, with_passphrase, sizeof(fp)) != 0);
+    CHECK(seedtool_root_from_mnemonic(mnemonic, "tab\there", &root) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_root_from_mnemonic("abandon abandon", "", &root) == SEEDTOOL_EINVAL);
     return true;
 }
 
@@ -544,6 +576,7 @@ int main(void)
         TEST(bbqr_base32_is_sound),
         TEST(published_vectors_match),
         TEST(account_and_chain_reach_the_path),
+        TEST(fingerprint_follows_the_passphrase),
     };
     const int ret = run_tests("core", tests, sizeof(tests) / sizeof(tests[0]));
     wally_cleanup(0);

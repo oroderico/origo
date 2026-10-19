@@ -167,11 +167,16 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
  * must: a layout that dropped a character would leave a passphrase impossible
  * to retype. */
 #define SEEDTOOL_WORD_LAYOUT "qwertyuiop\nasdfghjkl\nzxcvbnm\b"
+/* The same keys in alphabetical rows, as on Jade (main/ui/keyboard.c): on a
+ * ring walked with two buttons, a reader who does not touch-type finds a
+ * letter by where it falls in the alphabet. */
+#define SEEDTOOL_WORD_LAYOUT_ABC "abcdefghij\nklmnopqrst\nuvwxyz\b"
 /* Accept before Backspace: the cursor snaps to whichever is nearer on the ring,
  * and a completed number should land on Accept. */
 #define SEEDTOOL_WORD_NUMBER_LAYOUT "1234567890\n\r\b"
 #define SEEDTOOL_PASSPHRASE_PAGES 4
 extern const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES];
+extern const char* const seedtool_passphrase_layouts_abc[SEEDTOOL_PASSPHRASE_PAGES];
 
 /* Layout geometry, kept here so the string is read the same way everywhere it is
  * drawn, walked or measured. */
