@@ -15,6 +15,7 @@
 
 /* SLIP-132 zpub version bytes, patched over a plain BIP32 serialisation
  * because libwally knows only the BIP32 versions. */
+static const uint8_t YPUB_VERSION[4] = { 0x04, 0x9d, 0x7c, 0xb2 };
 static const uint8_t ZPUB_VERSION[4] = { 0x04, 0xb2, 0x47, 0x46 };
 
 static bool valid_words(const size_t words)
@@ -27,7 +28,8 @@ static size_t entropy_len(const size_t words) { return words == 12 ? 16 : 32; }
 
 static bool valid_account(const seedtool_address_type_t type, const uint32_t account_index)
 {
-    return (type == SEEDTOOL_BIP84 || type == SEEDTOOL_BIP86) && account_index <= SEEDTOOL_MAX_ACCOUNT_INDEX;
+    return (type == SEEDTOOL_BIP44 || type == SEEDTOOL_BIP49 || type == SEEDTOOL_BIP84 || type == SEEDTOOL_BIP86)
+        && account_index <= SEEDTOOL_MAX_ACCOUNT_INDEX;
 }
 
 void seedtool_zero(void* ptr, const size_t len)
@@ -594,8 +596,9 @@ static seedtool_result_t account_from_root(const seedtool_root_t* root, const se
 seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, const seedtool_address_type_t type,
     const uint32_t account_index, const seedtool_key_format_t format, char* output, const size_t output_len)
 {
-    if (!output || !output_len || !valid_account(type, account_index)
-        || (format != SEEDTOOL_XPUB && format != SEEDTOOL_ZPUB) || (format == SEEDTOOL_ZPUB && type != SEEDTOOL_BIP84)) {
+    const bool slip132_ok = format == SEEDTOOL_XPUB || (format == SEEDTOOL_YPUB && type == SEEDTOOL_BIP49)
+        || (format == SEEDTOOL_ZPUB && type == SEEDTOOL_BIP84);
+    if (!output || !output_len || !valid_account(type, account_index) || !slip132_ok) {
         return SEEDTOOL_EINVAL;
     }
     struct ext_key account;
@@ -609,7 +612,9 @@ seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, const seedt
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
-    if (format == SEEDTOOL_ZPUB) {
+    if (format == SEEDTOOL_YPUB) {
+        memcpy(bytes, YPUB_VERSION, sizeof(YPUB_VERSION));
+    } else if (format == SEEDTOOL_ZPUB) {
         memcpy(bytes, ZPUB_VERSION, sizeof(ZPUB_VERSION));
     }
     if (wally_base58_from_bytes(bytes, sizeof(bytes), BASE58_FLAG_CHECKSUM, &base58) != WALLY_OK || !base58) {
@@ -646,20 +651,44 @@ static seedtool_result_t address_from_account(const struct ext_key* account, con
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
-    if (type == SEEDTOOL_BIP84) {
-        script[0] = OP_0;
-        script[1] = 20;
-        memcpy(script + 2, child.hash160, 20);
-        script_len = WALLY_SCRIPTPUBKEY_P2WPKH_LEN;
-    } else if (wally_scriptpubkey_p2tr_from_bytes(child.pub_key, sizeof(child.pub_key), 0, script, sizeof(script),
-                   &script_len)
-        != WALLY_OK) {
-        ret = SEEDTOOL_ECRYPTO;
-        goto done;
-    }
-    if (wally_addr_segwit_from_bytes(script, script_len, "bc", 0, &address) != WALLY_OK || !address) {
-        ret = SEEDTOOL_ECRYPTO;
-        goto done;
+    if (type == SEEDTOOL_BIP44 || type == SEEDTOOL_BIP49) {
+        /* Base58 with a version byte: P2PKH over the key's hash160, or P2SH
+         * over the hash160 of the P2WPKH script it wraps (BIP49). */
+        uint8_t payload[1 + HASH160_LEN];
+        if (type == SEEDTOOL_BIP44) {
+            payload[0] = WALLY_ADDRESS_VERSION_P2PKH_MAINNET;
+            memcpy(payload + 1, child.hash160, HASH160_LEN);
+        } else {
+            script[0] = OP_0;
+            script[1] = HASH160_LEN;
+            memcpy(script + 2, child.hash160, HASH160_LEN);
+            payload[0] = WALLY_ADDRESS_VERSION_P2SH_MAINNET;
+            if (wally_hash160(script, WALLY_SCRIPTPUBKEY_P2WPKH_LEN, payload + 1, HASH160_LEN) != WALLY_OK) {
+                ret = SEEDTOOL_ECRYPTO;
+                goto done;
+            }
+        }
+        if (wally_base58_from_bytes(payload, sizeof(payload), BASE58_FLAG_CHECKSUM, &address) != WALLY_OK
+            || !address) {
+            ret = SEEDTOOL_ECRYPTO;
+            goto done;
+        }
+    } else {
+        if (type == SEEDTOOL_BIP84) {
+            script[0] = OP_0;
+            script[1] = HASH160_LEN;
+            memcpy(script + 2, child.hash160, HASH160_LEN);
+            script_len = WALLY_SCRIPTPUBKEY_P2WPKH_LEN;
+        } else if (wally_scriptpubkey_p2tr_from_bytes(
+                       child.pub_key, sizeof(child.pub_key), 0, script, sizeof(script), &script_len)
+            != WALLY_OK) {
+            ret = SEEDTOOL_ECRYPTO;
+            goto done;
+        }
+        if (wally_addr_segwit_from_bytes(script, script_len, "bc", 0, &address) != WALLY_OK || !address) {
+            ret = SEEDTOOL_ECRYPTO;
+            goto done;
+        }
     }
     if (strlen(address) + 1 > output_len) {
         ret = SEEDTOOL_ENOSPACE;
