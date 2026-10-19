@@ -47,7 +47,7 @@ static void show_settings_menu(void)
     size_t cursor = 0;
     for (;;) {
         char orientation_item[32], brightness_fraction[8], brightness_item[24];
-        (void)snprintf(orientation_item, sizeof(orientation_item), "Flip Orientation: %s",
+        (void)snprintf(orientation_item, sizeof(orientation_item), "Flip screen: %s",
             orientation_flipped ? "On" : "Off");
         format_brightness(brightness_fraction, sizeof(brightness_fraction));
         (void)snprintf(brightness_item, sizeof(brightness_item), "Brightness: %s", brightness_fraction);

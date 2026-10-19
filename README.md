@@ -334,7 +334,7 @@ on a carousel, `BOTH undoes the last flip` on a coin.
 The main menu's `Settings` entry carries `About` (the firmware's version - the
 source's `git describe`, with `-dirty` if it was built from uncommitted changes -
 then the safety disclaimer),
-`Flip Orientation`, which toggles the panel 180 degrees in place,
+`Flip screen`, which turns the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
 are session-only - like every other piece of UI state, they reset to their
