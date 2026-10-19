@@ -681,8 +681,16 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
         }
     }
     /* Centred between margins the width of the arrow's box, so a long title
-     * does not paint into it. */
-    (void)draw_centered_box(tft_Ubuntu16, title, inset, SEEDTOOL_DISPLAY_WIDTH - 2 * inset, LIST_TITLE_Y);
+     * does not paint into it. A title too long for the header face on one line
+     * (a key origin under a three-digit account) takes the smaller face, since
+     * a second line would land on the body. */
+    const int title_width = SEEDTOOL_DISPLAY_WIDTH - 2 * inset;
+    if (title && text_width(tft_Ubuntu16, title, strlen(title)) > title_width) {
+        (void)draw_centered_box(tft_DefaultFont, title, inset, title_width,
+            NAV_BACK_Y + (NAV_BACK_HEIGHT - tft_DefaultFont[1]) / 2);
+    } else {
+        (void)draw_centered_box(tft_Ubuntu16, title, inset, title_width, LIST_TITLE_Y);
+    }
     /* The rule under the header, which closes the arrow's box and the
      * confirm's, drawn here so every screen wearing the header gets it. */
     fill_rect(NAV_BACK_X, NAV_BACK_Y + NAV_BACK_HEIGHT, SEEDTOOL_DISPLAY_WIDTH - 2 * NAV_BACK_X, 1, COLOR_DIM);
