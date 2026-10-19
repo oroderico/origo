@@ -271,9 +271,11 @@ static bool flip_bits(const char* title, uint8_t* bits, const size_t count, cons
 static bool enter_flipped_word(const unsigned position, const unsigned total, uint16_t* index_out)
 {
     uint8_t bits[COIN_WORD_BITS] = { 0 };
-    /* Sized for ten-digit counts, for -Wformat-truncation. */
+    /* The flip counter follows, so the two counts are told apart by name:
+     * "Word 3/11, flip 5/11". Sized for ten-digit counts, for
+     * -Wformat-truncation. */
     char title[48];
-    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    (void)snprintf(title, sizeof(title), "Word %u/%u, flip", position, total);
     const bool flipped_all = flip_bits(title, bits, COIN_WORD_BITS, 0);
     if (flipped_all) {
         uint16_t index = 0;
@@ -292,7 +294,7 @@ static bool enter_flipped_word(const unsigned position, const unsigned total, ui
 static bool confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
 {
     char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
-    (void)snprintf(title, sizeof(title), "Word %u of %u", position, total);
+    (void)snprintf(title, sizeof(title), "Word %u/%u", position, total);
     for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
         bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
     }

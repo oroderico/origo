@@ -359,7 +359,7 @@ static void format_progress_heading(char* heading, const size_t heading_len, con
     if (progress && progress->graded) {
         (void)snprintf(heading, heading_len, "%s %u/%u %d bits", title, position, total, progress->bits);
     } else {
-        (void)snprintf(heading, heading_len, "%s  %u/%u", title, position, total);
+        (void)snprintf(heading, heading_len, "%s %u/%u", title, position, total);
     }
 }
 
