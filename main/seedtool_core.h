@@ -128,6 +128,10 @@ seedtool_result_t seedtool_card_pattern_detected(
 seedtool_result_t seedtool_transcript(
     seedtool_source_t source, const uint8_t* values, size_t values_len, char* output, size_t output_len);
 
+/* What a card transcript starts with, naming its encoding for the hash. It is
+ * part of what is hashed, not of what the reader entered. */
+#define SEEDTOOL_CARDS_TRANSCRIPT_PREFIX "cards-v1:"
+
 /* Values are numeric: D6=1..6, D20=1..20, coin=0/1. Cards are
  * 0..51 in canonical AC..KC, AD..KD, AH..KH, AS..KS order. */
 seedtool_result_t seedtool_generate(

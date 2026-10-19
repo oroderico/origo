@@ -251,7 +251,7 @@ seedtool_result_t seedtool_transcript(const seedtool_source_t source, const uint
     output[0] = '\0';
 
     const bool is_cards = source == SEEDTOOL_CARDS || source == SEEDTOOL_CARDS_REPLACE;
-    if (is_cards && append(output, output_len, &used, "cards-v1:") != SEEDTOOL_OK) {
+    if (is_cards && append(output, output_len, &used, SEEDTOOL_CARDS_TRANSCRIPT_PREFIX) != SEEDTOOL_OK) {
         return SEEDTOOL_ENOSPACE;
     }
     for (size_t i = 0; i < values_len; ++i) {
