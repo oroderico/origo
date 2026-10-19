@@ -21,6 +21,12 @@ CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 XPUB_VERSION = b"\x04\x88\xb2\x1e"
 ZPUB_VERSION = b"\x04\xb2\x47\x46"  # SLIP-132, native segwit (BIP84) only
+YPUB_VERSION = b"\x04\x9d\x7c\xb2"  # SLIP-132, nested segwit (BIP49) only
+# Every script type the device derives, in its own order: legacy, nested
+# segwit, native segwit, taproot.
+PURPOSES = (44, 49, 84, 86)
+# Each type's output descriptor wrapper (BIP381-386).
+SCRIPT_WRAP = {44: ("pkh(", ")"), 49: ("sh(wpkh(", "))"), 84: ("wpkh(", ")"), 86: ("tr(", ")")}
 WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/data/wordlists/english.txt"
 
 # How many events each source needs, as (12 words, 24 words); None where that
@@ -151,9 +157,9 @@ def descriptor(fingerprint, purpose, xpub, account=0, multipath=True):
     firmware has no such setting - it is the one descriptor shape the device
     shows - so this exists to let a reader produce the fallback offline
     rather than hand-editing a string whose checksum then no longer matches."""
-    fragment = "wpkh" if purpose == 84 else "tr"
+    opening, closing = SCRIPT_WRAP[purpose]
     chain = "<0;1>" if multipath else "0"
-    body = f"{fragment}([{fingerprint}/{purpose}'/0'/{account}']{xpub}/{chain}/*)"
+    body = f"{opening}[{fingerprint}/{purpose}'/0'/{account}']{xpub}/{chain}/*{closing}"
     return f"{body}#{descriptor_checksum(body)}"
 
 
@@ -421,6 +427,11 @@ def zpub(node):
     return xpub(node, ZPUB_VERSION)
 
 
+def ypub(node):
+    """The same account key with SLIP-132's nested-segwit version bytes."""
+    return xpub(node, YPUB_VERSION)
+
+
 def polymod(values):
     chk = 1
     gen = (0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)
@@ -462,13 +473,20 @@ def tagged_hash(tag, data):
 def addresses(mnemonic, passphrase, index, account_index=0, chain=0):
     root = master(mnemonic, passphrase)
     result, accounts = {}, {}
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         account = derive(root, (purpose | H, 0 | H, account_index | H))
         accounts[purpose] = xpub(account)
         if purpose == 84:
             accounts["84z"] = zpub(account)
+        if purpose == 49:
+            accounts["49y"] = ypub(account)
         node = derive(account, (chain, index))
-        if purpose == 84:
+        if purpose == 44:
+            result[purpose] = base58check(b"\x00" + hash160(pubkey(node[0])))
+        elif purpose == 49:
+            redeem = b"\x00\x14" + hash160(pubkey(node[0]))
+            result[purpose] = base58check(b"\x05" + hash160(redeem))
+        elif purpose == 84:
             result[purpose] = segwit(hash160(pubkey(node[0])), 0)
         else:
             x, y = mul(node[0])
@@ -515,18 +533,19 @@ def inspect(args):
     print("word numbers:", " ".join(str(n) for n in word_numbers(args.mnemonic)))
     print("compact seedqr (hex):", compact_seedqr_payload(args.mnemonic).hex())
     print("fingerprint:", fingerprint)
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         print(f"[{fingerprint}/{purpose}'/0'/{args.account}']: {accounts[purpose]}")
+    print(f"[{fingerprint}/49'/0'/{args.account}'] (ypub): {accounts['49y']}")
     print(f"[{fingerprint}/84'/0'/{args.account}'] (zpub): {accounts['84z']}")
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         print(f"qr {purpose}: {account_qr_payload(fingerprint, purpose, accounts[purpose], args.account)}")
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         print(f"m/{purpose}'/0'/{args.account}'/{chain}/{args.index}: {addrs[purpose]}")
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         print(f"descriptor {purpose}: {descriptor(fingerprint, purpose, accounts[purpose], args.account)}")
     # The pre-BIP389 fallback, for a wallet that rejects the multipath form.
     # Not what the device shows; printed so it never has to be hand-edited.
-    for purpose in (84, 86):
+    for purpose in PURPOSES:
         receive_only = descriptor(fingerprint, purpose, accounts[purpose], args.account, multipath=False)
         print(f"descriptor {purpose} (receive-only): {receive_only}")
 
@@ -591,7 +610,7 @@ def main():
     check = sub.add_parser("inspect")
     check.add_argument("mnemonic")
     check.add_argument("--passphrase", default="")
-    check.add_argument("--index", type=int, choices=range(100), default=0)
+    check.add_argument("--index", type=int, choices=range(10000), default=0, metavar="0-9999")
     check.add_argument("--account", type=int, choices=range(1000), default=0)
     check.add_argument("--change", action="store_true", help="derive the change branch (chain 1) instead of receive")
     check.set_defaults(func=inspect)

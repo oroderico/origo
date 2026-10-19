@@ -37,10 +37,46 @@ static bool derive_root(wallet_session_t* const session)
  * SEEDTOOL_MAX_ACCOUNT_INDEX's own width, not a placeholder. */
 #define ACCOUNT_KEY_LEN (sizeof("[00000000/84'/0'/999']") + SEEDTOOL_MAX_XPUB_LEN)
 
-/* A BIP380 descriptor: prefix, origin, xpub, BIP389's "<0;1>" multipath step,
- * the wildcard, "#" and 8 checksum characters. "wpkh" is the longest prefix
- * used. */
-#define DESCRIPTOR_LEN (sizeof("wpkh([00000000/84'/0'/999']/<0;1>/*)#12345678") + SEEDTOOL_MAX_XPUB_LEN)
+/* A BIP380 descriptor: script wrapper, origin, xpub, BIP389's "<0;1>"
+ * multipath step, the wildcard, "#" and 8 checksum characters. BIP49's
+ * "sh(wpkh(" is the longest wrapper used. */
+#define DESCRIPTOR_LEN (sizeof("sh(wpkh([00000000/49'/0'/999']/<0;1>/*))#12345678") + SEEDTOOL_MAX_XPUB_LEN)
+
+/* Every script type the viewer derives, in the order offered; everything that
+ * names a type, wraps its descriptor or offers its SLIP-132 key reads it here.
+ * `slip132` is SEEDTOOL_XPUB where SLIP-132 defines no prefix. */
+typedef struct {
+    seedtool_address_type_t type;
+    const char* name;
+    const char* script_open;
+    const char* script_close;
+    seedtool_key_format_t slip132;
+} address_type_t;
+
+static const address_type_t ADDRESS_TYPES[] = {
+    { SEEDTOOL_BIP84, "Native SegWit", "wpkh(", ")", SEEDTOOL_ZPUB },
+    { SEEDTOOL_BIP86, "Taproot", "tr(", ")", SEEDTOOL_XPUB },
+    { SEEDTOOL_BIP49, "Nested SegWit", "sh(wpkh(", "))", SEEDTOOL_YPUB },
+    { SEEDTOOL_BIP44, "Legacy", "pkh(", ")", SEEDTOOL_XPUB },
+};
+#define ADDRESS_TYPE_COUNT ARRAY_LEN(ADDRESS_TYPES)
+
+static const address_type_t* address_type(const seedtool_address_type_t type)
+{
+    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
+        if (ADDRESS_TYPES[i].type == type) {
+            return &ADDRESS_TYPES[i];
+        }
+    }
+    /* The session's type only ever comes from this table. */
+    seedtool_require(false);
+    return &ADDRESS_TYPES[0];
+}
+
+static const char* key_format_name(const seedtool_key_format_t format)
+{
+    return format == SEEDTOOL_YPUB ? "ypub" : format == SEEDTOOL_ZPUB ? "zpub" : "xpub";
+}
 
 /* The longest value ever handed to show_account_key_qr: the descriptor. */
 #define BBQR_MAX_VALUE_LEN ((ACCOUNT_KEY_LEN > DESCRIPTOR_LEN ? ACCOUNT_KEY_LEN : DESCRIPTOR_LEN) - 1)
@@ -206,8 +242,7 @@ static void export_qr(const wallet_session_t* const session, const seedtool_key_
         return;
     }
     char title[24];
-    (void)snprintf(
-        title, sizeof(title), "BIP%u %s", (unsigned)session->type, format == SEEDTOOL_ZPUB ? "zpub" : "xpub");
+    (void)snprintf(title, sizeof(title), "BIP%u %s", (unsigned)session->type, key_format_name(format));
     char value[ACCOUNT_KEY_LEN] = { 0 };
     (void)snprintf(value, sizeof(value), "[%s/%u'/0'/%u']%s", session->fphex, (unsigned)session->type,
         (unsigned)session->account, xpub);
@@ -231,9 +266,9 @@ static void show_descriptor(const wallet_session_t* const session)
     char value[DESCRIPTOR_LEN] = { 0 };
     if (seedtool_account_xpub(&session->root, session->type, session->account, SEEDTOOL_XPUB, xpub, sizeof(xpub))
         == SEEDTOOL_OK) {
-        (void)snprintf(body, sizeof(body), "%s([%s/%u'/0'/%u']%s/<0;1>/*)",
-            session->type == SEEDTOOL_BIP84 ? "wpkh" : "tr", session->fphex, (unsigned)session->type,
-            (unsigned)session->account, xpub);
+        const address_type_t* const script = address_type(session->type);
+        (void)snprintf(body, sizeof(body), "%s[%s/%u'/0'/%u']%s/<0;1>/*%s", script->script_open, session->fphex,
+            (unsigned)session->type, (unsigned)session->account, xpub, script->script_close);
         seedtool_zero(xpub, sizeof(xpub));
         if (seedtool_descriptor_checksum(body, value, sizeof(value)) == SEEDTOOL_OK) {
             if (page_text("Descriptor", value)) {
@@ -280,16 +315,15 @@ static void show_address_qr(const char* title, const char* address)
     }
 }
 
-/* The Addresses screen's cache: derived once per visit rather than on every
- * return from a QR, which would repeat PBKDF2. Addresses are public, so keeping
- * them for the visit trades privacy, not the seed. */
-static char addresses[ADDRESS_LIST_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
+/* The listed addresses, derived once per visit rather than on every return
+ * from a QR. Addresses are public, so keeping them for the visit trades
+ * privacy, not the seed. */
+static char addresses[ADDRESS_SHOWN_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
 static char address_labels[ADDRESS_SHOWN_ROWS][ADDRESS_LABEL_LEN];
 static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Back */
 
-/* Fills the cache for one type, account and branch: every index is derived (Go
- * to index can reach any), the first ADDRESS_SHOWN_ROWS labelled. Returns
- * false, having told the reader, on a derivation error. */
+/* Fills the list for one type, account and branch. Returns false, having told
+ * the reader, on a derivation error. */
 static bool derive_addresses(
     const wallet_session_t* const session, const seedtool_chain_t chain, const char* const prefix)
 {
@@ -297,7 +331,7 @@ static bool derive_addresses(
     seedtool_zero(address_labels, sizeof(address_labels));
     screen_text(prefix, "Deriving addresses...", NULL, NULL);
     if (seedtool_mainnet_addresses(
-            &session->root, session->type, session->account, chain, ADDRESS_LIST_ROWS, addresses)
+            &session->root, session->type, session->account, chain, 0, ADDRESS_SHOWN_ROWS, addresses)
         != SEEDTOOL_OK) {
         seedtool_zero(addresses, sizeof(addresses));
         notice("Error", "Could not derive addresses", NULL);
@@ -314,11 +348,12 @@ static bool derive_addresses(
     return true;
 }
 
-/* Browses the cache. Returns the chosen index with its address in address_out,
- * or NAV_BACK. `cursor` is where the list opens and where it is
- * left; Go to index moves it only within the shown rows. */
-static int browse_addresses(
-    const char* const prefix, char* address_out, const size_t address_out_len, size_t* cursor)
+/* Browses the list. Returns the chosen index with its address in
+ * address_out, or NAV_BACK. `cursor` is where the list opens and where it is
+ * left; Go to index moves it only within the listed rows, and derives an index
+ * past them on its own. */
+static int browse_addresses(const wallet_session_t* const session, const seedtool_chain_t chain,
+    const char* const prefix, char address_out[SEEDTOOL_MAX_ADDRESS_LEN], size_t* cursor)
 {
     for (;;) {
         const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
@@ -327,49 +362,29 @@ static int browse_addresses(
             if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, &index)) {
                 continue;
             }
-            /* `index` addresses the static cache directly, so it is checked
-             * here even though the keypad cannot type past it. */
-            if (index > SEEDTOOL_MAX_ADDRESS_INDEX) {
-                continue;
-            }
             if (index < ADDRESS_SHOWN_ROWS) {
                 *cursor = index;
+                memcpy(address_out, addresses[index], SEEDTOOL_MAX_ADDRESS_LEN);
+                return (int)index;
             }
-            /* %.*s, for the same reason as in derive_addresses. */
-            (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
-                addresses[index]);
+            char one[1][SEEDTOOL_MAX_ADDRESS_LEN];
+            if (seedtool_mainnet_addresses(&session->root, session->type, session->account, chain, index, 1, one)
+                != SEEDTOOL_OK) {
+                notice("Error", "Could not derive address", NULL);
+                continue;
+            }
+            memcpy(address_out, one[0], SEEDTOOL_MAX_ADDRESS_LEN);
             return (int)index;
         }
         if (selected == NAV_BACK) {
             return NAV_BACK;
         }
         /* choose_menu_at has already left the cursor on what was taken. */
-        (void)snprintf(address_out, address_out_len, "%.*s", (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1),
-            addresses[selected]);
+        memcpy(address_out, addresses[selected], SEEDTOOL_MAX_ADDRESS_LEN);
         return selected;
     }
 }
 
-/* Every script type the viewer derives, in the order offered; everything that
- * names a type reads it here. */
-static const struct {
-    seedtool_address_type_t type;
-    const char* name;
-} ADDRESS_TYPES[] = {
-    { SEEDTOOL_BIP84, "Native SegWit" },
-    { SEEDTOOL_BIP86, "Taproot" },
-};
-#define ADDRESS_TYPE_COUNT (sizeof(ADDRESS_TYPES) / sizeof(ADDRESS_TYPES[0]))
-
-static const char* address_type_name(const seedtool_address_type_t type)
-{
-    for (size_t i = 0; i < ADDRESS_TYPE_COUNT; ++i) {
-        if (ADDRESS_TYPES[i].type == type) {
-            return ADDRESS_TYPES[i].name;
-        }
-    }
-    return "";
-}
 
 /* Which script type to derive, opened on the one in force. Returns false,
  * leaving `*type` alone, on Back or a timeout. */
@@ -415,30 +430,30 @@ static void show_account_key(const wallet_session_t* const session, const seedto
     seedtool_zero(xpub, sizeof(xpub));
 }
 
-/* xpub, zpub and the descriptor: the same key three ways, behind one row since
- * each reveals every address. SLIP-132 has no taproot prefix, so zpub is BIP84
- * only. */
+/* xpub, its SLIP-132 form where the type has one (ypub for BIP49, zpub for
+ * BIP84), and the descriptor: the same key up to three ways, behind one row
+ * since each reveals every address. */
 static void show_extended_keys(const wallet_session_t* const session)
 {
+    const seedtool_key_format_t slip132 = address_type(session->type)->slip132;
     size_t cursor = 0;
     for (;;) {
-        const char* items[4];
+        const char* items[3];
         size_t count = 0;
         items[count++] = "xpub";
-        if (session->type == SEEDTOOL_BIP84) {
-            items[count++] = "zpub";
+        if (slip132 != SEEDTOOL_XPUB) {
+            items[count++] = key_format_name(slip132);
         }
+        const size_t descriptor_row = count;
         items[count++] = "Descriptor";
         const int selected = choose_menu_at("Extended public key", items, count, &cursor);
         if (selected == NAV_BACK) {
             return;
         }
-        if (selected == 0) {
-            show_account_key(session, SEEDTOOL_XPUB);
-        } else if (session->type == SEEDTOOL_BIP84 && selected == 1) {
-            show_account_key(session, SEEDTOOL_ZPUB);
-        } else {
+        if ((size_t)selected == descriptor_row) {
             show_descriptor(session);
+        } else {
+            show_account_key(session, selected == 0 ? SEEDTOOL_XPUB : slip132);
         }
     }
 }
@@ -467,7 +482,7 @@ static void show_addresses(const wallet_session_t* const session)
     size_t cursor = 0;
     for (;;) {
         char address[SEEDTOOL_MAX_ADDRESS_LEN] = { 0 };
-        const int index = browse_addresses(prefix, address, sizeof(address), &cursor);
+        const int index = browse_addresses(session, chain, prefix, address, &cursor);
         if (index == NAV_BACK) {
             seedtool_zero(address, sizeof(address));
             break;
@@ -676,7 +691,7 @@ static void show_derivation_menu(wallet_session_t* const session)
         char account_item[16];
         (void)snprintf(account_item, sizeof(account_item), "Account: %u", (unsigned)session->account);
         char type_item[32];
-        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type_name(session->type));
+        (void)snprintf(type_item, sizeof(type_item), "Type: %s", address_type(session->type)->name);
         /* Says whether one is set, never anything about what it is. */
         const char* const passphrase_item
             = session->passphrase[0] ? "Passphrase: session only" : "Passphrase: none";

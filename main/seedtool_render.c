@@ -282,6 +282,7 @@ static int draw_centered_box(const uint8_t* font, const char* text, const int x,
     while (*cursor && y + line_height <= SEEDTOOL_DISPLAY_HEIGHT) {
         const char* end = cursor;
         const char* last_space = NULL;
+        const char* last_slash = NULL;
         int used = 0;
         while (*end && *end != '\n') {
             const int advance = glyph_advance(font, (unsigned char)*end);
@@ -290,12 +291,26 @@ static int draw_centered_box(const uint8_t* font, const char* text, const int x,
             }
             if (*end == ' ') {
                 last_space = end;
+            } else if (*end == '/') {
+                last_slash = end;
             }
             used += advance;
             ++end;
         }
         const bool mid_word = end > cursor && end[-1] != ' ' && *end && *end != '\n' && *end != ' ';
-        const char* const line_end = mid_word && last_space && last_space != cursor ? last_space : end;
+        /* A word breaks at the space before it, or a derivation path after
+         * its last slash that fits, whichever is later: a path has no spaces,
+         * and cut anywhere else it splits an index in two. */
+        const char* line_end = end;
+        if (mid_word) {
+            const char* const at_space = last_space != cursor ? last_space : NULL;
+            const char* const after_slash = last_slash && last_slash + 1 < end ? last_slash + 1 : NULL;
+            if (after_slash && (!at_space || after_slash > at_space)) {
+                line_end = after_slash;
+            } else if (at_space) {
+                line_end = at_space;
+            }
+        }
         draw_centered_line(font, cursor, (size_t)(line_end - cursor), x, width, y);
         cursor = *line_end == ' ' || *line_end == '\n' ? line_end + 1 : line_end;
         y += line_height;

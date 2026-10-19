@@ -27,14 +27,11 @@
 #define MAX_LINE_CHARS 48
 #define PASSPHRASE_TAIL 24
 
-/* Every index up to SEEDTOOL_MAX_ADDRESS_INDEX is derived and cached; only the
- * first ADDRESS_SHOWN_ROWS get a row, and "Go to index" reaches the rest. */
-#define ADDRESS_LIST_ROWS (SEEDTOOL_MAX_ADDRESS_INDEX + 1)
+/* The first ADDRESS_SHOWN_ROWS addresses are derived and listed; "Go to index"
+ * derives any other up to SEEDTOOL_MAX_ADDRESS_INDEX on its own. */
 #define ADDRESS_SHOWN_ROWS 50
 #define ADDRESS_LABEL_LEN (8 + SEEDTOOL_MAX_ADDRESS_LEN)
-/* derive_addresses labels one shown row per derived address, so showing more
- * rows than were derived would read past the end of `addresses`. */
-_Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are shown than are derived");
+_Static_assert(ADDRESS_SHOWN_ROWS <= SEEDTOOL_MAX_ADDRESS_INDEX + 1, "more address rows are listed than exist");
 
 /* The two buttons sit one above the other, so the left one (KEY_PREV) reads as
  * "up". Spelled out because the fonts have no arrow glyph. */
@@ -54,13 +51,16 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= ADDRESS_LIST_ROWS, "more address rows are s
  * SEEDTOOL_MAX_ACCOUNT_INDEX, so every digit is reachable at any length. */
 #define ACCOUNT_DIGITS 3
 
-/* "Go to index", sized for SEEDTOOL_MAX_ADDRESS_INDEX. The assertion keeps the
- * two in step, and browse_addresses also rejects an index past the cache. */
-#define ADDRESS_INDEX_DIGITS 2
-_Static_assert(ADDRESS_INDEX_DIGITS == 2 && SEEDTOOL_MAX_ADDRESS_INDEX == 99,
+/* "Go to index", sized for SEEDTOOL_MAX_ADDRESS_INDEX: four digits reach it,
+ * so every digit is reachable at any length. */
+#define ADDRESS_INDEX_DIGITS 4
+_Static_assert(ADDRESS_INDEX_DIGITS == 4 && SEEDTOOL_MAX_ADDRESS_INDEX == 9999,
     "the address-index keypad width and the derived address range must be changed together");
-/* enter_number's buffer is sized for the wider of the two. */
-_Static_assert(ADDRESS_INDEX_DIGITS <= ACCOUNT_DIGITS, "enter_number holds ACCOUNT_DIGITS digits");
+
+/* enter_number's buffer, sized for the wider of its two uses. */
+#define NUMBER_MAX_DIGITS 4
+_Static_assert(ACCOUNT_DIGITS <= NUMBER_MAX_DIGITS && ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS,
+    "enter_number holds NUMBER_MAX_DIGITS digits");
 
 /* The word-number field draws one box per digit, and the renderer bounds how
  * many of those fit across the display. Widening a word number without the
