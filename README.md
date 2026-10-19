@@ -326,8 +326,9 @@ exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
 of a screen position, since a direct choice has nothing left to confirm. Neither of
 these is visible until it is used, so the entry screens say where they are in
-a footer that stays: `BOTH take   back is below 1` (or the suit, or the rank)
-on a carousel, `BOTH undoes the last flip` on a coin.
+a footer that stays: `BOTH take   back below 1` (or the rank; `first` for a
+suit, whose name does not fit beside it) on a carousel, `BOTH undoes the last
+flip` on a coin.
 
 ### Settings
 

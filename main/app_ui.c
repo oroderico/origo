@@ -384,7 +384,10 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
     } else {
         (void)snprintf(first_shown, sizeof(first_shown), "%u", first);
     }
-    (void)snprintf(footer, sizeof(footer), "BOTH take   back is below %s", first_shown);
+    /* A suit's name does not fit the footer beside the chord; a die face or a
+     * rank does. */
+    (void)snprintf(
+        footer, sizeof(footer), "BOTH take   back below %s", strlen(first_shown) > 2 ? "first" : first_shown);
 
     for (;;) {
         char heading[48], shown[48];
