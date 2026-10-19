@@ -291,8 +291,8 @@ good once the chord has been used once — not under the main menu itself, which
 is not the place to also be teaching it. What stays under a screen after that is
 its position counter alone, or nothing at all on a screen that answers with the
 tick in the header rather than a bar along the bottom. The one footer that still
-names a consequence rather than a gesture — the timeout's `BOTH extend
-Up/Down erase` — is always shown, because guessing wrong there costs a session.
+names a consequence rather than a gesture — the timeout's `Press any button to
+stay` — is always shown, because missing it costs a session.
 
 ### Carousels: dice, coins and cards
 
@@ -328,11 +328,12 @@ of a screen position, since a direct choice has nothing left to confirm.
 ### Settings
 
 The main menu's `Settings` entry carries `About` (the safety disclaimer),
-`Flip Orientation`, which toggles the panel 180 degrees in place, and
+`Flip Orientation`, which toggles the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
-as it is adjusted. The display settings are session-only - like every other
-piece of UI state, they reset to their defaults (unflipped, brightness 3 of 5)
-on the next boot, since Origo has nothing to save them to.
+as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
+are session-only - like every other piece of UI state, they reset to their
+defaults (unflipped, brightness 3 of 5, alphabetical) on the next boot, since
+Origo has nothing to save them to.
 
 ### Lists and scrolling
 
@@ -388,8 +389,14 @@ and padded to four digits.
 
 ### The keyboards
 
-The keyboards are QWERTY. The cursor opens on the middle key of the middle row —
-`g` on the letter keyboards, `5` on the number one — because on a ring of thirty
+The letter keyboards are alphabetical by default, in Jade's rows (`a`–`j`,
+`k`–`t`, `u`–`z`): on a ring walked with two buttons, a reader who does not
+touch-type finds a letter by where it falls in the alphabet. `Keyboard: QWERTY`
+in Settings switches them. Settings is reached only from the main menu, so the
+choice cannot change while a seed is loaded, and no passphrase is typed on one
+arrangement and confirmed on the other. The number keyboard has one order. The
+cursor opens on the middle key of the middle row — `o` on the alphabetical
+letters, `g` on QWERTY, `5` on the numbers — because on a ring of thirty
 keys walked with two buttons the corner is the furthest possible place to start
 from. It then keeps its place, so repeating a character is one press rather than
 a walk back, and returns to the centre when a keyboard is opened or a symbol page
@@ -403,8 +410,11 @@ screen in the entry path may depend on the device RNG.
 ### Passphrase
 
 An optional printable-ASCII passphrase of at most 100 characters is typed on a
-four-page keyboard covering the whole printable range, entered twice, and exists
-for that derivation session only. It is set from the wallet viewer's Derivation
+four-page keyboard covering the whole printable range, read back whole with its
+length (the one sign of a space at either end), entered a second time, and exists
+for that derivation session only. Backspace on an empty field steps back, so the
+review returns to the keyboard with the text still there, and a second entry that
+differs is retyped against the first rather than costing both. It is set from the wallet viewer's Derivation
 screen rather than asked for on the way in: a session begins with none, and the
 screen states which of the two is in force rather than leaving it to be assumed.
 Changing or clearing it re-derives the master fingerprint, since that
@@ -738,9 +748,11 @@ what is in RAM is what the screen in front of you needs and not what three
 screens ago needed. Power the board down when you are done rather than leaving
 a session open.
 
-The ten-minute inactivity timer gives a 60-second extend-or-erase warning, and
-anything but extending restarts the device, from any screen; so does leaving the
-wallet. A software restart leaves RAM as it was, so every boot zeroes the free
+The ten-minute inactivity timer gives a 60-second warning; any button extends
+the session, and a warning left unanswered restarts the device, from any
+screen. So does leaving the wallet. Erasing on purpose is the wallet's own
+`Erase and restart` row: a timer meant for a reader who walked away has no
+business turning a stray press into the loss of a half-entered transcript. A software restart leaves RAM as it was, so every boot zeroes the free
 heap, where the previous session's stacks lived, and C startup zeroes the
 rest. That covers an internal assertion failure too (`__wrap_abort` in
 `main/seedtool_platform_esp.c`), which restarts without unwinding.
