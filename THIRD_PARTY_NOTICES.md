@@ -17,7 +17,7 @@ The following third-party components remain subject to their own notices:
   `e65cb6f8359cbd68d6388ffce6d44fda51cad849cbf6afdb12d2dc36d7fdf50e` and
   `25b3eb0a638635ac0590bc263bd86729586cd7f4ffa9a496e1dfce675eedf22f`). Jade's
   later changes to those files touch only its icon helpers, which Origo does
-  not carry. The README's "The QR encoder" lists what Origo changed.
+  not carry. "The QR encoder" in docs/verify.md lists what Origo changed.
 - **DefaultFont font data** is inherited from the Blockstream Jade source
   distribution, byte for byte Jade's `main/fonts/DefaultFont.c` at the same
   commit (SHA256
