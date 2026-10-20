@@ -98,6 +98,19 @@ static const uint16_t NUM_RAW_DATA_MODULES = 1383;
 
 #endif
 
+/* Origo: zeroes a buffer that held payload-derived bytes before its stack frame
+ * is released. The payload can be a Compact SeedQR's entropy, i.e. the whole
+ * wallet, so neither its codewords nor their error correction are left behind
+ * for the next call's stack to inherit. Volatile so the stores are not elided
+ * as dead. */
+static void qr_wipe(void* buffer, size_t length)
+{
+    volatile uint8_t* bytes = (volatile uint8_t*)buffer;
+    while (length--) {
+        *bytes++ = 0;
+    }
+}
+
 static int max(int a, int b)
 {
     if (a > b) {
@@ -844,6 +857,7 @@ static void performErrorCorrection(uint8_t version, uint8_t ecc, BitBucket* data
 
     memcpy(data->data, result, data->capacityBytes);
     data->bitOffsetOrWidth = moduleCount;
+    qr_wipe(result, sizeof(result));
 }
 
 // We store the Format bits tightly packed into a single byte (each of the 4 modes is 2 bits)
@@ -965,6 +979,7 @@ int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8
     int8_t mode = encodeDataCodewords(&codewords, data, length, version);
 
     if (mode < 0) {
+        qr_wipe(codewordBytes, sizeof(codewordBytes));
         return -1;
     }
     qrcode->mode = mode;
@@ -1016,6 +1031,7 @@ int8_t qrcode_initBytes(QRCode* qrcode, uint8_t* modules, uint8_t version, uint8
     // Apply the final choice of mask
     applyMask(&modulesGrid, &isFunctionGrid, mask);
 
+    qr_wipe(codewordBytes, sizeof(codewordBytes));
     return 0;
 }
 
