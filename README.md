@@ -638,7 +638,7 @@ turn a stray press into one.
 
 That artwork is the only picture in the firmware: a 102x124 array of palette
 indices at two pixels per byte, about 6.2 KiB, written straight into the
-framebuffer by indexing a palette of ten colours. It is deliberately not
+framebuffer by indexing a palette of nine colours. It is deliberately not
 compressed. Deflate would take it to well under half, but the decompressor is
 one of the components the audit rejects by name, and trading an audited absence
 for a few kilobytes is a bad exchange.
