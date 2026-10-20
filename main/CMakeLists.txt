@@ -14,7 +14,8 @@ idf_component_register(
          "origo_esp_main.c"
          "qrcode.c"
          "fonts/DefaultFont.c"
-         "fonts/Ubuntu16.c"
+         "fonts/UbuntuRegular16.c"
+         "fonts/UbuntuMedium16.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES libwally-seed esp_driver_gpio esp_driver_spi esp_driver_ledc esp_hw_support heap)
 

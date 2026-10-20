@@ -1146,6 +1146,8 @@ static bool remaining_screens_render(void)
     const seedtool_nav_t at_start = { .selected = 0, .confirm_enabled = false, .back = true };
     seedtool_render_nav_list(&scrolled, "Wallet", rows, 7, 4);
     seedtool_render_nav_list(&at_start, "Word 3/12  aba", rows, 7, 0);
+    const seedtool_nav_t wallet = { .selected = 0, .back = false, .fingerprint = "73c5da0a" };
+    seedtool_render_nav_list(&wallet, "Wallet @", rows, 7, 0);
     const bool letters[SEEDTOOL_LETTERS + 1] = { true };
     seedtool_render_keyboard(
         "Word 1/12", "aba", SEEDTOOL_WORD_LAYOUT, letters, seedtool_layout_center(SEEDTOOL_WORD_LAYOUT), 1, 12);

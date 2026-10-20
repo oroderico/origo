@@ -89,7 +89,8 @@ set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/seedtool_logo.c"
     "${ORIGO_ROOT}/main/qrcode.c"
     "${ORIGO_ROOT}/main/fonts/DefaultFont.c"
-    "${ORIGO_ROOT}/main/fonts/Ubuntu16.c")
+    "${ORIGO_ROOT}/main/fonts/UbuntuRegular16.c"
+    "${ORIGO_ROOT}/main/fonts/UbuntuMedium16.c")
 
 enable_testing()
 foreach(suite core entropy_stats render)
