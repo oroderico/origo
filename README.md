@@ -332,9 +332,10 @@ flip` on a coin.
 
 ### Settings
 
-The main menu's `Settings` entry carries `About` (the firmware's version - the
-source's `git describe`, with `-dirty` if it was built from uncommitted changes -
-then the safety disclaimer),
+`Settings`, in the main menu and in a loaded wallet's menu (where leaving for
+the main menu would erase the seed), carries `About` (the firmware's version -
+the source's `git describe`, with `-dirty` if it was built from uncommitted
+changes - then the safety disclaimer),
 `Flip screen`, which turns the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
@@ -399,9 +400,9 @@ and padded to four digits.
 The letter keyboards are alphabetical by default, in Jade's rows (`a`–`j`,
 `k`–`t`, `u`–`z`): on a ring walked with two buttons, a reader who does not
 touch-type finds a letter by where it falls in the alphabet. `Keyboard: QWERTY`
-in Settings switches them. Settings is reached only from the main menu, so the
-choice cannot change while a seed is loaded, and no passphrase is typed on one
-arrangement and confirmed on the other. The number keyboard has one order. The
+in Settings switches them. Settings opens only from a menu, never in the middle
+of a flow, and a passphrase is typed and confirmed in one sitting, so it is
+never typed on one arrangement and confirmed on the other. The number keyboard has one order. The
 cursor opens on the middle key of the middle row — `o` on the alphabetical
 letters, `g` on QWERTY, `5` on the numbers — because on a ring of thirty
 keys walked with two buttons the corner is the furthest possible place to start

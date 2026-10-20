@@ -84,10 +84,9 @@ extern bool chord_learned;
 extern bool orientation_flipped;
 extern unsigned backlight_level;
 
-/* Letter keyboards in QWERTY rather than alphabetical rows. Settings is reached
- * only from the Origo menu, and a wallet never returns there, so it cannot
- * change while a seed is loaded: no passphrase is typed half on one
- * arrangement and confirmed on the other. */
+/* Letter keyboards in QWERTY rather than alphabetical rows. Settings opens
+ * from the Origo and wallet menus, never from inside a flow: a passphrase is
+ * typed and confirmed in one sitting, so never half on each arrangement. */
 extern bool qwerty_keys;
 
 /* choose_nav's outcomes other than an item index. page_key adds NAV_STAY. */
@@ -149,6 +148,9 @@ bool enter_passphrase_once(char* output, const size_t output_len);
 /* app_wallet.c */
 void show_wallet_data(const char* mnemonic);
 bool review_backup_and_show_wallet(const char* mnemonic, const size_t words);
+
+/* seedtool_app.c */
+void show_settings_menu(void);
 
 /* app_seed.c */
 void show_new_seed_menu(void);

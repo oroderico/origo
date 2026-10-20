@@ -738,7 +738,7 @@ void show_wallet_data(const char* mnemonic)
     _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
         "the wallet title must hold its label and all eight fingerprint hex digits");
     (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
-    enum { WALLET_BACKUP, WALLET_KEYS, WALLET_DERIVATION, WALLET_ADDRESSES, WALLET_ERASE };
+    enum { WALLET_BACKUP, WALLET_KEYS, WALLET_DERIVATION, WALLET_ADDRESSES, WALLET_SETTINGS, WALLET_ERASE };
     size_t cursor = 0;
     for (;;) {
         const char* menu[] = {
@@ -746,6 +746,9 @@ void show_wallet_data(const char* mnemonic)
             [WALLET_KEYS] = "Extended public key",
             [WALLET_DERIVATION] = "Derivation",
             [WALLET_ADDRESSES] = "Addresses",
+            /* Leaving for the Origo menu would erase the seed, so the
+             * display can be adjusted here too. */
+            [WALLET_SETTINGS] = "Settings",
             [WALLET_ERASE] = "Erase and restart",
         };
         /* No arrow: the only exit erases the session, so it is a row. */
@@ -770,8 +773,11 @@ void show_wallet_data(const char* mnemonic)
              * fingerprint this title states. */
             (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
             break;
-        default:
+        case WALLET_ADDRESSES:
             show_addresses(&session);
+            break;
+        default:
+            show_settings_menu();
             break;
         }
     }

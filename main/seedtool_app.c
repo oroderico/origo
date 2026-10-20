@@ -40,7 +40,7 @@ static void show_brightness(void)
     }
 }
 
-static void show_settings_menu(void)
+void show_settings_menu(void)
 {
     enum { SETTINGS_ORIENTATION, SETTINGS_BRIGHTNESS, SETTINGS_KEYBOARD, SETTINGS_ABOUT };
     size_t cursor = 0;
