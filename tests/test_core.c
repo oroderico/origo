@@ -103,6 +103,16 @@ static bool build_prefix(const size_t count, const unsigned spread, char* out, c
  * lengths: a word left out must fail validation and a word left in must pass,
  * or a restorable seed becomes unrestorable. 12 words leave 2^7 = 128
  * candidates, 24 leave 2^3 = 8. */
+/* How many words `set` holds. */
+static size_t wordset_count(const seedtool_wordset_t* set)
+{
+    size_t count = 0;
+    for (size_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        count += seedtool_wordset_has(set, index);
+    }
+    return count;
+}
+
 static bool final_word_filter_is_exact(void)
 {
     static const struct {
@@ -117,7 +127,7 @@ static bool final_word_filter_is_exact(void)
         seedtool_wordset_t set;
         if (!build_prefix(prefix_words, cases[c].spread, prefix, sizeof(prefix))
             || seedtool_final_word_candidates(prefix, &set) != SEEDTOOL_OK
-            || seedtool_wordset_count(&set) != cases[c].expected) {
+            || wordset_count(&set) != cases[c].expected) {
             return false;
         }
         for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {

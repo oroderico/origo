@@ -34,8 +34,6 @@ typedef struct {
 void seedtool_wordset_clear(seedtool_wordset_t* set);
 void seedtool_wordset_add(seedtool_wordset_t* set, size_t index);
 bool seedtool_wordset_has(const seedtool_wordset_t* set, size_t index);
-/* How many words the set holds. */
-size_t seedtool_wordset_count(const seedtool_wordset_t* set);
 
 /* Every function below that takes `allowed` counts only words in it, NULL
  * meaning the whole wordlist. */
