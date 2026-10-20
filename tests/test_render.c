@@ -481,7 +481,7 @@ static bool nav_title_stays_in_its_column(const int x)
 static bool nav_right_slot_is_drawn(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
-    /* NAV_BACK_X/WIDTH/Y/HEIGHT in seedtool_render.c, mirrored to the right
+    /* NAV_BACK_X/WIDTH/Y/HEIGHT in render_internal.h, mirrored to the right
      * edge, kept in sync with the numbers here. */
     const int left = SEEDTOOL_DISPLAY_WIDTH - 2 - 20;
     for (int y = 1; y < 1 + 19; ++y) {
@@ -499,7 +499,7 @@ static bool nav_left_slot_is_drawn(void)
 {
     const uint16_t* const pixels = seedtool_render_pixels();
     /* NAV_BACK_X = 2, NAV_BACK_WIDTH = 20, NAV_BACK_Y = 1, NAV_BACK_HEIGHT = 19
-     * in seedtool_render.c, kept in sync with the numbers here. */
+     * in render_internal.h, kept in sync with the numbers here. */
     for (int y = 1; y < 1 + 19; ++y) {
         for (int x = 2; x < 2 + 20; ++x) {
             if (pixels[y * SEEDTOOL_DISPLAY_WIDTH + x] != 0x0000) {

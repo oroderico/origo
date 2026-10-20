@@ -64,20 +64,6 @@ bool seedtool_wordset_has(const seedtool_wordset_t* set, const size_t index)
     return !set || (set->bits[index / 8] & (uint8_t)(1u << (index % 8))) != 0;
 }
 
-size_t seedtool_wordset_count(const seedtool_wordset_t* set)
-{
-    if (!set) {
-        return SEEDTOOL_WORDLIST_LEN;
-    }
-    size_t count = 0;
-    for (size_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
-        if (seedtool_wordset_has(set, index)) {
-            ++count;
-        }
-    }
-    return count;
-}
-
 size_t seedtool_words_with_prefix_in(const seedtool_wordset_t* allowed, const char* prefix, const size_t prefix_len,
     uint16_t* output, const size_t output_len)
 {

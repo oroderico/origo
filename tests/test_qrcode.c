@@ -1,17 +1,18 @@
 /* The vendored QR encoder, compiled as the firmware compiles it: without
  * LOCK_VERSION, so it accepts any version it is handed and does not check the
  * payload fits. What keeps the firmware safe is the pre-check every caller in
- * seedtool_render.c makes: ask qrcode_versionFor{Text,Bytes} which version
- * holds the payload, refuse to draw on 0, and size the module buffer for the
- * largest version. Those are the properties checked here. */
+ * render_qr.c makes: ask qrcode_versionFor{Text,Bytes} which version holds the
+ * payload, refuse to draw on 0, and size the module buffer for the largest
+ * version. Those are the properties checked here, along with the matrices. */
 #include "check.h"
 
 #include "qrcode.h"
+#include "qr_vectors.h"
 
 #include <stdint.h>
 #include <string.h>
 
-#define MAX_VERSION 6 /* QR_VERSION in main/seedtool_render.c */
+#define MAX_VERSION 6 /* QR_VERSION in main/render_qr.c */
 
 static bool encoder_matches_what_callers_assume(void)
 {
@@ -73,8 +74,41 @@ static bool encoder_matches_what_callers_assume(void)
     return true;
 }
 
+/* What is drawn, not only how big it is: for each payload in qr_vectors.h,
+ * the version the firmware would pick, the mask, and every module, against
+ * an independent encoder's matrix that an independent decoder read back. A
+ * change to the encoder that still produced valid-looking codes of the wrong
+ * content, or no longer decodable ones, fails here. */
+static bool encoder_matches_independent_vectors(void)
+{
+    for (size_t i = 0; i < sizeof(qr_vectors) / sizeof(qr_vectors[0]); ++i) {
+        const qr_vector_t* const v = &qr_vectors[i];
+        uint8_t modules[qrcode_getBufferSize(MAX_VERSION)];
+        QRCode qr;
+        char text[256] = { 0 };
+        int8_t failed;
+        uint8_t version;
+        if (v->text) {
+            CHECK(v->length < sizeof(text));
+            memcpy(text, v->payload, v->length);
+            version = qrcode_versionForText(ECC_LOW, text, MAX_VERSION);
+            failed = qrcode_initText(&qr, modules, version, ECC_LOW, text);
+        } else {
+            version = qrcode_versionForBytes(ECC_LOW, v->length, MAX_VERSION);
+            failed = qrcode_initBytes(&qr, modules, version, ECC_LOW, (uint8_t*)v->payload, v->length);
+        }
+        if (failed || version != v->version || qr.mask != v->mask
+            || memcmp(modules, v->modules, qrcode_getBufferSize(version)) != 0) {
+            fprintf(stderr, "qr vector %s differs\n", v->name);
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(void)
 {
-    static const test_t tests[] = { TEST(encoder_matches_what_callers_assume) };
+    static const test_t tests[]
+        = { TEST(encoder_matches_what_callers_assume), TEST(encoder_matches_independent_vectors) };
     return run_tests("qrcode", tests, sizeof(tests) / sizeof(tests[0]));
 }

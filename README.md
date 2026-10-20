@@ -771,6 +771,45 @@ Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and
 compare the transcript, full hash, fingerprint, xpubs, and addresses.
 
+### The QR encoder
+
+Every QR the device draws, the Compact SeedQR among them, comes from
+`main/qrcode.c`: Richard Moore's port of Project Nayuki's QR Code generator,
+as Blockstream Jade carries it. Origo's copy starts from Jade's at commit
+`4765740e3aad`, and the difference is the review:
+
+```sh
+J=https://raw.githubusercontent.com/Blockstream/Jade/4765740e3aadc096800f42a3cccbe2d5a54b582f/main
+curl -fsSL $J/qrcode.c | diff - main/qrcode.c
+curl -fsSL $J/qrcode.h | diff - main/qrcode.h
+```
+
+What it shows: Jade's icon helpers and their includes removed; the per-version
+tables for versions 5 and 6 added to the `LOCK_VERSION` builds, which Origo
+does not use; `qrcode_versionForBytes`, `qrcode_versionForAlphanumeric` and
+`qrcode_versionForText`, which pick the smallest version a payload fits, since
+the encoder itself never checks that it does; and `qr_wipe`, which zeroes the
+encoder's codeword and error-correction buffers before it returns, as they
+hold the payload. Nothing in the encoding itself is changed.
+
+That last claim is tested rather than asserted. `tests/qr_vectors.h` holds
+the full matrix of 25 payloads - Compact SeedQRs, the four address types, a
+key origin and zpub, a BBQr frame, and the largest byte and alphanumeric
+payload of each version from 1 to 6 - and `tests/test_qrcode.c` requires the
+encoder to reproduce each one bit for bit, at the version the firmware would
+pick. `tools/make_qr_vectors.py` made them: each matrix is Nayuki's own
+qrcodegen 1.8.0 encoding of the payload, decoded back to it by zxing-cpp
+3.1.1, an unrelated decoder, and the tool refuses to write a vector where
+Origo's matrix differs from qrcodegen's. The one thing taken from Origo is the
+mask: its penalty scoring is older than qrcodegen's and sometimes picks
+another of the eight, which a decoder reads from the code's format bits.
+
+Raw bytes that happen to be all digits, or all characters of QR's
+alphanumeric set, are encoded in that denser mode rather than byte mode, as
+the original library does; a decoder returns the same bytes. Two of the
+vectors are such Compact SeedQRs. Random entropy lands there with probability
+under 10^-12.
+
 ## Safety boundaries
 
 This tool protects against a compromised hardware RNG only when the human
