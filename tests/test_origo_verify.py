@@ -740,7 +740,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, cmake)
         self.assertIn("fonts/DefaultFont.c", cmake)
-        self.assertIn("fonts/Ubuntu16.c", cmake)
+        self.assertIn("fonts/UbuntuRegular16.c", cmake)
+        self.assertIn("fonts/UbuntuMedium16.c", cmake)
 
     def test_qr_max_version_is_shared_and_unlocked(self):
         # LOCK_VERSION used to pin the encoder to a single fixed version; that

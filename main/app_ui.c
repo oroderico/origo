@@ -214,8 +214,8 @@ void notice(const char* title, const char* one, const char* two)
  * `back` is false only for the Origo menu, which has no level above it, and the
  * wallet, whose exit erases the session and so is a row rather than a one-press
  * arrow. */
-int choose_nav(const char* title, const char* const* items, const size_t count, const char* confirm,
-    const bool confirm_enabled, const bool back, size_t* const cursor)
+int choose_nav(const char* title, const char* fingerprint, const char* const* items, const size_t count,
+    const char* confirm, const bool confirm_enabled, const bool back, size_t* const cursor)
 {
     size_t top = 0;
     /* A cursor on a control this draw does not offer falls back to the arrow,
@@ -234,6 +234,7 @@ int choose_nav(const char* title, const char* const* items, const size_t count, 
             .confirm = confirm ? SEEDTOOL_CONFIRM_TICK : SEEDTOOL_CONFIRM_NONE,
             .confirm_enabled = confirm_enabled,
             .back = back,
+            .fingerprint = fingerprint,
         };
         seedtool_render_nav_list(&nav, title, items, count, top);
         seedtool_display_flush();
@@ -328,7 +329,7 @@ seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* c
  * or NAV_BACK. */
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor)
 {
-    return choose_nav(title, items, count, NULL, false, true, cursor);
+    return choose_nav(title, NULL, items, count, NULL, false, true, cursor);
 }
 
 int choose_menu(const char* title, const char* const* items, const size_t count)
@@ -384,7 +385,10 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
     } else {
         (void)snprintf(first_shown, sizeof(first_shown), "%u", first);
     }
-    (void)snprintf(footer, sizeof(footer), "BOTH take   back is below %s", first_shown);
+    /* A suit's name does not fit the footer beside the chord; a die face or a
+     * rank does. */
+    (void)snprintf(
+        footer, sizeof(footer), "BOTH take   back below %s", strlen(first_shown) > 2 ? "first" : first_shown);
 
     for (;;) {
         char heading[48], shown[48];

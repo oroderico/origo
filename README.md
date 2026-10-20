@@ -326,14 +326,16 @@ exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
 of a screen position, since a direct choice has nothing left to confirm. Neither of
 these is visible until it is used, so the entry screens say where they are in
-a footer that stays: `BOTH take   back is below 1` (or the suit, or the rank)
-on a carousel, `BOTH undoes the last flip` on a coin.
+a footer that stays: `BOTH take   back below 1` (or the rank; `first` for a
+suit, whose name does not fit beside it) on a carousel, `BOTH undoes the last
+flip` on a coin.
 
 ### Settings
 
-The main menu's `Settings` entry carries `About` (the firmware's version - the
-source's `git describe`, with `-dirty` if it was built from uncommitted changes -
-then the safety disclaimer),
+`Settings`, in the main menu and in a loaded wallet's menu (where leaving for
+the main menu would erase the seed), carries `About` (the firmware's version -
+the source's `git describe`, with `-dirty` if it was built from uncommitted
+changes - then the safety disclaimer),
 `Flip screen`, which turns the panel 180 degrees in place,
 `Brightness`, which steps the backlight through five PWM levels, applied live
 as it is adjusted, and `Keyboard`, alphabetical or QWERTY letters. All three
@@ -398,9 +400,9 @@ and padded to four digits.
 The letter keyboards are alphabetical by default, in Jade's rows (`a`–`j`,
 `k`–`t`, `u`–`z`): on a ring walked with two buttons, a reader who does not
 touch-type finds a letter by where it falls in the alphabet. `Keyboard: QWERTY`
-in Settings switches them. Settings is reached only from the main menu, so the
-choice cannot change while a seed is loaded, and no passphrase is typed on one
-arrangement and confirmed on the other. The number keyboard has one order. The
+in Settings switches them. Settings opens only from a menu, never in the middle
+of a flow, and a passphrase is typed and confirmed in one sitting, so it is
+never typed on one arrangement and confirmed on the other. The number keyboard has one order. The
 cursor opens on the middle key of the middle row — `o` on the alphabetical
 letters, `g` on QWERTY, `5` on the numbers — because on a ring of thirty
 keys walked with two buttons the corner is the furthest possible place to start
@@ -431,8 +433,9 @@ passphrase in force is the intended one.
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
 address viewer entirely. For a valid mnemonic the viewer's own menu is titled
-with the master fingerprint — `Wallet @73c5da0a` — rather than spending a row
-on showing it. It is an identity rather than an action, and being read without
+with the master fingerprint — `Wallet @73c5da0a`, the fingerprint in the body
+weight and a light green of its own, apart from the orange that marks a
+selection — rather than spending a row on showing it. It is an identity rather than an action, and being read without
 being asked for is what makes it a check: it is a function of the passphrase in
 force and moves the moment that does, so a reader who knows their wallet's
 fingerprint sees at a glance whether the device is deriving that wallet.
@@ -637,7 +640,7 @@ turn a stray press into one.
 
 That artwork is the only picture in the firmware: a 102x124 array of palette
 indices at two pixels per byte, about 6.2 KiB, written straight into the
-framebuffer by indexing a palette of ten colours. It is deliberately not
+framebuffer by indexing a palette of nine colours. It is deliberately not
 compressed. Deflate would take it to well under half, but the decompressor is
 one of the components the audit rejects by name, and trading an audited absence
 for a few kilobytes is a bad exchange.
@@ -649,7 +652,32 @@ colour letters, each drawn at its own whole number of display pixels per cell -
 across pixels or blended into its neighbour. `tools/make_logo.py` turns those
 cells into `main/seedtool_logo.c` and into `assets/logo.png`, the same picture
 at eight times the size; edit the cells and run it. It needs only the standard
-library, like the rest of `tools/`.
+library.
+
+### Fonts
+
+Text is set in Ubuntu at 16 pixels: screen titles in Regular and what the
+screen holds - rows, words, numbers, addresses, keys - in Medium, as Jade sets
+labels lighter than values. Both are one bit per pixel, like the artwork: no
+glyph edge is blended, and the renderer draws a font by setting pixels, with
+no coverage to mix. `tools/make_font.py` generates `main/fonts/UbuntuRegular16.c`
+and `main/fonts/UbuntuMedium16.c` from the two TTFs whose SHA256s it and
+`THIRD_PARTY_NOTICES.md` record. It is the one tool that needs more than the
+standard library: Pillow, whose FreeType does the hinting. Hinting changes
+between FreeType releases, so the arrays are reproduced exactly with the
+versions the tool names (Pillow 11.1.0, FreeType 2.13.2), and it warns under
+others. To check the committed fonts:
+
+```sh
+python3 -m venv /tmp/fonts && /tmp/fonts/bin/pip install pillow==11.1.0
+mkdir /tmp/ttf && for f in Ubuntu-Regular.ttf Ubuntu-Medium.ttf; do
+  curl -fsSLo /tmp/ttf/$f https://github.com/google/fonts/raw/main/ufl/ubuntu/$f
+done
+/tmp/fonts/bin/python tools/make_font.py /tmp/ttf && git diff --exit-code main/fonts
+```
+
+The tool refuses a TTF whose SHA256 differs, so an upstream change to the
+files shows up as that refusal rather than as different glyphs.
 
 ## Build and flash
 
