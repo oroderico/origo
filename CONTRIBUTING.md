@@ -2,8 +2,8 @@
 
 Origo does one thing — turn hand-recorded dice, coin or card entropy into a
 BIP39 mnemonic, deterministically and without touching the device RNG — and
-its value is being small enough to audit in full. Read the "Why" section of
-[README.md](README.md) before proposing anything: every change here gets
+its value is being small enough to audit in full. Read
+[docs/why.md](docs/why.md) before proposing anything: every change here gets
 judged against the threat model described there, not against how useful or
 interesting it is in isolation.
 
@@ -20,9 +20,7 @@ you from a rewrite.
 
 ## Building and testing locally
 
-Full setup instructions live in README.md's [Run on a
-PC](README.md#run-on-a-pc) and [Build and flash](README.md#build-and-flash)
-sections — this just lists what a pull request is expected to pass, which is
+Full setup instructions live in [docs/build.md](docs/build.md) — this just lists what a pull request is expected to pass, which is
 exactly what CI (`.github/workflows/build.yml`) checks:
 
 ```sh
@@ -78,11 +76,11 @@ comments before writing your own.
 ## Adding a dependency
 
 Treat this as an exceptional change, not a routine one. `tools/audit_origo_elf.py`
-enforces the image budget and the list of rejected symbols described in README.md's
-[Build and flash](README.md#build-and-flash) section, and a dependency has to be
+enforces the image budget and the list of rejected symbols described in
+[docs/build.md](docs/build.md#build-and-flash), and a dependency has to be
 justified against that list, not just against whether it compiles. Origo has turned down a two-kilobyte size win before
-because it required a decompressor the audit is built to reject (see
-README.md's logo section); expect the same bar to apply. A PR that adds a
+because it required a decompressor the audit is built to reject (see the
+logo section of [docs/verify.md](docs/verify.md)); expect the same bar to apply. A PR that adds a
 dependency should update `tools/audit_origo_elf.py` (if it legitimately needs
 a new allowance) and `THIRD_PARTY_NOTICES.md` together with the code, not as
 a follow-up.

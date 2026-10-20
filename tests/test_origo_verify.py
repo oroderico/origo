@@ -131,7 +131,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # The device's Flip-each-word method packs eleven flips per word
         # straight into the entropy, with no hash - so the verifier has to be
         # able to reproduce it from the flips alone, or a seed made that way is
-        # one the README's "recompute it independently" promise does not cover.
+        # one the docs' "recompute it independently" promise does not cover.
         #
         # All-zero flips are the anchor: 121 zero bits plus seven more are 128
         # zero entropy bits, which BIP39 publishes as abandon x11 + about. That
@@ -174,8 +174,8 @@ class SeedToolVerifierTests(unittest.TestCase):
         # makes this vector worth keeping. It does NOT pin device interop:
         # Origo asks for exactly 60 D6 rolls for 12 words where Krux asks for
         # at least 50, so the 50-roll run below is one the device will no
-        # longer accept. That divergence is deliberate (see the entropy
-        # section of README.md) - Krux can absorb a marginal count by letting
+        # longer accept. That divergence is deliberate (see
+        # docs/entropy.md) - Krux can absorb a marginal count by letting
         # the user keep rolling and by grading with a 2-bit tolerance, and
         # Origo, whose runs are fixed length, pays for the margin in rolls
         # instead. The count is passed explicitly here for that reason.
@@ -493,8 +493,8 @@ class SeedToolVerifierTests(unittest.TestCase):
             yield match.group(1), source[match.end():i]
 
     def test_every_secret_buffer_is_wiped_in_the_function_that_holds_it(self):
-        # README's Safety boundaries promise that every screen holding seed
-        # material wipes its buffers when it is left. seedtool_zero is called
+        # docs/safety.md promises that every screen holding seed material
+        # wipes its buffers when it is left. seedtool_zero is called
         # over a hundred times to that end and, until this test, not one of
         # those calls was verified by anything - the promise rested entirely on
         # each author remembering. Two real gaps of exactly this shape were
