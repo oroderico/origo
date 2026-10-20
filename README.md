@@ -650,7 +650,32 @@ colour letters, each drawn at its own whole number of display pixels per cell -
 across pixels or blended into its neighbour. `tools/make_logo.py` turns those
 cells into `main/seedtool_logo.c` and into `assets/logo.png`, the same picture
 at eight times the size; edit the cells and run it. It needs only the standard
-library, like the rest of `tools/`.
+library.
+
+### Fonts
+
+Text is set in Ubuntu at 16 pixels: screen titles in Regular and what the
+screen holds - rows, words, numbers, addresses, keys - in Medium, as Jade sets
+labels lighter than values. Both are one bit per pixel, like the artwork: no
+glyph edge is blended, and the renderer draws a font by setting pixels, with
+no coverage to mix. `tools/make_font.py` generates `main/fonts/UbuntuRegular16.c`
+and `main/fonts/UbuntuMedium16.c` from the two TTFs whose SHA256s it and
+`THIRD_PARTY_NOTICES.md` record. It is the one tool that needs more than the
+standard library: Pillow, whose FreeType does the hinting. Hinting changes
+between FreeType releases, so the arrays are reproduced exactly with the
+versions the tool names (Pillow 11.1.0, FreeType 2.13.2), and it warns under
+others. To check the committed fonts:
+
+```sh
+python3 -m venv /tmp/fonts && /tmp/fonts/bin/pip install pillow==11.1.0
+mkdir /tmp/ttf && for f in Ubuntu-Regular.ttf Ubuntu-Medium.ttf; do
+  curl -fsSLo /tmp/ttf/$f https://github.com/google/fonts/raw/main/ufl/ubuntu/$f
+done
+/tmp/fonts/bin/python tools/make_font.py /tmp/ttf && git diff --exit-code main/fonts
+```
+
+The tool refuses a TTF whose SHA256 differs, so an upstream change to the
+files shows up as that refusal rather than as different glyphs.
 
 ## Build and flash
 
