@@ -1,100 +1,92 @@
 #!/usr/bin/env python3
-"""Convert a TrueType font into the glyph array the firmware draws.
+"""Convert the Ubuntu TrueType fonts into the glyph arrays the firmware draws.
 
-Authoring tool, run by hand when a font changes; the generated C file is
-committed and is what builds. Pillow (with FreeType) is needed here and only
+Authoring tool, run by hand when a font changes; the generated C files are
+committed and are what builds. Pillow (with FreeType) is needed here and only
 here: the firmware, the verifier and the tests stay dependency-free.
 
-With --bpp 1 each glyph is FreeType's monochrome rendering, hinted for the
-pixel grid. With --bpp 4 it is the antialiased rendering kept as sixteen
-coverage levels, which the renderer blends into whatever is behind the text:
-on a colour panel that gives a stroke weight between one pixel and two, which
-a one-bit font cannot have at this size.
+Each glyph is FreeType's monochrome rendering, hinted for the pixel grid, one
+bit per pixel as in Jade's fonts. Hinting differs between FreeType releases,
+so the committed arrays are reproduced exactly only with the versions below;
+the tool says when it runs under others. To check the committed fonts, fetch
+the two TTFs named in FONTS (github.com/google/fonts, ufl/ubuntu/) into one
+directory, then
 
-    python3 tools/make_font.py Ubuntu-Regular.ttf 16 tft_UbuntuRegular16 \\
-        main/fonts/UbuntuRegular16.c --line-height 16 --baseline 13 --bpp 4
+    python3 tools/make_font.py DIR && git diff --exit-code main/fonts
 
 The array format is the one find_glyph() in main/seedtool_render.c reads: a
-four-byte header (bits per pixel, or 0 for one; line height; 0; 0), then per
-glyph its character code, y offset from the top of the line, width, height,
-x offset (signed), advance and the bitmap, row-major, most significant bits
-first, then 0xFF.
+four-byte header (0; line height; 0; 0), then per glyph its character code,
+y offset from the top of the line, width, height, x offset (signed), advance
+and the bitmap, row-major, most significant bit first, then 0xFF.
 """
 
 import argparse
+import hashlib
 from pathlib import Path
 import sys
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, __version__ as PILLOW_VERSION, features
 except ImportError:  # pragma: no cover - authoring-only dependency
-    sys.exit("this tool needs Pillow: pip install pillow")
+    sys.exit("this tool needs Pillow: pip install pillow==11.1.0")
 
+ROOT = Path(__file__).parents[1]
+# The versions the committed arrays were generated with.
+GENERATED_WITH = {"Pillow": "11.1.0", "FreeType": "2.13.2"}
+# (TTF, its SHA256, C identifier, output); every font is 16 px on a 16-row
+# line with the baseline at row 13.
+FONTS = (
+    ("Ubuntu-Regular.ttf", "3128df86a31805618436d0ae5651ba4285d0c9de0a39057d025f64ee33bceb64",
+     "tft_UbuntuRegular16", "main/fonts/UbuntuRegular16.c"),
+    ("Ubuntu-Medium.ttf", "3cd952b8b52581e48a8fa95b31c8829c2baa41b635042a69587d57f98092961e",
+     "tft_UbuntuMedium16", "main/fonts/UbuntuMedium16.c"),
+)
+SIZE, LINE_HEIGHT, BASELINE = 16, 16, 13
 # Printable ASCII: the firmware draws nothing else.
 FIRST, LAST = 0x20, 0x7E
 # Where each glyph is drawn on its scratch canvas, clear of every edge.
 PAD = 32
 
 
-def glyph(font, ascent, baseline, character, bpp):
+def glyph(font, ascent, character):
     """(y offset, width, height, x offset, advance, rows) for one character,
-    each pixel a value from 0 to 2**bpp - 1."""
-    top_value = (1 << bpp) - 1
+    each pixel 0 or 1."""
     canvas = Image.new("L", (4 * PAD, 4 * PAD), 0)
     draw = ImageDraw.Draw(canvas)
-    draw.fontmode = "1" if bpp == 1 else "L"
+    draw.fontmode = "1"
     draw.text((PAD, PAD), character, font=font, fill=255, anchor="la")
-    canvas = canvas.point(lambda v: round(v * top_value / 255))
     advance = round(font.getlength(character))
     box = canvas.getbbox()
     if box is None:
         return 0, 0, 0, 0, advance, []
     left, top, right, bottom = box
-    rows = [
-        [canvas.getpixel((x, y)) for x in range(left, right)]
-        for y in range(top, bottom)
-    ]
+    rows = [[1 if canvas.getpixel((x, y)) else 0 for x in range(left, right)] for y in range(top, bottom)]
     # The canvas puts the ascender line at PAD; the line's baseline row is
-    # `baseline`, so everything moves up by however far the font's ascent
-    # sits below it.
-    y_offset = top - PAD - (ascent - baseline)
+    # BASELINE, so everything moves up by however far the font's ascent sits
+    # below it.
+    y_offset = top - PAD - (ascent - BASELINE)
     return y_offset, right - left, bottom - top, left - PAD, advance, rows
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("ttf", type=Path)
-    parser.add_argument("size", type=int, help="pixel size handed to FreeType")
-    parser.add_argument("name", help="C identifier of the array")
-    parser.add_argument("output", type=Path)
-    parser.add_argument("--line-height", type=int, required=True)
-    parser.add_argument("--baseline", type=int, required=True, help="row of the baseline, from the top of the line")
-    parser.add_argument("--bpp", type=int, choices=(1, 4), default=1, help="bits per pixel: 1 for monochrome, 4 for 16 levels")
-    args = parser.parse_args()
-
-    font = ImageFont.truetype(str(args.ttf), args.size)
+def convert(ttf, name, output):
+    font = ImageFont.truetype(str(ttf), SIZE)
     ascent, _ = font.getmetrics()
     lines = [
-        f"/* Generated by tools/make_font.py from {args.ttf.name} at {args.size} px. Do not edit. */",
+        f"/* Generated by tools/make_font.py from {ttf.name} at {SIZE} px. Do not edit. */",
         "",
-        f"const unsigned char {args.name}[] = {{ 0x{0 if args.bpp == 1 else args.bpp:02X}, 0x{args.line_height:02X}, 0x00, 0x00,",
+        f"const unsigned char {name}[] = {{ 0x00, 0x{LINE_HEIGHT:02X}, 0x00, 0x00,",
     ]
     total = 4
     for code in range(FIRST, LAST + 1):
         character = chr(code)
-        y_offset, width, height, x_offset, advance, rows = glyph(font, ascent, args.baseline, character, args.bpp)
-        if width and (y_offset < 0 or y_offset + height > args.line_height):
-            raise SystemExit(
-                f"{character!r} spans rows {y_offset}..{y_offset + height - 1}, outside the "
-                f"{args.line_height}-row line; change --baseline or the size"
-            )
+        y_offset, width, height, x_offset, advance, rows = glyph(font, ascent, character)
+        if width and (y_offset < 0 or y_offset + height > LINE_HEIGHT):
+            raise SystemExit(f"{character!r} spans rows {y_offset}..{y_offset + height - 1}, outside the line")
         if not -128 <= x_offset <= 127 or not 0 <= advance <= 255:
             raise SystemExit(f"{character!r} has an x offset or advance a byte cannot hold")
-        values = [value for row in rows for value in row]
-        per_byte = 8 // args.bpp
+        bits = [bit for row in rows for bit in row]
         data = [
-            sum(values[i + j] << (8 - args.bpp * (j + 1)) for j in range(per_byte) if i + j < len(values))
-            for i in range(0, len(values), per_byte)
+            sum(bits[i + j] << (7 - j) for j in range(8) if i + j < len(bits)) for i in range(0, len(bits), 8)
         ]
         header = [code, y_offset, width, height, x_offset & 0xFF, advance]
         label = "space" if character == " " else ("backslash" if character == "\\" else character)
@@ -102,8 +94,24 @@ def main():
         lines.append("    " + " ".join(f"0x{b:02X}," for b in header + data))
         total += len(header) + len(data)
     lines += ["    0xFF };", ""]
-    args.output.write_text("\n".join(lines))
-    print(f"{args.output}: {LAST - FIRST + 1} glyphs, {total + 1} bytes")
+    output.write_text("\n".join(lines))
+    print(f"{output.relative_to(ROOT)}: {LAST - FIRST + 1} glyphs, {total + 1} bytes")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("ttf_dir", type=Path, help="directory holding the TTFs named in FONTS")
+    args = parser.parse_args()
+
+    running = {"Pillow": PILLOW_VERSION, "FreeType": features.version("freetype2")}
+    if running != GENERATED_WITH:
+        print(f"warning: running {running}, the committed fonts used {GENERATED_WITH}; "
+              "the output may differ", file=sys.stderr)
+    for ttf_name, digest, name, output in FONTS:
+        ttf = args.ttf_dir / ttf_name
+        if hashlib.sha256(ttf.read_bytes()).hexdigest() != digest:
+            raise SystemExit(f"{ttf}: SHA256 is not {digest}")
+        convert(ttf, name, ROOT / output)
 
 
 if __name__ == "__main__":

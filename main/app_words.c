@@ -378,8 +378,8 @@ static bool review_words(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t c
         }
         /* Continue stays drawn but dim while the checksum fails; the title
          * carries the verdict. */
-        const int selected = choose_nav(
-            valid ? "Review words" : "Review - fix a word", review_items, count, "Continue", valid, true, &cursor);
+        const int selected = choose_nav(valid ? "Review words" : "Review - fix a word", NULL, review_items, count,
+            "Continue", valid, true, &cursor);
         if (selected == NAV_BACK || selected == NAV_CONFIRM) {
             confirmed = selected == NAV_CONFIRM;
             break;

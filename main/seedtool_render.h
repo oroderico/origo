@@ -114,6 +114,9 @@ typedef struct {
     bool back;
     /* Page counter, drawn small at the bottom. NULL draws none. */
     const char* counter;
+    /* A master fingerprint drawn after the title, in the body face and its
+     * own colour, naming the loaded wallet. NULL draws none. */
+    const char* fingerprint;
 } seedtool_nav_t;
 
 /* Two or three centred body lines; three when `line3` is given, at a tighter
@@ -158,6 +161,11 @@ void seedtool_render_digits(const char* title, const char* digits, size_t count,
  * than digit by digit. `back` draws the backspace glyph in place of `text`. */
 void seedtool_render_value_box(
     const char* title, const char* text, bool back, const char* footer, const seedtool_progress_t* progress);
+
+/* A level from 1 to `max` set in place, as the value box is: the box shows
+ * "level/max", a row of `max` segments fills to the level, and an arrow is
+ * drawn only where the level can still move. */
+void seedtool_render_level(const char* title, unsigned level, unsigned max, const char* footer);
 
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);

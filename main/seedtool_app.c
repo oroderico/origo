@@ -19,9 +19,8 @@ static void format_brightness(char* const buf, const size_t buf_len)
 static void show_brightness(void)
 {
     for (;;) {
-        char shown[8];
-        format_brightness(shown, sizeof(shown));
-        screen_text("Brightness", shown, "", chord_learned ? NULL : NAV_FOOTER);
+        seedtool_render_level("Brightness", backlight_level, SEEDTOOL_DISPLAY_BRIGHTNESS_MAX, "Up/Down set   BOTH done");
+        seedtool_display_flush();
         switch (wait_key()) {
         case KEY_PREV:
             if (backlight_level < SEEDTOOL_DISPLAY_BRIGHTNESS_MAX) {
@@ -41,7 +40,7 @@ static void show_brightness(void)
     }
 }
 
-static void show_settings_menu(void)
+void show_settings_menu(void)
 {
     enum { SETTINGS_ORIENTATION, SETTINGS_BRIGHTNESS, SETTINGS_KEYBOARD, SETTINGS_ABOUT };
     size_t cursor = 0;
@@ -115,7 +114,7 @@ void seedtool_run(void)
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
         /* No arrow: this is the top. */
         const int selected
-            = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
+            = choose_nav("Origo", NULL, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         if (selected == 0) {
             show_new_seed_menu();
         } else if (selected == 1) {
