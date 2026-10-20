@@ -114,6 +114,9 @@ typedef struct {
     bool back;
     /* Page counter, drawn small at the bottom. NULL draws none. */
     const char* counter;
+    /* A master fingerprint drawn after the title, in the body face and its
+     * own colour, naming the loaded wallet. NULL draws none. */
+    const char* fingerprint;
 } seedtool_nav_t;
 
 /* Two or three centred body lines; three when `line3` is given, at a tighter

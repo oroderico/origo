@@ -17,6 +17,9 @@
 #define COLOR_HIGHLIGHT UINT16_C(0xfd20)
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
+/* The master fingerprint where it names the wallet: a light shade of the logo's
+ * leaf green, clear of COLOR_HIGHLIGHT, which means selected. */
+#define COLOR_FINGERPRINT UINT16_C(0xbe4b)
 
 /* Five greys for the QR's light half, near-black to white (16, 74, 124, 198,
  * 255 as RGB565). The ramp starts at white. */
@@ -164,8 +167,6 @@ typedef struct {
     uint8_t height;
     int8_t x_offset;
     uint8_t x_advance;
-    /* 1 for an inked-or-not pixel, 4 for sixteen levels of coverage. */
-    uint8_t bits;
     const uint8_t* bitmap;
 } glyph_t;
 
@@ -200,12 +201,9 @@ static void fill_rect(int x, int y, int width, int height, const uint16_t color)
 
 static bool find_glyph(const uint8_t* font, const unsigned char character, glyph_t* glyph)
 {
-    /* The header's first byte is the bits per pixel, 0 in the one-bit fonts
-     * that predate it (whose other header bytes are in use). */
-    const uint8_t bits = font[0] ? font[0] : 1;
     const uint8_t* cursor = font + 4;
     while (*cursor != character && *cursor != 0xff) {
-        const size_t bitmap_size = ((size_t)cursor[2] * cursor[3] * bits + 7) / 8;
+        const size_t bitmap_size = cursor[2] ? ((size_t)cursor[2] * cursor[3] + 7) / 8 : 0;
         cursor += 6 + bitmap_size;
     }
     if (*cursor == 0xff) {
@@ -216,7 +214,6 @@ static bool find_glyph(const uint8_t* font, const unsigned char character, glyph
     glyph->height = cursor[3];
     glyph->x_offset = cursor[4] < 0x80 ? (int8_t)cursor[4] : (int8_t)(cursor[4] - 0x100);
     glyph->x_advance = cursor[5];
-    glyph->bits = bits;
     glyph->bitmap = cursor + 6;
     return true;
 }
@@ -242,22 +239,6 @@ static int text_width(const uint8_t* font, const char* text, const size_t length
     return width ? width - 1 : 0;
 }
 
-/* `color` over the pixel already at (x, y), `coverage` sixteenths of the way:
- * an antialiased glyph's edge takes the colour of whatever it is drawn on, a
- * row's highlight as much as the black around it. */
-static void blend_pixel(const int x, const int y, const uint16_t color, const unsigned coverage)
-{
-    if (x < 0 || y < 0 || x >= SEEDTOOL_DISPLAY_WIDTH || y >= SEEDTOOL_DISPLAY_HEIGHT) {
-        return;
-    }
-    uint16_t* const pixel = &framebuffer[y * SEEDTOOL_DISPLAY_WIDTH + x];
-    const unsigned back = *pixel, keep = 15 - coverage;
-    const unsigned red = (((color >> 11) & 0x1f) * coverage + ((back >> 11) & 0x1f) * keep + 7) / 15;
-    const unsigned green = (((color >> 5) & 0x3f) * coverage + ((back >> 5) & 0x3f) * keep + 7) / 15;
-    const unsigned blue = ((color & 0x1f) * coverage + (back & 0x1f) * keep + 7) / 15;
-    *pixel = (uint16_t)((red << 11) | (green << 5) | blue);
-}
-
 static void draw_glyph(
     const uint8_t* font, const unsigned char character, const int x, const int y, const uint16_t color)
 {
@@ -265,17 +246,11 @@ static void draw_glyph(
     if (!find_glyph(font, character, &glyph)) {
         return;
     }
-    size_t index = 0;
+    size_t bit = 0;
     for (uint8_t row = 0; row < glyph.height; ++row) {
-        for (uint8_t col = 0; col < glyph.width; ++col, ++index) {
-            const int px = x + glyph.x_offset + col, py = y + glyph.y_offset + row;
-            if (glyph.bits == 4) {
-                const unsigned coverage = (glyph.bitmap[index / 2] >> (index % 2 ? 0 : 4)) & 0x0f;
-                if (coverage) {
-                    blend_pixel(px, py, color, coverage);
-                }
-            } else if (glyph.bitmap[index / 8] & (UINT8_C(0x80) >> (index % 8))) {
-                fill_rect(px, py, 1, 1, color);
+        for (uint8_t col = 0; col < glyph.width; ++col, ++bit) {
+            if (glyph.bitmap[bit / 8] & (UINT8_C(0x80) >> (bit % 8))) {
+                fill_rect(x + glyph.x_offset + col, y + glyph.y_offset + row, 1, 1, color);
             }
         }
     }
@@ -725,7 +700,16 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * (a key origin under a three-digit account) takes the smaller face, since
      * a second line would land on the body. */
     const int title_width = SEEDTOOL_DISPLAY_WIDTH - 2 * inset;
-    if (title && text_width(FONT_TITLE, title, strlen(title)) > title_width) {
+    if (title && nav->fingerprint) {
+        /* The label in the title face, the fingerprint after it as content.
+         * Both are short enough for the line: "Wallet @" and eight hex. */
+        const int label_width = text_width(FONT_TITLE, title, strlen(title));
+        const int value_width = text_width(FONT_BODY, nav->fingerprint, strlen(nav->fingerprint));
+        const int x = inset + (title_width - label_width - value_width) / 2;
+        draw_line_at(FONT_TITLE, title, strlen(title), x, LIST_TITLE_Y, COLOR_WHITE);
+        draw_line_at(FONT_BODY, nav->fingerprint, strlen(nav->fingerprint), x + label_width, LIST_TITLE_Y,
+            COLOR_FINGERPRINT);
+    } else if (title && text_width(FONT_TITLE, title, strlen(title)) > title_width) {
         (void)draw_centered_box(tft_DefaultFont, title, inset, title_width,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - tft_DefaultFont[1]) / 2);
     } else {
