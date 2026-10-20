@@ -86,6 +86,8 @@ set(APP_SOURCES
     "${ORIGO_ROOT}/main/app_words.c")
 set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/seedtool_render.c"
+    "${ORIGO_ROOT}/main/render_entry.c"
+    "${ORIGO_ROOT}/main/render_qr.c"
     "${ORIGO_ROOT}/main/seedtool_logo.c"
     "${ORIGO_ROOT}/main/qrcode.c"
     "${ORIGO_ROOT}/main/fonts/DefaultFont.c"

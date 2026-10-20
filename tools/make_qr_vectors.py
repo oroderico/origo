@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - authoring-only dependency
 
 ROOT = Path(__file__).parents[1]
 OUTPUT = ROOT / "tests/qr_vectors.h"
-# QR_VERSION in main/seedtool_render.c.
+# QR_VERSION in main/render_qr.c.
 MAX_VERSION = 6
 ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
 

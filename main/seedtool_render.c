@@ -1,6 +1,8 @@
-#include "seedtool_render.h"
+/* The renderer's core: the framebuffer, text, the nav chrome, lists and the
+ * plain screens, and the primitives render_entry.c and render_qr.c draw with
+ * (render_internal.h). */
+#include "render_internal.h"
 
-#include "qrcode.h"
 #include "seedtool_logo.h"
 
 #include <stddef.h>
@@ -8,64 +10,15 @@
 #include <stdio.h>
 #include <string.h>
 
-#define COLOR_BLACK UINT16_C(0x0000)
-#define COLOR_WHITE UINT16_C(0xffff)
-#define COLOR_DIM UINT16_C(0x39e7)
-/* Secondary text that is still read: lighter than COLOR_DIM, which marks what
- * is inactive or structural. */
-#define COLOR_SOFT UINT16_C(0xa514)
-#define COLOR_HIGHLIGHT UINT16_C(0xfd20)
-#define COLOR_WARN UINT16_C(0xf800)
-#define COLOR_GO UINT16_C(0x07e0)
-/* The master fingerprint where it names the wallet: a light shade of the logo's
- * leaf green, clear of COLOR_HIGHLIGHT, which means selected. */
-#define COLOR_FINGERPRINT UINT16_C(0xbe4b)
-
-/* Five greys for the QR's light half, near-black to white (16, 74, 124, 198,
- * 255 as RGB565). The ramp starts at white. */
-static const uint16_t qr_shades[]
-    = { UINT16_C(0x1082), UINT16_C(0x4a49), UINT16_C(0x7bef), UINT16_C(0xc618), COLOR_WHITE };
-#define QR_SHADE_COUNT (sizeof(qr_shades) / sizeof(qr_shades[0]))
-static size_t qr_shade_index = QR_SHADE_COUNT - 1;
-static uint16_t qr_light(void) { return qr_shades[qr_shade_index]; }
-
-void seedtool_render_qr_cycle_shade(void)
-{
-    qr_shade_index = qr_shade_index ? qr_shade_index - 1 : QR_SHADE_COUNT - 1;
-}
-
-/* In the gap seedtool_render_screen leaves between the transcript line (ends
- * y=81) and the footer (starts y=111). */
-#define DICE_BAR_MARGIN 20
-#define DICE_BAR_X DICE_BAR_MARGIN
-#define DICE_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * DICE_BAR_MARGIN)
-#define DICE_BAR_Y 90
-#define DICE_BAR_HEIGHT 14
-
 /* Left margin for the four-row body: a numbered list reads as a table, so every
  * row starts at the same x. */
 #define SCREEN4_TEXT_X 20
-
-#define KEYBOARD_COLUMNS 10
-#define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
-#define KEY_HEIGHT 27
-#define KEYBOARD_TOP (SEEDTOOL_DISPLAY_HEIGHT - 3 * KEY_HEIGHT)
-
-/* In the 6px gap between the typed text (ends y=48) and the keyboard (starts
- * y=54), with the entropy bar's margins. */
-#define WORD_BAR_Y (KEYBOARD_TOP - 4)
-#define WORD_BAR_HEIGHT 3
 
 /* The 16px title, three 33px rows and the 11px footer fill the 135px display.
  * The scroll strip on the right is kept clear of the selection bar. */
 #define LIST_TITLE_Y 3
 #define LIST_TOP 21
 
-/* The band between a plain screen's title and footer; the digit field centres
- * in it. */
-#define SCREEN_TITLE_Y 2
-#define SCREEN_TITLE_BOTTOM (SCREEN_TITLE_Y + 16) /* the 16px face's own height */
-#define SCREEN_FOOTER_Y 111
 #define LIST_GUTTER 10
 #define LIST_BAR_X 2
 #define LIST_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - LIST_GUTTER - 2 * LIST_BAR_X)
@@ -75,15 +28,6 @@ void seedtool_render_qr_cycle_shade(void)
 #define LIST_SCROLL_WIDTH 4
 #define LIST_SCROLL_MIN 10
 
-/* Nav chrome. The back arrow sits inside the title bar, and the title is
- * centred between margins of NAV_BACK_WIDTH so the arrow does not push it off
- * centre. */
-#define NAV_BACK_X 2
-#define NAV_BACK_Y 1
-#define NAV_BACK_WIDTH 20
-#define NAV_BACK_HEIGHT 19
-#define NAV_ARROW_WIDTH 7
-#define NAV_ARROW_HEIGHT 11
 /* The tick's box is derived from its legs, so the two cannot drift. */
 #define NAV_TICK_STROKE 2
 #define NAV_TICK_SHORT 3
@@ -103,64 +47,6 @@ void seedtool_render_qr_cycle_shade(void)
 #define NAV_ROWS_TOP 28
 #define NAV_ROWS_HEIGHT 20
 
-/* Version 6 holds 134 bytes at ECC_LOW, enough for a key origin and an account
- * xpub in one code. Raising it is a compile error rather than a code clipped by
- * the display. */
-#define QR_VERSION 6
-#define QR_MAX_MODULES (17 + 4 * QR_VERSION)
-#define QR_MARGIN 3
-#define QR_TITLE_Y 50
-_Static_assert(SEEDTOOL_DISPLAY_HEIGHT / (QR_MAX_MODULES + 2) >= 1, "the largest QR no longer fits the display");
-
-/* Stackbit 1248 punch grid: four digit columns (thousands to units) by four
- * weight rows (1, 2, 4, 8), with the number and the word beside it. */
-#define STACKBIT_GRID_X 10
-#define STACKBIT_LABEL_WIDTH 12
-#define STACKBIT_CELL 20
-#define STACKBIT_DOT 6
-#define STACKBIT_DIGITS 4
-#define STACKBIT_ROWS 4
-#define STACKBIT_GRID_TOP 26
-#define STACKBIT_GRID_WIDTH (STACKBIT_LABEL_WIDTH + STACKBIT_DIGITS * STACKBIT_CELL)
-#define STACKBIT_GRID_HEIGHT (STACKBIT_ROWS * STACKBIT_CELL)
-#define STACKBIT_PANEL_X (STACKBIT_GRID_X + STACKBIT_GRID_WIDTH + 14)
-#define STACKBIT_PANEL_WIDTH (SEEDTOOL_DISPLAY_WIDTH - STACKBIT_PANEL_X - 6)
-#define STACKBIT_NUMBER_Y 40
-#define STACKBIT_WORD_Y 68
-#define STACKBIT_FOOTER_Y 122
-_Static_assert(STACKBIT_GRID_TOP + STACKBIT_GRID_HEIGHT <= STACKBIT_FOOTER_Y, "the punch grid runs into the footer");
-_Static_assert(STACKBIT_PANEL_WIDTH >= 60, "no room left beside the grid to name the word");
-
-/* The physical plate's layout (Krux, src/krux/pages/stack_1248.py): two rows.
- * The thousands digit is one column of two cells (weights 1 and 2, since it is
- * never above 2); the others are 2x2 blocks weighted 1, 2 / 4, 8. Below the
- * grid, being wide and short. */
-#define STACKBIT_PHYS_CELL 22
-#define STACKBIT_PHYS_DOT 6
-#define STACKBIT_PHYS_GAP 6
-#define STACKBIT_PHYS_BLOCK_WIDTH (2 * STACKBIT_PHYS_CELL)
-#define STACKBIT_PHYS_GRID_WIDTH \
-    (STACKBIT_PHYS_CELL + STACKBIT_PHYS_GAP + 3 * STACKBIT_PHYS_BLOCK_WIDTH + 2 * STACKBIT_PHYS_GAP)
-#define STACKBIT_PHYS_GRID_HEIGHT (2 * STACKBIT_PHYS_CELL)
-#define STACKBIT_PHYS_GRID_X ((SEEDTOOL_DISPLAY_WIDTH - STACKBIT_PHYS_GRID_WIDTH) / 2)
-#define STACKBIT_PHYS_GRID_TOP 28
-#define STACKBIT_PHYS_NUMBER_Y 80
-#define STACKBIT_PHYS_WORD_Y 102
-#define STACKBIT_PHYS_FOOTER_Y 122
-_Static_assert(STACKBIT_PHYS_GRID_X >= 0, "the physical punch grid is wider than the display");
-_Static_assert(STACKBIT_PHYS_GRID_TOP + STACKBIT_PHYS_GRID_HEIGHT <= STACKBIT_PHYS_NUMBER_Y,
-    "the physical punch grid runs into the number line");
-
-extern const unsigned char tft_DefaultFont[];
-extern const unsigned char tft_UbuntuRegular16[];
-extern const unsigned char tft_UbuntuMedium16[];
-
-/* Screen titles in the regular weight and what the screen holds - menu rows,
- * words, numbers, addresses, keys - in the medium one, as Jade does: the
- * weight marks what is read, not what labels it. */
-#define FONT_TITLE tft_UbuntuRegular16
-#define FONT_BODY tft_UbuntuMedium16
-
 typedef struct {
     uint8_t y_offset;
     uint8_t width;
@@ -172,7 +58,7 @@ typedef struct {
 
 _Alignas(4) static uint16_t framebuffer[SEEDTOOL_DISPLAY_WIDTH * SEEDTOOL_DISPLAY_HEIGHT];
 
-static void fill_rect(int x, int y, int width, int height, const uint16_t color)
+void fill_rect(int x, int y, int width, int height, const uint16_t color)
 {
     if (x < 0) {
         width += x;
@@ -223,7 +109,7 @@ static bool find_glyph(const uint8_t* font, const unsigned char character, glyph
 #define TEXT_MARGIN 6
 #define TEXT_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * TEXT_MARGIN)
 
-static int glyph_advance(const uint8_t* font, const unsigned char character)
+int glyph_advance(const uint8_t* font, const unsigned char character)
 {
     glyph_t glyph;
     return find_glyph(font, character, &glyph) ? (glyph.width > glyph.x_advance ? glyph.width : glyph.x_advance) + 1
@@ -239,7 +125,7 @@ static int text_width(const uint8_t* font, const char* text, const size_t length
     return width ? width - 1 : 0;
 }
 
-static void draw_glyph(
+void draw_glyph(
     const uint8_t* font, const unsigned char character, const int x, const int y, const uint16_t color)
 {
     glyph_t glyph;
@@ -256,7 +142,7 @@ static void draw_glyph(
     }
 }
 
-static void draw_line_at(
+void draw_line_at(
     const uint8_t* font, const char* text, const size_t length, int x, const int y, const uint16_t color)
 {
     for (size_t i = 0; i < length; ++i) {
@@ -266,7 +152,7 @@ static void draw_line_at(
 }
 
 /* Centre `text` inside the box of `width` pixels starting at `x`. */
-static void draw_centered_in(const uint8_t* font, const char* text, const int x, const int width, const int y,
+void draw_centered_in(const uint8_t* font, const char* text, const int x, const int width, const int y,
     const uint16_t color)
 {
     const size_t length = strlen(text);
@@ -293,7 +179,7 @@ static void draw_centered_line(
 /* Lays `text` out centred in a box `width` wide from row `y`, wrapping as it
  * goes, and returns the row below its last line. With `draw` false it only
  * measures, so a screen can place what follows before drawing anything. */
-static int layout_centered_box(
+int layout_centered_box(
     const uint8_t* font, const char* text, const int x, const int width, int y, const bool draw)
 {
     if (!text) {
@@ -342,14 +228,14 @@ static int layout_centered_box(
     return y;
 }
 
-static int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, const int y)
+int draw_centered_box(const uint8_t* font, const char* text, const int x, const int width, const int y)
 {
     return layout_centered_box(font, text, x, width, y, true);
 }
 
 /* The lowest row any glyph of `text` inks, from the top of its line: a font's
  * declared height leaves out descenders. */
-static int text_ink_bottom(const uint8_t* font, const char* text, const size_t length)
+int text_ink_bottom(const uint8_t* font, const char* text, const size_t length)
 {
     int bottom = 0;
     for (size_t i = 0; i < length; ++i) {
@@ -361,7 +247,7 @@ static int text_ink_bottom(const uint8_t* font, const char* text, const size_t l
     return bottom;
 }
 
-static void draw_centered(const uint8_t* font, const char* text, const int y)
+void draw_centered(const uint8_t* font, const char* text, const int y)
 {
     draw_centered_box(font, text, 0, SEEDTOOL_DISPLAY_WIDTH, y);
 }
@@ -374,7 +260,7 @@ static void draw_left(const uint8_t* font, const char* text, const int x, const 
 
 /* What has been typed, in the larger face to be checked. Only the tail that
  * fits one line is drawn, so a long passphrase does not push into the keyboard. */
-static void draw_typed(const uint8_t* font, const char* text, const int y)
+void draw_typed(const uint8_t* font, const char* text, const int y)
 {
     const size_t length = strlen(text);
     size_t start = 0;
@@ -422,16 +308,9 @@ size_t seedtool_render_fit(const char* text, const size_t limit)
     return fit_in_wrapped(FONT_BODY, text, limit, TEXT_WIDTH);
 }
 
-/* An address has no word boundaries to keep one's place by, so it is drawn in
- * groups of four with a gap and an alternating ink: two signals for where a
- * group ends. Grouping is only drawn; what is compared, hashed and encoded is
- * the unbroken string. */
-#define GROUP_LEN SEEDTOOL_GROUP_LEN
-#define GROUP_GAP 5
-
 /* Ink for the group at `index`, counted from the start of the whole value so
  * the alternation carries across a line break rather than restarting. */
-static uint16_t group_ink(const size_t index) { return index % 2 ? COLOR_HIGHLIGHT : COLOR_WHITE; }
+uint16_t group_ink(const size_t index) { return index % 2 ? COLOR_HIGHLIGHT : COLOR_WHITE; }
 
 /* `length` characters of `text` drawn in groups, centred in the column at
  * `column_x`. `first_group` is how many groups came before this line. */
@@ -490,7 +369,6 @@ size_t seedtool_render_fit_grouped(const char* text, const size_t limit)
 {
     return fit_grouped_in(FONT_BODY, text, limit, TEXT_WIDTH);
 }
-
 
 /* A row's text, with an ellipsis when it did not all fit, so a cut address does
  * not look like a whole one. The ellipsis comes out of the same width. */
@@ -604,9 +482,7 @@ size_t seedtool_list_top(const size_t count, const size_t selected, size_t previ
  * because the faces have no glyph for it. Up and down draw rows, left and right
  * the same arithmetic in columns. The `+ 1` on the step keeps the apex a single
  * pixel. */
-typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT, TRIANGLE_RIGHT } triangle_dir_t;
-
-static void draw_triangle(
+void draw_triangle(
     const int x, const int y, const int width, const int height, const triangle_dir_t dir, const uint16_t color)
 {
     const bool vertical = dir == TRIANGLE_UP || dir == TRIANGLE_DOWN;
@@ -639,7 +515,7 @@ static void draw_tick(const int x, const int y, const uint16_t color)
     }
 }
 
-static void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
+void draw_border(const int x, const int y, const int width, const int height, const uint16_t color)
 {
     fill_rect(x, y, width, 1, color);
     fill_rect(x, y + height - 1, width, 1, color);
@@ -731,7 +607,7 @@ static void draw_nav_counter(const seedtool_nav_t* nav)
 
 /* The order every nav screen draws in, written once: clear, chrome, body,
  * counter. */
-static void nav_begin(const seedtool_nav_t* nav, const char* title)
+void nav_begin(const seedtool_nav_t* nav, const char* title)
 {
     seedtool_render_clear();
     draw_nav_header(nav, title);
@@ -809,815 +685,6 @@ void seedtool_render_nav_list(
         fill_rect(LIST_SCROLL_X, LIST_TOP + thumb.offset, LIST_SCROLL_WIDTH, thumb.height, COLOR_WHITE);
     }
     nav_end(nav);
-}
-
-/* One past the last key of the row starting at `row`. */
-static const char* row_end(const char* row)
-{
-    while (*row && *row != '\n') {
-        ++row;
-    }
-    return row;
-}
-
-/* Every key is found by its character rather than by where it sits, so the
- * layouts are QWERTY, or anything else, purely by changing these strings. */
-const char* const seedtool_passphrase_layouts[SEEDTOOL_PASSPHRASE_PAGES] = {
-    "qwertyuiop\nasdfghjkl \nzxcvbnm\b\t\r",
-    "QWERTYUIOP\nASDFGHJKL \nZXCVBNM\b\t\r",
-    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
-    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
-};
-
-/* The letter pages in alphabetical rows; punctuation has no such order, so
- * the digit and symbol pages are the same. */
-const char* const seedtool_passphrase_layouts_abc[SEEDTOOL_PASSPHRASE_PAGES] = {
-    "abcdefghij\nklmnopqrst\nuvwxyz \b\t\r",
-    "ABCDEFGHIJ\nKLMNOPQRST\nUVWXYZ \b\t\r",
-    "1234567890\n!\"#$%&'()\n*+,-./ \b\t\r",
-    ":;<=>?@\n[\\]^_`~\n{|} \b\t\r",
-};
-
-size_t seedtool_layout_keys(const char* layout)
-{
-    size_t count = 0;
-    for (const char* cursor = layout; *cursor; ++cursor) {
-        if (*cursor != '\n') {
-            ++count;
-        }
-    }
-    return count;
-}
-
-char seedtool_layout_key(const char* layout, size_t index)
-{
-    for (const char* cursor = layout; *cursor; ++cursor) {
-        if (*cursor != '\n' && !index--) {
-            return *cursor;
-        }
-    }
-    return '\0';
-}
-
-size_t seedtool_layout_center(const char* layout)
-{
-    size_t rows = 0;
-    for (const char* cursor = layout; *cursor;) {
-        const char* const end = row_end(cursor);
-        ++rows;
-        cursor = *end ? end + 1 : end;
-    }
-    if (!rows) {
-        return 0;
-    }
-    const size_t middle = (rows - 1) / 2;
-    size_t index = 0, row = 0;
-    for (const char* cursor = layout; *cursor; ++row) {
-        const char* const end = row_end(cursor);
-        const size_t length = (size_t)(end - cursor);
-        if (row == middle) {
-            return length ? index + (length - 1) / 2 : index;
-        }
-        index += length;
-        cursor = *end ? end + 1 : end;
-    }
-    return 0;
-}
-
-/* A backspace arrow, drawn because the fonts are printable ASCII only. */
-#define BACKSPACE_WIDTH 15
-#define BACKSPACE_HEIGHT 11
-
-static void draw_backspace(const int x, const int y, const uint16_t ink, const uint16_t ground)
-{
-    const int half = BACKSPACE_HEIGHT / 2;
-    for (int column = 0; column <= half; ++column) {
-        fill_rect(x + column, y + half - column, 1, 2 * column + 1, ink);
-    }
-    fill_rect(x + half + 1, y, BACKSPACE_WIDTH - half - 1, BACKSPACE_HEIGHT, ink);
-    /* An x cut out of the body, so the key reads as "delete" rather than as a
-     * plain arrow that could just as well mean "go back". */
-    for (int i = 0; i < 5; ++i) {
-        fill_rect(x + 8 + i, y + 3 + i, 1, 1, ground);
-        fill_rect(x + 8 + i, y + 7 - i, 1, 1, ground);
-    }
-}
-
-static const char* key_label(const char key, char* scratch)
-{
-    switch (key) {
-    case SEEDTOOL_KEY_PAGE:
-        return ">>";
-    case SEEDTOOL_KEY_ACCEPT:
-        return "OK";
-    case ' ':
-        return "SP";
-    default:
-        scratch[0] = key;
-        scratch[1] = '\0';
-        return scratch;
-    }
-}
-
-static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
-
-/* The entropy quality bar, for every screen with room above DICE_BAR_Y. NULL
- * draws nothing. */
-static void draw_progress_bar(const seedtool_progress_t* progress)
-{
-    if (!progress) {
-        return;
-    }
-    const int inner_x = DICE_BAR_X + 2;
-    const int inner_width = DICE_BAR_WIDTH - 4;
-    const int segment_height = (DICE_BAR_HEIGHT - 4) / 2;
-    const int rolls_width = clamp_pct(progress->rolls_pct) * inner_width / 100;
-    const int entropy_width = clamp_pct(progress->entropy_pct) * inner_width / 100;
-    if (rolls_width > 0) {
-        fill_rect(inner_x, DICE_BAR_Y + 2, rolls_width, segment_height, COLOR_HIGHLIGHT);
-    }
-    if (entropy_width > 0) {
-        fill_rect(inner_x, DICE_BAR_Y + 2 + segment_height + 1, entropy_width, segment_height,
-            progress->warn ? COLOR_WARN : COLOR_HIGHLIGHT);
-    }
-    draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
-}
-
-/* A row of digit boxes, the one being set carrying up and down arrows, so the
- * value scrolls in place: up and down are the digit. Adapted from Jade's PIN
- * and index entry (main/ui/digit_entry.c). */
-#define DIGIT_BOX_WIDTH 34
-#define DIGIT_BOX_HEIGHT 32
-#define DIGIT_BOX_GAP 6
-#define DIGIT_ARROW_WIDTH 11
-/* Six rows: an 11-wide triangle has exactly six distinct half-widths, and a
- * seventh would repeat one. */
-#define DIGIT_ARROW_HEIGHT 6
-
-/* Arrow, boxes, arrow: one stack, its height derived from its parts. */
-#define DIGIT_FIELD_GAP 4
-#define DIGIT_FIELD_HEIGHT (2 * (DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP) + DIGIT_BOX_HEIGHT)
-#define DIGIT_FIELD_TOP(bottom) (SCREEN_TITLE_BOTTOM + ((bottom) -SCREEN_TITLE_BOTTOM - DIGIT_FIELD_HEIGHT) / 2)
-#define DIGIT_FIELD_BOX_Y(top) ((top) + DIGIT_ARROW_HEIGHT + DIGIT_FIELD_GAP)
-#define DIGIT_FIELD_DOWN_Y(top) (DIGIT_FIELD_BOX_Y(top) + DIGIT_BOX_HEIGHT + DIGIT_FIELD_GAP)
-
-/* The widest field, centred, must fit the display: a box or gap grown by a few
- * pixels would be clipped silently. The arrows must clear the title and the
- * footer. */
-_Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXES_MAX - 1) * DIGIT_BOX_GAP
-        <= SEEDTOOL_DISPLAY_WIDTH,
-    "the digit boxes are wider than the display");
-/* Both placements, each against the thing that actually bounds it. */
-_Static_assert(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y) >= SCREEN_TITLE_BOTTOM, "the digit field runs into the title");
-_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y)) + DIGIT_ARROW_HEIGHT <= SCREEN_FOOTER_Y,
-    "the digit field runs into the footer");
-_Static_assert(DIGIT_FIELD_TOP(DICE_BAR_Y) >= SCREEN_TITLE_BOTTOM, "the value box runs into the title");
-_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(DICE_BAR_Y)) + DIGIT_ARROW_HEIGHT <= DICE_BAR_Y,
-    "the value box runs into the quality bar");
-
-
-/* One wider box for a value scrolled whole, a die face or a D20. `back` puts
- * the way out on the ring, as the digit field does. */
-#define VALUE_BOX_WIDTH 60
-
-void seedtool_render_value_box(
-    const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
-{
-    seedtool_render_clear();
-    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
-    /* Centred above the quality bar whether or not `progress` draws it, so the
-     * box does not move between graded and ungraded runs. */
-    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
-    const int box_y = DIGIT_FIELD_BOX_Y(top);
-    const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
-    fill_rect(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
-    draw_border(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
-    if (back) {
-        draw_backspace(x + (VALUE_BOX_WIDTH - BACKSPACE_WIDTH) / 2,
-            box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2, COLOR_BLACK, COLOR_HIGHLIGHT);
-    } else {
-        draw_centered_in(FONT_BODY, text, x, VALUE_BOX_WIDTH,
-            box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2, COLOR_BLACK);
-    }
-    const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-    draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
-    draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
-    if (progress) {
-        draw_progress_bar(progress);
-    }
-}
-
-#define LEVEL_SEGMENT_GAP 4
-
-void seedtool_render_level(const char* title, const unsigned level, const unsigned max, const char* footer)
-{
-    seedtool_render_clear();
-    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
-    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
-    const int box_y = DIGIT_FIELD_BOX_Y(top);
-    const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
-    char text[24];
-    (void)snprintf(text, sizeof(text), "%u/%u", level, max);
-    fill_rect(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
-    draw_centered_in(FONT_BODY, text, x, VALUE_BOX_WIDTH, box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2,
-        COLOR_BLACK);
-    /* At either end the arrow that would go nowhere is left out, which is
-     * the screen's whole answer to a press that changes nothing. */
-    const int arrow_x = x + (VALUE_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-    if (level < max) {
-        draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
-    }
-    if (level > 1) {
-        draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
-    }
-    if (max) {
-        const int segment = (DICE_BAR_WIDTH - (int)(max - 1) * LEVEL_SEGMENT_GAP) / (int)max;
-        for (unsigned i = 0; i < max; ++i) {
-            const int sx = DICE_BAR_X + (int)i * (segment + LEVEL_SEGMENT_GAP);
-            if (i < level) {
-                fill_rect(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_HIGHLIGHT);
-            } else {
-                draw_border(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_DIM);
-            }
-        }
-    }
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
-}
-
-void seedtool_render_digits(const char* title, const char* digits, const size_t count, const size_t active,
-    const char* footer, const seedtool_progress_t* progress)
-{
-    seedtool_render_clear();
-    draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
-
-    /* Nothing under this field but the footer, so it centres in that whole
-     * band rather than sharing the value box's higher placement. */
-    const int top = DIGIT_FIELD_TOP(SCREEN_FOOTER_Y);
-    const int box_y = DIGIT_FIELD_BOX_Y(top);
-    const int span = (int)count * DIGIT_BOX_WIDTH + ((int)count - 1) * DIGIT_BOX_GAP;
-    const int left = (SEEDTOOL_DISPLAY_WIDTH - span) / 2;
-    for (size_t i = 0; i < count; ++i) {
-        const int x = left + (int)i * (DIGIT_BOX_WIDTH + DIGIT_BOX_GAP);
-        const bool selected = i == active;
-        const bool set = i < active;
-        if (selected) {
-            fill_rect(x, box_y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
-        }
-        draw_border(x, box_y, DIGIT_BOX_WIDTH, DIGIT_BOX_HEIGHT,
-            selected ? COLOR_HIGHLIGHT : set ? COLOR_WHITE : COLOR_DIM);
-
-        const char shown = digits[i];
-        const int glyph_y = box_y + (DIGIT_BOX_HEIGHT - FONT_BODY[1]) / 2;
-        if (shown == SEEDTOOL_KEY_ACCEPT) {
-            draw_centered_in(FONT_BODY, "OK", x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
-        } else if (shown == SEEDTOOL_KEY_BACKSPACE) {
-            /* The way out rides the ring as the backspace glyph. */
-            draw_backspace(x + (DIGIT_BOX_WIDTH - BACKSPACE_WIDTH) / 2, box_y + (DIGIT_BOX_HEIGHT - BACKSPACE_HEIGHT) / 2,
-                COLOR_BLACK, COLOR_HIGHLIGHT);
-        } else if (shown && shown != ' ') {
-            const char text[2] = { shown, '\0' };
-            draw_centered_in(FONT_BODY, text, x, DIGIT_BOX_WIDTH, glyph_y, selected ? COLOR_BLACK : COLOR_WHITE);
-        }
-
-        if (selected) {
-            const int arrow_x = x + (DIGIT_BOX_WIDTH - DIGIT_ARROW_WIDTH) / 2;
-            draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
-            draw_triangle(
-                arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
-        }
-    }
-
-    draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
-    if (progress) {
-        draw_progress_bar(progress);
-    }
-}
-
-void seedtool_render_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
-    const seedtool_progress_t* progress)
-{
-    seedtool_render_screen(title, line1, line2, footer);
-    draw_progress_bar(progress);
-}
-
-void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
-    const seedtool_progress_t* progress)
-{
-    /* The quality bar (y=90..103) takes the footer's row, which the chrome
-     * replaces. */
-    seedtool_render_nav_text(nav, title, line1, line2, NULL);
-    draw_progress_bar(progress);
-}
-
-
-void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
-    const size_t selected, const size_t position, const size_t total)
-{
-    seedtool_render_clear();
-    draw_centered(FONT_TITLE, title, 2);
-    draw_typed(FONT_BODY, text, 32);
-    if (total && position) {
-        const size_t done = position > total ? total : position - 1;
-        const int filled = (int)(DICE_BAR_WIDTH * done / total);
-        fill_rect(DICE_BAR_X, WORD_BAR_Y, DICE_BAR_WIDTH, WORD_BAR_HEIGHT, COLOR_DIM);
-        if (filled) {
-            fill_rect(DICE_BAR_X, WORD_BAR_Y, filled, WORD_BAR_HEIGHT, COLOR_HIGHLIGHT);
-        }
-    }
-
-    size_t key = 0;
-    int y = KEYBOARD_TOP;
-    for (const char* row = layout; *row;) {
-        const char* const end = row_end(row);
-        const int count = (int)(end - row);
-        const int left = (SEEDTOOL_DISPLAY_WIDTH - count * KEY_WIDTH) / 2;
-        for (int column = 0; column < count; ++column, ++key) {
-            const bool active = !enabled || enabled[key];
-            const bool highlighted = key == selected;
-            const int x = left + column * KEY_WIDTH;
-            char scratch[2];
-            const char* const label = key_label(row[column], scratch);
-            /* Letters and digits take the larger face; word keys keep the small
-             * one, or "OK" would fill its cell. */
-            const bool worded = row[column] == SEEDTOOL_KEY_PAGE || row[column] == SEEDTOOL_KEY_ACCEPT
-                || row[column] == ' ';
-            const unsigned char* const face = worded ? tft_DefaultFont : FONT_BODY;
-            if (highlighted) {
-                fill_rect(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, COLOR_HIGHLIGHT);
-            } else {
-                draw_border(x + 1, y + 1, KEY_WIDTH - 2, KEY_HEIGHT - 3, active ? COLOR_DIM : COLOR_BLACK);
-            }
-            const uint16_t ink = highlighted ? COLOR_BLACK : active ? COLOR_WHITE : COLOR_DIM;
-            if (row[column] == SEEDTOOL_KEY_BACKSPACE) {
-                draw_backspace(x + (KEY_WIDTH - BACKSPACE_WIDTH) / 2, y + (KEY_HEIGHT - BACKSPACE_HEIGHT) / 2 - 1,
-                    ink, highlighted ? COLOR_HIGHLIGHT : COLOR_BLACK);
-            } else {
-                draw_centered_in(face, label, x, KEY_WIDTH, y + (KEY_HEIGHT - face[1]) / 2, ink);
-            }
-        }
-        y += KEY_HEIGHT;
-        row = *end ? end + 1 : end;
-    }
-}
-
-void seedtool_render_stackbit_screen(
-    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
-{
-    static const uint8_t WEIGHTS[STACKBIT_ROWS] = { 1, 2, 4, 8 };
-    static const char WEIGHT_LABELS[] = "1248";
-
-    nav_begin(nav, title);
-
-    char digits[STACKBIT_DIGITS + 1];
-    (void)snprintf(digits, sizeof(digits), "%04u", word_number);
-    for (int col = 0; col < STACKBIT_DIGITS; ++col) {
-        const unsigned value = (unsigned)(digits[col] - '0');
-        for (int row = 0; row < STACKBIT_ROWS; ++row) {
-            const int x = STACKBIT_GRID_X + STACKBIT_LABEL_WIDTH + col * STACKBIT_CELL;
-            const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL;
-            draw_border(x, y, STACKBIT_CELL, STACKBIT_CELL, COLOR_DIM);
-            if (value & WEIGHTS[row]) {
-                fill_rect(x + (STACKBIT_CELL - STACKBIT_DOT) / 2, y + (STACKBIT_CELL - STACKBIT_DOT) / 2,
-                    STACKBIT_DOT, STACKBIT_DOT, COLOR_HIGHLIGHT);
-            }
-        }
-    }
-    for (int row = 0; row < STACKBIT_ROWS; ++row) {
-        const int y = STACKBIT_GRID_TOP + row * STACKBIT_CELL + (STACKBIT_CELL - tft_DefaultFont[1]) / 2;
-        draw_line_at(tft_DefaultFont, &WEIGHT_LABELS[row], 1, STACKBIT_GRID_X, y, COLOR_DIM);
-    }
-    draw_centered_in(FONT_BODY, digits, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_NUMBER_Y, COLOR_WHITE);
-    draw_centered_in(tft_DefaultFont, word, STACKBIT_PANEL_X, STACKBIT_PANEL_WIDTH, STACKBIT_WORD_Y, COLOR_SOFT);
-    draw_centered(tft_DefaultFont, footer, STACKBIT_FOOTER_Y);
-}
-
-void seedtool_render_stackbit_physical_screen(
-    const seedtool_nav_t* nav, const char* title, const unsigned word_number, const char* word, const char* footer)
-{
-    nav_begin(nav, title);
-
-    char digits[STACKBIT_DIGITS + 1];
-    (void)snprintf(digits, sizeof(digits), "%04u", word_number);
-
-    int x = STACKBIT_PHYS_GRID_X;
-    const unsigned thousands = (unsigned)(digits[0] - '0');
-    for (int row = 0; row < 2; ++row) {
-        const int y = STACKBIT_PHYS_GRID_TOP + row * STACKBIT_PHYS_CELL;
-        const unsigned weight = row ? 2u : 1u;
-        draw_border(x, y, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
-        const char label[2] = { (char)('0' + weight), '\0' };
-        draw_line_at(tft_DefaultFont, label, 1, x + 2, y + 1, COLOR_DIM);
-        if (thousands & weight) {
-            fill_rect(x + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
-                y + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
-                COLOR_HIGHLIGHT);
-        }
-    }
-    x += STACKBIT_PHYS_CELL + STACKBIT_PHYS_GAP;
-
-    static const unsigned BLOCK_WEIGHTS[2][2] = { { 1, 2 }, { 4, 8 } };
-    for (int digit = 1; digit < STACKBIT_DIGITS; ++digit) {
-        const unsigned value = (unsigned)(digits[digit] - '0');
-        for (int row = 0; row < 2; ++row) {
-            for (int col = 0; col < 2; ++col) {
-                const int cx = x + col * STACKBIT_PHYS_CELL;
-                const int cy = STACKBIT_PHYS_GRID_TOP + row * STACKBIT_PHYS_CELL;
-                const unsigned weight = BLOCK_WEIGHTS[row][col];
-                draw_border(cx, cy, STACKBIT_PHYS_CELL, STACKBIT_PHYS_CELL, COLOR_DIM);
-                const char label[2] = { (char)('0' + weight), '\0' };
-                draw_line_at(tft_DefaultFont, label, 1, cx + 2, cy + 1, COLOR_DIM);
-                if (value & weight) {
-                    fill_rect(cx + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2,
-                        cy + (STACKBIT_PHYS_CELL - STACKBIT_PHYS_DOT) / 2, STACKBIT_PHYS_DOT, STACKBIT_PHYS_DOT,
-                        COLOR_HIGHLIGHT);
-                }
-            }
-        }
-        x += STACKBIT_PHYS_BLOCK_WIDTH + STACKBIT_PHYS_GAP;
-    }
-
-    draw_centered(FONT_BODY, digits, STACKBIT_PHYS_NUMBER_Y);
-    draw_centered_in(tft_DefaultFont, word, 0, SEEDTOOL_DISPLAY_WIDTH, STACKBIT_PHYS_WORD_Y, COLOR_SOFT);
-    draw_centered(tft_DefaultFont, footer, STACKBIT_PHYS_FOOTER_Y);
-}
-
-/* Geometry for a square, height-bound grid of `modules` cells against the right
- * edge, with the title column to its left: a full code with its quiet zone, or
- * a zoomed region without one. */
-typedef struct {
-    int scale;
-    int extent;
-    int top;
-    int code_x;
-    int title_x;
-    int title_width;
-} qr_geometry_t;
-
-/* The code sits against the right edge, and the title and the way out share the
- * margin to its left. */
-static qr_geometry_t qr_geometry(const int modules)
-{
-    qr_geometry_t g;
-    g.scale = SEEDTOOL_DISPLAY_HEIGHT / modules;
-    g.extent = modules * g.scale;
-    g.top = (SEEDTOOL_DISPLAY_HEIGHT - g.extent) / 2;
-    g.code_x = SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - g.extent;
-    g.title_x = QR_MARGIN;
-    g.title_width = g.code_x - 2 * QR_MARGIN;
-    return g;
-}
-
-/* The way out, drawn the way the header's controls are: filled when it is
- * where the cursor sits, outlined when it is not. */
-static void draw_qr_back(const bool selected)
-{
-    /* Painted either way, not only when selected: a screen that redraws a
-     * control to move the cursor off it has to cover the highlight it had. */
-    fill_rect(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
-    draw_border(NAV_BACK_X, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
-    draw_triangle(NAV_BACK_X + (NAV_BACK_WIDTH - NAV_ARROW_WIDTH) / 2,
-        NAV_BACK_Y + (NAV_BACK_HEIGHT - NAV_ARROW_HEIGHT) / 2, NAV_ARROW_WIDTH, NAV_ARROW_HEIGHT, TRIANGLE_LEFT,
-        selected ? COLOR_BLACK : COLOR_WHITE);
-}
-
-/* The shade control, against the code's left edge, since what it changes is the
- * code. A sun whose disc is drawn in the current shade, so it dims as the code
- * does; the rays and outline stay in ink so it stays visible. Drawn from
- * rectangles: the faces are ASCII only. */
-#define QR_SHADE_GAP 3
-#define QR_SUN_CORE 5
-#define QR_SUN_GAP 2
-#define QR_SUN_RAY 2
-#define QR_SUN_EXTENT (QR_SUN_CORE + 2 * (QR_SUN_GAP + QR_SUN_RAY))
-
-/* A code is never wider than the display is tall, so its left edge never comes
- * further left than this, and the sun stays clear of the way out. */
-_Static_assert(SEEDTOOL_DISPLAY_WIDTH - QR_MARGIN - SEEDTOOL_DISPLAY_HEIGHT - QR_SHADE_GAP - NAV_BACK_WIDTH
-        > NAV_BACK_X + NAV_BACK_WIDTH,
-    "the QR's shade control would overlap its back arrow");
-
-static void draw_qr_shade(const int box_x, const bool selected)
-{
-    fill_rect(box_x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_BLACK);
-    draw_border(box_x, NAV_BACK_Y, NAV_BACK_WIDTH, NAV_BACK_HEIGHT, selected ? COLOR_HIGHLIGHT : COLOR_DIM);
-
-    const uint16_t ink = selected ? COLOR_BLACK : COLOR_WHITE;
-    const int left = box_x + (NAV_BACK_WIDTH - QR_SUN_EXTENT) / 2;
-    const int top = NAV_BACK_Y + (NAV_BACK_HEIGHT - QR_SUN_EXTENT) / 2;
-    const int core_x = left + QR_SUN_GAP + QR_SUN_RAY;
-    const int core_y = top + QR_SUN_GAP + QR_SUN_RAY;
-    fill_rect(core_x, core_y, QR_SUN_CORE, QR_SUN_CORE, qr_light());
-    draw_border(core_x - 1, core_y - 1, QR_SUN_CORE + 2, QR_SUN_CORE + 2, ink);
-
-    /* One ray per side, each starting a gap out from the disc's outline. */
-    const int middle = core_x + QR_SUN_CORE / 2;
-    const int centre = core_y + QR_SUN_CORE / 2;
-    fill_rect(middle, top, 1, QR_SUN_RAY, ink);
-    fill_rect(middle, top + QR_SUN_EXTENT - QR_SUN_RAY, 1, QR_SUN_RAY, ink);
-    fill_rect(left, centre, QR_SUN_RAY, 1, ink);
-    fill_rect(left + QR_SUN_EXTENT - QR_SUN_RAY, centre, QR_SUN_RAY, 1, ink);
-    /* And a dot on each diagonal, which is what stops four rays reading as a
-     * cross rather than as a sun. */
-    fill_rect(left + 1, top + 1, 1, 1, ink);
-    fill_rect(left + QR_SUN_EXTENT - 2, top + 1, 1, 1, ink);
-    fill_rect(left + 1, top + QR_SUN_EXTENT - 2, 1, 1, ink);
-    fill_rect(left + QR_SUN_EXTENT - 2, top + QR_SUN_EXTENT - 2, 1, 1, ink);
-}
-
-/* Every QR screen has the same two controls: the way out at the top left and
- * the sun against the code. */
-static void draw_qr_chrome(const int code_x, const size_t selected)
-{
-    draw_qr_back(selected == SEEDTOOL_NAV_BACK);
-    draw_qr_shade(code_x - QR_SHADE_GAP - NAV_BACK_WIDTH, selected == SEEDTOOL_NAV_SHADE);
-}
-
-/* The code against the right edge inside its quiet zone, on a cleared screen:
- * the light field in the current shade, the dark modules over it. The scale is
- * the largest that fits the display's height. */
-static qr_geometry_t draw_modules(const QRCode* qr)
-{
-    const qr_geometry_t g = qr_geometry(qr->size + 2);
-    seedtool_render_clear();
-    fill_rect(g.code_x, g.top, g.extent, g.extent, qr_light());
-    for (uint8_t y = 0; y < qr->size; ++y) {
-        for (uint8_t x = 0; x < qr->size; ++x) {
-            if (qrcode_getModule((QRCode*)qr, x, y)) {
-                fill_rect(g.code_x + (x + 1) * g.scale, g.top + (y + 1) * g.scale, g.scale, g.scale, COLOR_BLACK);
-            }
-        }
-    }
-    return g;
-}
-
-/* Draws the populated `qr` with its title in the margin, so a stepped sequence
- * of codes says what each holds, then zeroes `modules`, which held the encoded
- * value. */
-static bool draw_qr(QRCode* qr, uint8_t* modules, const char* title, const size_t selected)
-{
-    const qr_geometry_t g = draw_modules(qr);
-    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
-    draw_qr_chrome(g.code_x, selected);
-    memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
-    return true;
-}
-
-bool seedtool_render_qr(const char* title, const char* text, const size_t selected)
-{
-    /* At the smallest version that holds `text`, so a short value gets coarser,
-     * easier modules. */
-    const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
-    if (!version) {
-        return false;
-    }
-    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
-    QRCode qr;
-    if (qrcode_initText(&qr, modules, version, ECC_LOW, text) != 0) {
-        /* A failed encode may already have written part of `text` into
-         * `modules` before the encoder gave up. */
-        memset(modules, 0, sizeof(modules));
-        return false;
-    }
-    return draw_qr(&qr, modules, title, selected);
-}
-
-/* Two groups to a line, so an address always falls into the same block; a
- * 42-character bech32 address is five full lines and a short sixth. */
-#define QR_ADDRESS_GROUPS 2
-/* Between the path and the address: they are two different facts, and run
- * together they read as one wrapped string. */
-#define QR_ADDRESS_GAP 5
-
-/* The code, its derivation path and the address, on one screen: the way out,
- * then the path, then the address in groups of four, in the small face since it
- * is there to be checked, not transcribed. */
-bool seedtool_render_qr_address(const char* title, const char* text, const size_t selected)
-{
-    const uint8_t version = qrcode_versionForText(ECC_LOW, text, QR_VERSION);
-    if (!version) {
-        return false;
-    }
-    const qr_geometry_t g = qr_geometry(17 + 4 * version + 2);
-
-    /* Where the address starts: under the path as it will actually wrap, then
-     * a gap that keeps the two facts apart without spending a whole line. */
-    const int title_y = NAV_BACK_Y + NAV_BACK_HEIGHT + 6;
-    const int text_top
-        = layout_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, title_y, false) + QR_ADDRESS_GAP;
-    const size_t total = strlen(text);
-
-    /* A grid, not centred lines: the face is proportional, so each column is as
-     * wide as its widest group and every group starts at its column's left
-     * edge. */
-    int column = 0;
-    for (size_t i = 0; i < total; i += GROUP_LEN) {
-        const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
-        int width = 0;
-        for (size_t j = 0; j < run; ++j) {
-            width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
-        }
-        if (width > column) {
-            column = width;
-        }
-    }
-    const int block_width = QR_ADDRESS_GROUPS * column + (QR_ADDRESS_GROUPS - 1) * GROUP_GAP;
-
-    /* Checked before anything is drawn, and why this returns a bool: an address
-     * cut off at the margin looks like one that ended there. A taproot address
-     * (62 characters) does not fit the 48 two columns hold. The last line is
-     * measured to its lowest inked row, descenders included. */
-    const int step = tft_DefaultFont[1] + 2;
-    const size_t lines = (total + QR_ADDRESS_GROUPS * GROUP_LEN - 1) / (QR_ADDRESS_GROUPS * GROUP_LEN);
-    const size_t last_line = (lines - 1) * QR_ADDRESS_GROUPS * GROUP_LEN;
-    const int bottom
-        = text_top + (int)(lines - 1) * step + text_ink_bottom(tft_DefaultFont, text + last_line, total - last_line);
-    if (block_width > g.title_width || bottom > SEEDTOOL_DISPLAY_HEIGHT) {
-        return false;
-    }
-
-    if (!seedtool_render_qr(NULL, text, selected)) {
-        return false;
-    }
-    int y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, title_y) + QR_ADDRESS_GAP;
-
-    int left = g.title_x + (g.title_width - block_width) / 2;
-    if (left < g.title_x) {
-        left = g.title_x;
-    }
-
-    for (size_t i = 0; i < total; i += GROUP_LEN) {
-        const size_t run = total - i < GROUP_LEN ? total - i : GROUP_LEN;
-        const size_t slot = (i / GROUP_LEN) % QR_ADDRESS_GROUPS;
-        /* A last line that does not fill its columns is centred on the block. */
-        const bool last_line = i + GROUP_LEN >= total && slot == 0;
-        int x;
-        if (last_line) {
-            int width = 0;
-            for (size_t j = 0; j < run; ++j) {
-                width += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
-            }
-            x = left + (block_width - width) / 2;
-        } else {
-            x = left + (int)slot * (column + GROUP_GAP);
-        }
-        const uint16_t ink = group_ink(i / GROUP_LEN);
-        for (size_t j = 0; j < run; ++j) {
-            draw_glyph(tft_DefaultFont, (unsigned char)text[i + j], x, y, ink);
-            x += glyph_advance(tft_DefaultFont, (unsigned char)text[i + j]);
-        }
-        if (slot + 1 == QR_ADDRESS_GROUPS) {
-            y += tft_DefaultFont[1] + 2;
-        }
-    }
-    return true;
-}
-
-size_t seedtool_render_qr_alphanumeric_capacity(const uint8_t max_version)
-{
-    size_t chars = 0;
-    while (qrcode_versionForAlphanumeric(ECC_LOW, (uint16_t)(chars + 1), max_version)) {
-        ++chars;
-    }
-    return chars;
-}
-
-/* Encodes `data` in byte mode at the smallest version that holds it: that is
- * what "compact" means in SeedSigner's convention. `modules` must hold
- * qrcode_getBufferSize(QR_VERSION), which bounds every smaller version. */
-static bool encode_bytes(QRCode* qr, uint8_t* modules, const uint8_t* data, const size_t len)
-{
-    if (len > UINT16_MAX) {
-        return false;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    /* qrcode_initBytes only reads through `data`; the cast does not let it
-     * write through it. */
-    if (!version || qrcode_initBytes(qr, modules, version, ECC_LOW, (uint8_t*)data, (uint16_t)len) != 0) {
-        /* `data` is seed entropy, and a failed encode may already have written
-         * some of it into `modules`. */
-        memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
-        return false;
-    }
-    return true;
-}
-
-bool seedtool_render_qr_bytes(const char* title, const uint8_t* data, const size_t len, const size_t selected)
-{
-    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
-    QRCode qr;
-    return encode_bytes(&qr, modules, data, len) && draw_qr(&qr, modules, title, selected);
-}
-
-/* 7x7 blocks for the smallest (version 1, 21x21) QR, 5x5 otherwise: Krux's own
- * thresholds (src/krux/pages/qr_view.py, SeedQRView.__init__). */
-static size_t qr_region_size(const uint8_t qr_size) { return qr_size == 21 ? 7 : 5; }
-
-size_t seedtool_render_qr_bytes_regions(const size_t len)
-{
-    if (len > UINT16_MAX) {
-        return 0;
-    }
-    const uint8_t version = qrcode_versionForBytes(ECC_LOW, (uint16_t)len, QR_VERSION);
-    if (!version) {
-        return 0;
-    }
-    const uint8_t qr_size = (uint8_t)(4 * version + 17);
-    const size_t region_size = qr_region_size(qr_size);
-    const size_t columns = ((size_t)qr_size + region_size - 1) / region_size;
-    return columns * columns;
-}
-
-/* The region map: seedtool_render_qr_bytes's code, same geometry, with a dim
- * line at each region boundary and each region's label inside it, from the same
- * split draw_qr_region uses, so the map always matches the tiles. */
-bool seedtool_render_qr_bytes_map(const char* title, const uint8_t* data, const size_t len, const size_t selected)
-{
-    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
-    QRCode qr;
-    if (!encode_bytes(&qr, modules, data, len)) {
-        return false;
-    }
-    const size_t region_size = qr_region_size(qr.size);
-    const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    const qr_geometry_t g = draw_modules(&qr);
-    /* The code's top-left corner, one quiet-zone module in, which the grid and
-     * labels are placed from. */
-    const int code_left = g.code_x + g.scale;
-    const int code_top = g.top + g.scale;
-    const int code_extent = (int)qr.size * g.scale;
-    const int block = (int)region_size * g.scale;
-    for (size_t i = 0; i <= columns; ++i) {
-        const int pos = (int)i * block;
-        fill_rect(code_left, code_top + pos, code_extent, 1, COLOR_DIM);
-        fill_rect(code_left + pos, code_top, 1, code_extent, COLOR_DIM);
-    }
-    /* A label must read over black and white modules alike, so each gets a
-     * small white plate with black text. */
-    for (size_t row = 0; row < columns; ++row) {
-        for (size_t column = 0; column < columns; ++column) {
-            char label[4];
-            (void)snprintf(label, sizeof(label), "%c%u", (char)('A' + row), (unsigned)(column + 1));
-            const int label_x = code_left + (int)column * block;
-            const int label_y = code_top + (int)row * block + 2;
-            const int label_height = tft_DefaultFont[1] + 2;
-            fill_rect(label_x + 1, label_y - 1, block - 2, label_height, COLOR_WHITE);
-            draw_centered_in(tft_DefaultFont, label, label_x, block, label_y, COLOR_BLACK);
-        }
-    }
-    draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
-    draw_qr_chrome(g.code_x, selected);
-    memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
-    return true;
-}
-
-/* draw_qr's layout at a region's own scale: 5-7 cells rather than 21-25, so
- * each is much larger. No quiet zone: a region is copied by hand, never
- * scanned. */
-static void draw_qr_region(QRCode* qr, uint8_t* modules, const char* title, const size_t region_size,
-    const size_t columns, const size_t region_index, const size_t selected)
-{
-    const size_t row = region_index / columns;
-    const size_t column = region_index % columns;
-    const qr_geometry_t g = qr_geometry((int)region_size);
-    seedtool_render_clear();
-    for (size_t y = 0; y < region_size; ++y) {
-        for (size_t x = 0; x < region_size; ++x) {
-            const size_t qx = column * region_size + x;
-            const size_t qy = row * region_size + y;
-            const bool set = qx < qr->size && qy < qr->size && qrcode_getModule(qr, (uint8_t)qx, (uint8_t)qy);
-            fill_rect(g.code_x + (int)x * g.scale, g.top + (int)y * g.scale, g.scale, g.scale,
-                set ? COLOR_BLACK : qr_light());
-        }
-    }
-    for (size_t i = 0; i <= region_size; ++i) {
-        fill_rect(g.code_x, g.top + (int)i * g.scale, g.extent, 1, COLOR_DIM);
-        fill_rect(g.code_x + (int)i * g.scale, g.top, 1, g.extent, COLOR_DIM);
-    }
-    const int label_y = draw_centered_box(tft_DefaultFont, title, g.title_x, g.title_width, QR_TITLE_Y);
-    char label[24];
-    (void)snprintf(label, sizeof(label), "Region %c%u", (char)('A' + row), (unsigned)(column + 1));
-    draw_centered_box(tft_DefaultFont, label, g.title_x, g.title_width, label_y + 4);
-    draw_qr_chrome(g.code_x, selected);
-    memset(modules, 0, qrcode_getBufferSize(QR_VERSION));
-}
-
-bool seedtool_render_qr_bytes_region(
-    const char* title, const uint8_t* data, const size_t len, const size_t region_index, const size_t selected)
-{
-    uint8_t modules[qrcode_getBufferSize(QR_VERSION)];
-    QRCode qr;
-    if (!encode_bytes(&qr, modules, data, len)) {
-        return false;
-    }
-    const size_t region_size = qr_region_size(qr.size);
-    const size_t columns = ((size_t)qr.size + region_size - 1) / region_size;
-    if (region_index >= columns * columns) {
-        memset(modules, 0, sizeof(modules));
-        return false;
-    }
-    draw_qr_region(&qr, modules, title, region_size, columns, region_index, selected);
-    return true;
 }
 
 const uint16_t* seedtool_render_pixels(void) { return framebuffer; }

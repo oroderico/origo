@@ -544,7 +544,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # would put the device RNG back into the one path this tool exists to
         # keep it out of.
         root = Path(__file__).parents[1]
-        for name in ("main/seedtool_wordlist.c", "main/seedtool_render.c"):
+        for name in ("main/seedtool_wordlist.c", "main/seedtool_render.c", "main/render_entry.c", "main/render_qr.c"):
             source = (root / name).read_text()
             for forbidden in ("random", "rand(", "esp_fill"):
                 self.assertNotIn(forbidden, source, name)
@@ -656,7 +656,7 @@ class SeedToolVerifierTests(unittest.TestCase):
     def test_passphrase_keyboards_cover_printable_ascii(self):
         # Each arrangement on its own: a character only the QWERTY pages held
         # would leave a passphrase untypeable for a reader on ABC.
-        source = (Path(__file__).parents[1] / "main/seedtool_render.c").read_text()
+        source = (Path(__file__).parents[1] / "main/render_entry.c").read_text()
         for name in ("seedtool_passphrase_layouts", "seedtool_passphrase_layouts_abc"):
             anchor = f"{name}[SEEDTOOL_PASSPHRASE_PAGES] = {{"
             self.assertIn(anchor, source, f"{name} is not where this test looks for it")
@@ -723,7 +723,7 @@ class SeedToolVerifierTests(unittest.TestCase):
 
     def test_host_simulator_reuses_firmware_logic_and_renderer(self):
         cmake = (Path(__file__).parents[1] / "host/CMakeLists.txt").read_text()
-        for shared in ("APP_SOURCES", "seedtool_core.c", "seedtool_render.c", "qrcode.c"):
+        for shared in ("APP_SOURCES", "seedtool_core.c", "seedtool_render.c", "render_entry.c", "render_qr.c", "qrcode.c"):
             self.assertIn(shared, cmake)
         self.assertNotIn("origo_verify.py", cmake)
 
@@ -755,7 +755,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         root = Path(__file__).parents[1]
         firmware = (root / "main/CMakeLists.txt").read_text()
         host = (root / "host/CMakeLists.txt").read_text()
-        render = (root / "main/seedtool_render.c").read_text()
+        render = (root / "main/render_qr.c").read_text()
 
         self.assertNotIn("LOCK_VERSION", firmware)
         self.assertNotIn("LOCK_VERSION", host)

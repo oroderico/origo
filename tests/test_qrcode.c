@@ -1,9 +1,9 @@
 /* The vendored QR encoder, compiled as the firmware compiles it: without
  * LOCK_VERSION, so it accepts any version it is handed and does not check the
  * payload fits. What keeps the firmware safe is the pre-check every caller in
- * seedtool_render.c makes: ask qrcode_versionFor{Text,Bytes} which version
- * holds the payload, refuse to draw on 0, and size the module buffer for the
- * largest version. Those are the properties checked here. */
+ * render_qr.c makes: ask qrcode_versionFor{Text,Bytes} which version holds the
+ * payload, refuse to draw on 0, and size the module buffer for the largest
+ * version. Those are the properties checked here, along with the matrices. */
 #include "check.h"
 
 #include "qrcode.h"
@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define MAX_VERSION 6 /* QR_VERSION in main/seedtool_render.c */
+#define MAX_VERSION 6 /* QR_VERSION in main/render_qr.c */
 
 static bool encoder_matches_what_callers_assume(void)
 {

@@ -8,6 +8,8 @@ idf_component_register(
          "seedtool_core.c"
          "seedtool_display.c"
          "seedtool_render.c"
+         "render_entry.c"
+         "render_qr.c"
          "seedtool_platform_esp.c"
          "seedtool_wordlist.c"
          "seedtool_logo.c"
