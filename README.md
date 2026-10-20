@@ -433,8 +433,9 @@ passphrase in force is the intended one.
 
 Existing mnemonics are validated before derivation; a bad checksum blocks the
 address viewer entirely. For a valid mnemonic the viewer's own menu is titled
-with the master fingerprint — `Wallet @73c5da0a` — rather than spending a row
-on showing it. It is an identity rather than an action, and being read without
+with the master fingerprint — `Wallet @73c5da0a`, the fingerprint in the body
+weight and a light green of its own, apart from the orange that marks a
+selection — rather than spending a row on showing it. It is an identity rather than an action, and being read without
 being asked for is what makes it a check: it is a function of the passphrase in
 force and moves the moment that does, so a reader who knows their wallet's
 fingerprint sees at a glance whether the device is deriving that wallet.

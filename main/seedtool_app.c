@@ -114,7 +114,7 @@ void seedtool_run(void)
         const char* menu[] = { "New Seed", "Restore Seed", "Settings" };
         /* No arrow: this is the top. */
         const int selected
-            = choose_nav("Origo", menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
+            = choose_nav("Origo", NULL, menu, sizeof(menu) / sizeof(menu[0]), NULL, false, false, &cursor);
         if (selected == 0) {
             show_new_seed_menu();
         } else if (selected == 1) {

@@ -108,8 +108,8 @@ bool nav_acknowledge(const char* title, const char* one, const char* two, const 
 bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label, const bool start_on_back,
     const seedtool_progress_t* progress);
 void notice(const char* title, const char* one, const char* two);
-int choose_nav(const char* title, const char* const* items, const size_t count, const char* confirm,
-    const bool confirm_enabled, const bool back, size_t* const cursor);
+int choose_nav(const char* title, const char* fingerprint, const char* const* items, const size_t count,
+    const char* confirm, const bool confirm_enabled, const bool back, size_t* const cursor);
 size_t page_step(const size_t position, const size_t pages, const bool forward, const bool confirmable);
 size_t page_shown(const size_t position, const size_t pages);
 int page_key(size_t* const position, const size_t pages, const bool confirmable);

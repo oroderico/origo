@@ -17,6 +17,9 @@
 #define COLOR_HIGHLIGHT UINT16_C(0xfd20)
 #define COLOR_WARN UINT16_C(0xf800)
 #define COLOR_GO UINT16_C(0x07e0)
+/* The master fingerprint where it names the wallet: a light shade of the logo's
+ * leaf green, clear of COLOR_HIGHLIGHT, which means selected. */
+#define COLOR_FINGERPRINT UINT16_C(0xbe4b)
 
 /* Five greys for the QR's light half, near-black to white (16, 74, 124, 198,
  * 255 as RGB565). The ramp starts at white. */
@@ -697,7 +700,16 @@ static void draw_nav_header(const seedtool_nav_t* nav, const char* title)
      * (a key origin under a three-digit account) takes the smaller face, since
      * a second line would land on the body. */
     const int title_width = SEEDTOOL_DISPLAY_WIDTH - 2 * inset;
-    if (title && text_width(FONT_TITLE, title, strlen(title)) > title_width) {
+    if (title && nav->fingerprint) {
+        /* The label in the title face, the fingerprint after it as content.
+         * Both are short enough for the line: "Wallet @" and eight hex. */
+        const int label_width = text_width(FONT_TITLE, title, strlen(title));
+        const int value_width = text_width(FONT_BODY, nav->fingerprint, strlen(nav->fingerprint));
+        const int x = inset + (title_width - label_width - value_width) / 2;
+        draw_line_at(FONT_TITLE, title, strlen(title), x, LIST_TITLE_Y, COLOR_WHITE);
+        draw_line_at(FONT_BODY, nav->fingerprint, strlen(nav->fingerprint), x + label_width, LIST_TITLE_Y,
+            COLOR_FINGERPRINT);
+    } else if (title && text_width(FONT_TITLE, title, strlen(title)) > title_width) {
         (void)draw_centered_box(tft_DefaultFont, title, inset, title_width,
             NAV_BACK_Y + (NAV_BACK_HEIGHT - tft_DefaultFont[1]) / 2);
     } else {

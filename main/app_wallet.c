@@ -732,12 +732,6 @@ void show_wallet_data(const char* mnemonic)
         return;
     }
 
-    /* The fingerprint titles the menu, so a reader who knows their wallet's
-     * sees at a glance which one is being derived. */
-    char wallet_title[sizeof("Wallet @") + 8];
-    _Static_assert(sizeof(wallet_title) >= sizeof("Wallet @") + 8,
-        "the wallet title must hold its label and all eight fingerprint hex digits");
-    (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
     enum { WALLET_BACKUP, WALLET_KEYS, WALLET_DERIVATION, WALLET_ADDRESSES, WALLET_SETTINGS, WALLET_ERASE };
     size_t cursor = 0;
     for (;;) {
@@ -752,7 +746,11 @@ void show_wallet_data(const char* mnemonic)
             [WALLET_ERASE] = "Erase and restart",
         };
         /* No arrow: the only exit erases the session, so it is a row. */
-        const int selected = choose_nav(wallet_title, menu, ARRAY_LEN(menu), NULL, false, false, &cursor);
+        /* The fingerprint titles the menu, so a reader who knows their
+         * wallet's sees at a glance which one is being derived. It is read
+         * each draw, so a passphrase set under Derivation shows on return. */
+        const int selected
+            = choose_nav("Wallet @", session.fphex, menu, ARRAY_LEN(menu), NULL, false, false, &cursor);
         /* The only way out of a wallet session is a restart: C startup zeroes
          * .bss, and scrub_free_heap zeroes the old stacks, which a reset
          * alone leaves in DRAM. Display settings go back to their defaults. */
@@ -769,9 +767,6 @@ void show_wallet_data(const char* mnemonic)
             break;
         case WALLET_DERIVATION:
             show_derivation_menu(&session);
-            /* The passphrase may have changed under it, and with it the
-             * fingerprint this title states. */
-            (void)snprintf(wallet_title, sizeof(wallet_title), "Wallet @%s", session.fphex);
             break;
         case WALLET_ADDRESSES:
             show_addresses(&session);
