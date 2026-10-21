@@ -389,10 +389,43 @@ static bool confirm_ticket_word(const unsigned position, const unsigned total, c
     return accepted;
 }
 
+/* Every draw of a ticket run with the word it named, four to a page, to check
+ * against the seed form before the loose bits are flipped. Each word has one
+ * ticket and die, so they are recovered from the indices rather than kept.
+ * Returns true on the tick, false on the arrow. */
+static bool review_ticket_draws(const uint16_t* indices, const size_t count)
+{
+    const size_t pages = (count + 3) / 4;
+    size_t cursor = 1;
+    int answer = NAV_STAY;
+    char drawn[4][32] = { { 0 } };
+    while (answer == NAV_STAY) {
+        memset(drawn, 0, sizeof(drawn));
+        const size_t page = page_shown(cursor, pages);
+        for (size_t i = 0; i < 4 && page * 4 + i < count; ++i) {
+            const unsigned index = indices[page * 4 + i];
+            (void)snprintf(drawn[i], sizeof(drawn[i]), "%02u. T%u+%u %s", (unsigned)(page * 4 + i + 1),
+                index / SEEDTOOL_TICKET_DIE + 1u, index % SEEDTOOL_TICKET_DIE + 1u, seedtool_word(index));
+        }
+        char footer[24];
+        (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
+        const seedtool_nav_t nav = page_nav(cursor, pages, footer, true, SEEDTOOL_CONFIRM_TICK);
+        const char* const rows[] = { drawn[0], drawn[1], drawn[2], drawn[3] };
+        seedtool_render_nav_rows(&nav, "Check the draws", rows, 4);
+        seedtool_display_flush();
+        answer = page_key(&cursor, pages, true);
+    }
+    seedtool_zero(drawn, sizeof(drawn));
+    return answer == NAV_CONFIRM;
+}
+
 /* One word of a run made word by word: `enter` returns false when the reader
- * backs out of its first step, `confirm` false to enter the word again. */
+ * backs out of its first step, `confirm` false to enter the word again.
+ * `review`, where a source has one, shows the finished run as a whole and
+ * returns false to step back into it. */
 typedef bool (*word_entry_fn)(unsigned position, unsigned total, uint16_t* index_out);
 typedef bool (*word_confirm_fn)(unsigned position, unsigned total, uint16_t index);
+typedef bool (*run_review_fn)(const uint16_t* indices, size_t count);
 
 /* Words chosen one at a time and packed straight into the entropy rather than
  * hashed - eleven coin flips, or a ticket and a die, per word - then 7 or 3
@@ -400,7 +433,8 @@ typedef bool (*word_confirm_fn)(unsigned position, unsigned total, uint16_t inde
  * seedtool_complete_checksum complete_checksum uses. No quality gate: every
  * word is eleven bits by construction. Returns false only when the reader
  * backed out before any entry. */
-static bool pick_words(const size_t words, const word_entry_fn enter, const word_confirm_fn confirm)
+static bool pick_words(
+    const size_t words, const word_entry_fn enter, const word_confirm_fn confirm, const run_review_fn review)
 {
     const size_t word_count = picked_word_count(words);
     const size_t tail_count = loose_bit_count(words);
@@ -442,11 +476,22 @@ static bool pick_words(const size_t words, const word_entry_fn enter, const word
             break;
         }
 
-        /* The loose bits; backing out of the first returns to the last word,
-         * reopened at its confirmation like every step back. */
-        if (!flip_bits("Final bits", tail, tail_count, 0)) {
+        /* The whole run, where the source shows one; backing out of it
+         * returns to the last word, reopened at its confirmation like every
+         * step back. */
+        if (review && !review(indices, word_count)) {
             w = word_count - 1;
             reopen = true;
+            continue;
+        }
+
+        /* The loose bits; backing out of the first returns to the review, or
+         * without one to the last word. */
+        if (!flip_bits("Final bits", tail, tail_count, 0)) {
+            if (!review) {
+                w = word_count - 1;
+                reopen = true;
+            }
             continue;
         }
 
@@ -508,7 +553,7 @@ static bool create_seed(void)
             }
             const size_t words = length ? 24 : 12;
             if (source == SOURCE_ROW_TICKETS) {
-                if (pick_words(words, enter_ticket_word, confirm_ticket_word)) {
+                if (pick_words(words, enter_ticket_word, confirm_ticket_word, review_ticket_draws)) {
                     return true;
                 }
                 continue; /* Backed out before any entry: the length picker. */
@@ -524,7 +569,7 @@ static bool create_seed(void)
                         run_hashed = true;
                         break;
                     }
-                    if (pick_words(words, enter_flipped_word, confirm_flipped_word)) {
+                    if (pick_words(words, enter_flipped_word, confirm_flipped_word, NULL)) {
                         return true;
                     }
                     /* Backed out before any entry: this menu again. */

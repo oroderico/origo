@@ -140,9 +140,12 @@ On the device it is `SeedPicker tickets` in the entropy source list. Each word
 asks for the ticket on the number keypad, which offers only the digits that
 still lead to a ticket from T1 to T342, and the die on a carousel, then shows
 the pair, the number and the word together — `T57 + die 4`, `0340  clerk` —
-to be checked against the table before it is used. After 11 or 23 words, 7 or 3
-loose coin flips and BIP39's checksum finish the mnemonic, exactly as **Flip
-each word** does; there is no hash and no quality bar.
+to be checked against the table before it is used. After the last word,
+`Check the draws` lists every draw with the word it named, four to a page —
+`01. T57+4 clerk` — to compare with the seed form in one pass; its arrow
+returns to the last word. Then 7 or 3 loose coin flips and BIP39's checksum
+finish the mnemonic, exactly as **Flip each word** does; there is no hash and
+no quality bar.
 
 SeedPicker itself only makes 24 words, and its last-word calculator always
 takes the alphabetically first valid 24th word. That is the one whose three
