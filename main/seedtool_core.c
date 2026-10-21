@@ -430,6 +430,16 @@ seedtool_result_t seedtool_ticket_word(const unsigned ticket, const unsigned die
     return SEEDTOOL_OK;
 }
 
+seedtool_result_t seedtool_word_ticket(const uint16_t index, unsigned* ticket_out, unsigned* die_out)
+{
+    if (!ticket_out || !die_out || index >= SEEDTOOL_WORDLIST_LEN) {
+        return SEEDTOOL_EINVAL;
+    }
+    *ticket_out = (unsigned)index / SEEDTOOL_TICKET_DIE + 1;
+    *die_out = (unsigned)index % SEEDTOOL_TICKET_DIE + 1;
+    return SEEDTOOL_OK;
+}
+
 seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const uint8_t* coin_bits,
     const size_t coin_bits_len, char* output, const size_t output_len)
 {

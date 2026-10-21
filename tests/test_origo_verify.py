@@ -176,14 +176,14 @@ class SeedToolVerifierTests(unittest.TestCase):
         # valid 24th word. That calculator is reimplemented below from its
         # source (lib/logic.js, firstChecksumWordAlphabetically) rather than
         # trusted to agree.
-        import contextlib, io
+        import argparse, contextlib, io
         draws = ("57:4 201:1 342:2 1:1 118:6 300:3 23:5 171:2 256:4 89:6 14:3 330:1 77:2 142:5 5:6 "
                  "268:1 199:3 36:4 311:2 160:6 44:1 228:5 97:3").split()
 
         def run(bits, these=draws):
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                verify.tickets(type("Args", (), {"draws": list(these), "bits": bits})())
+                verify.tickets(argparse.Namespace(draws=list(these), bits=bits))
             return out.getvalue()
 
         printed = run("000")
@@ -208,7 +208,7 @@ class SeedToolVerifierTests(unittest.TestCase):
 
         # The device's keypad offers only digits that lead to T1..T342, so a
         # ticket out of range cannot be typed at all.
-        self.assertIn("enter_number(title, 3, 1, SEEDTOOL_TICKETS, &ticket)", app_source())
+        self.assertIn("enter_number(title, TICKET_DIGITS, 1, SEEDTOOL_TICKETS, &ticket)", app_source())
 
         # The four pairs past 2048, and anything out of range, are refused.
         for bad in ("342:3", "342:6", "343:1", "0:1", "1:7"):

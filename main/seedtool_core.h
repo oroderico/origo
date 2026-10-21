@@ -162,6 +162,11 @@ _Static_assert(SEEDTOOL_TICKETS * SEEDTOOL_TICKET_DIE >= SEEDTOOL_WORDLIST_LEN
  * either is out of range or the pair is one of the four past 2048. */
 seedtool_result_t seedtool_ticket_word(unsigned ticket, unsigned die, uint16_t* index_out);
 
+/* The other way: the one ticket and die that name a word, which is what the
+ * device shows to check a draw against the seed form. SEEDTOOL_EINVAL for an
+ * index past the wordlist. */
+seedtool_result_t seedtool_word_ticket(uint16_t index, unsigned* ticket_out, unsigned* die_out);
+
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 

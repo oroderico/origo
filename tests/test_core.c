@@ -111,6 +111,22 @@ static bool ticket_words_cover_the_wordlist(void)
         return false;
     }
 
+    /* And back: every word's ticket and die name that word again, which is
+     * what the confirmation and the review show. */
+    for (uint16_t index = 0; index < SEEDTOOL_WORDLIST_LEN; ++index) {
+        unsigned ticket = 0, die = 0;
+        uint16_t again = 0;
+        if (seedtool_word_ticket(index, &ticket, &die) != SEEDTOOL_OK
+            || seedtool_ticket_word(ticket, die, &again) != SEEDTOOL_OK || again != index) {
+            return false;
+        }
+    }
+    unsigned ticket = 0, die = 0;
+    if (seedtool_word_ticket(SEEDTOOL_WORDLIST_LEN, &ticket, &die) != SEEDTOOL_EINVAL
+        || seedtool_word_ticket(0, NULL, &die) != SEEDTOOL_EINVAL) {
+        return false;
+    }
+
     static const uint16_t draws[23][2] = { { 57, 4 }, { 201, 1 }, { 342, 2 }, { 1, 1 }, { 118, 6 }, { 300, 3 },
         { 23, 5 }, { 171, 2 }, { 256, 4 }, { 89, 6 }, { 14, 3 }, { 330, 1 }, { 77, 2 }, { 142, 5 }, { 5, 6 },
         { 268, 1 }, { 199, 3 }, { 36, 4 }, { 311, 2 }, { 160, 6 }, { 44, 1 }, { 228, 5 }, { 97, 3 } };

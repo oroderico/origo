@@ -353,7 +353,7 @@ static bool enter_ticket_word(const unsigned position, const unsigned total, uin
     for (;;) {
         uint32_t ticket = 0;
         /* The keypad offers only digits that still lead to T1..T342. */
-        if (!enter_number(title, 3, 1, SEEDTOOL_TICKETS, &ticket)) {
+        if (!enter_number(title, TICKET_DIGITS, 1, SEEDTOOL_TICKETS, &ticket)) {
             return false;
         }
         /* The ticket stays in view while the die is set. */
@@ -381,9 +381,12 @@ static bool enter_ticket_word(const unsigned position, const unsigned total, uin
  * exactly one pair. */
 static bool confirm_ticket_word(const unsigned position, const unsigned total, const uint16_t index)
 {
+    unsigned ticket = 0, die = 0;
+    seedtool_require(seedtool_word_ticket(index, &ticket, &die) == SEEDTOOL_OK);
     char drawn[32];
-    (void)snprintf(drawn, sizeof(drawn), "T%u + die %u", (unsigned)index / SEEDTOOL_TICKET_DIE + 1u,
-        (unsigned)index % SEEDTOOL_TICKET_DIE + 1u);
+    (void)snprintf(drawn, sizeof(drawn), "T%u + die %u", ticket, die);
+    seedtool_zero(&ticket, sizeof(ticket));
+    seedtool_zero(&die, sizeof(die));
     const bool accepted = confirm_word(position, total, index, drawn, "Draw", "This draw is lost");
     seedtool_zero(drawn, sizeof(drawn));
     return accepted;
@@ -403,9 +406,13 @@ static bool review_ticket_draws(const uint16_t* indices, const size_t count)
         memset(drawn, 0, sizeof(drawn));
         const size_t page = page_shown(cursor, pages);
         for (size_t i = 0; i < 4 && page * 4 + i < count; ++i) {
-            const unsigned index = indices[page * 4 + i];
-            (void)snprintf(drawn[i], sizeof(drawn[i]), "%02u. T%u+%u %s", (unsigned)(page * 4 + i + 1),
-                index / SEEDTOOL_TICKET_DIE + 1u, index % SEEDTOOL_TICKET_DIE + 1u, seedtool_word(index));
+            const uint16_t index = indices[page * 4 + i];
+            unsigned ticket = 0, die = 0;
+            seedtool_require(seedtool_word_ticket(index, &ticket, &die) == SEEDTOOL_OK);
+            (void)snprintf(drawn[i], sizeof(drawn[i]), "%02u. T%u+%u %s", (unsigned)(page * 4 + i + 1), ticket, die,
+                seedtool_word(index));
+            seedtool_zero(&ticket, sizeof(ticket));
+            seedtool_zero(&die, sizeof(die));
         }
         char footer[24];
         (void)snprintf(footer, sizeof(footer), "%u/%u", (unsigned)(page + 1), (unsigned)pages);
@@ -541,6 +548,7 @@ static bool create_seed(void)
     size_t cursor = 0;
     for (;;) {
         const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "SeedPicker tickets" };
+        _Static_assert(ARRAY_LEN(sources) == SOURCE_ROW_TICKETS + 1, "the tickets are the source menu's last row");
         const int source = choose_menu_at("Entropy source", sources, ARRAY_LEN(sources), &cursor);
         if (source == NAV_BACK) {
             return false;

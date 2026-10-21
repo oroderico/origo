@@ -60,9 +60,15 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= SEEDTOOL_MAX_ADDRESS_INDEX + 1, "more addre
 _Static_assert(ADDRESS_INDEX_DIGITS == 4 && SEEDTOOL_MAX_ADDRESS_INDEX == 9999,
     "the address-index keypad width and the derived address range must be changed together");
 
-/* enter_number's buffer, sized for the wider of its two uses. */
+/* A SeedPicker ticket, T1..T342, on the same keypad: three digits reach it. */
+#define TICKET_DIGITS 3
+_Static_assert(TICKET_DIGITS == 3 && SEEDTOOL_TICKETS >= 100 && SEEDTOOL_TICKETS <= 999,
+    "the ticket keypad width and the ticket count must be changed together");
+
+/* enter_number's buffer, sized for the widest of its uses. */
 #define NUMBER_MAX_DIGITS 4
-_Static_assert(ACCOUNT_DIGITS <= NUMBER_MAX_DIGITS && ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS,
+_Static_assert(ACCOUNT_DIGITS <= NUMBER_MAX_DIGITS && ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS
+        && TICKET_DIGITS <= NUMBER_MAX_DIGITS,
     "enter_number holds NUMBER_MAX_DIGITS digits");
 
 /* The word-number field draws one box per digit, and the renderer bounds how
