@@ -359,7 +359,7 @@ static int browse_addresses(const wallet_session_t* const session, const seedtoo
         const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
-            if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, &index)) {
+            if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, 0, SEEDTOOL_MAX_ADDRESS_INDEX, &index)) {
                 continue;
             }
             if (index < ADDRESS_SHOWN_ROWS) {
@@ -714,7 +714,7 @@ static void show_derivation_menu(wallet_session_t* const session)
             (void)choose_address_type(&session->type);
         } else {
             uint32_t chosen = session->account;
-            if (enter_number("Account", ACCOUNT_DIGITS, &chosen)) {
+            if (enter_number("Account", ACCOUNT_DIGITS, 0, SEEDTOOL_MAX_ACCOUNT_INDEX, &chosen)) {
                 session->account = chosen;
             }
         }

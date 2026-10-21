@@ -211,11 +211,13 @@ static bool enter_word_number(const size_t position, const size_t total, const s
     }
 }
 
-/* A number of up to `max_digits` digits on the word-number keypad, every digit
- * reachable at any length, since every prefix is already in range. Returns true
- * with `*value` set on Accept, false when the reader backed out of the first
- * digit. */
-bool enter_number(const char* title, const size_t max_digits, uint32_t* value)
+/* A number in [min, max] of up to `max_digits` digits on the word-number
+ * keypad. Only digits that keep the number at or below `max` are offered, and
+ * Accept only once it is at least `min`, so a number out of range cannot be
+ * typed rather than being refused after it has been. Returns true with
+ * `*value` set on Accept, false when the reader backed out of the first digit. */
+bool enter_number(
+    const char* title, const size_t max_digits, const uint32_t min, const uint32_t max, uint32_t* value)
 {
     char digits[NUMBER_MAX_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
@@ -223,13 +225,21 @@ bool enter_number(const char* title, const size_t max_digits, uint32_t* value)
     const size_t accept_index = layout_key_index(WORD_NUMBER_LAYOUT, SEEDTOOL_KEY_ACCEPT);
 
     for (;;) {
+        uint32_t typed = 0;
+        for (size_t i = 0; i < digits_len; ++i) {
+            typed = typed * 10 + (uint32_t)(digits[i] - '0');
+        }
         bool enabled[WORD_NUMBER_KEYS] = { false };
         for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
             const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
+            /* Another digit only makes the number larger, so one is offered
+             * exactly when the number it makes is still in range. */
             enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
-                : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0
-                                                       : digits_len < max_digits;
+                : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0 && typed >= min
+                                                       : digits_len < max_digits
+                        && typed * 10 + (uint32_t)(key - '0') <= max;
         }
+        seedtool_zero(&typed, sizeof(typed));
         /* With the digits full, the cursor goes to Accept. */
         selected
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);

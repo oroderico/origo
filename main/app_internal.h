@@ -137,7 +137,8 @@ const char* passphrase_layout(const size_t page);
 /* app_words.c */
 bool enter_word(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
     char output[SEEDTOOL_MAX_WORD_LEN + 1]);
-bool enter_number(const char* title, const size_t max_digits, uint32_t* value);
+bool enter_number(
+    const char* title, const size_t max_digits, const uint32_t min, const uint32_t max, uint32_t* value);
 bool join_words(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len);
 bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number);
 bool revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number);

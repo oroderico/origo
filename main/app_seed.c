@@ -352,13 +352,9 @@ static bool enter_ticket_word(const unsigned position, const unsigned total, uin
     (void)snprintf(title, sizeof(title), "Ticket, word %u/%u", position, total);
     for (;;) {
         uint32_t ticket = 0;
-        if (!enter_number(title, 3, &ticket)) {
+        /* The keypad offers only digits that still lead to T1..T342. */
+        if (!enter_number(title, 3, 1, SEEDTOOL_TICKETS, &ticket)) {
             return false;
-        }
-        if (ticket < 1 || ticket > SEEDTOOL_TICKETS) {
-            notice("No such ticket", "Tickets run", "T1 to T342");
-            seedtool_zero(&ticket, sizeof(ticket));
-            continue;
         }
         /* The ticket stays in view while the die is set. */
         char die_title[32];

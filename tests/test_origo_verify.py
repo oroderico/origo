@@ -206,6 +206,10 @@ class SeedToolVerifierTests(unittest.TestCase):
         self.assertEqual(next(w for w in wl if valid(w)), "cabin")
         self.assertEqual(verify.addresses(mnemonic, "", 0, 0, 0)[0], "60c2d222")
 
+        # The device's keypad offers only digits that lead to T1..T342, so a
+        # ticket out of range cannot be typed at all.
+        self.assertIn("enter_number(title, 3, 1, SEEDTOOL_TICKETS, &ticket)", app_source())
+
         # The four pairs past 2048, and anything out of range, are refused.
         for bad in ("342:3", "342:6", "343:1", "0:1", "1:7"):
             with self.assertRaises(ValueError):

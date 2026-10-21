@@ -137,7 +137,8 @@ likely and independent of the rest, eleven bits each, and SeedPicker's
 printed table is all it takes to check one.
 
 On the device it is `SeedPicker tickets` in the entropy source list. Each word
-asks for the ticket on the number keypad and the die on a carousel, then shows
+asks for the ticket on the number keypad, which offers only the digits that
+still lead to a ticket from T1 to T342, and the die on a carousel, then shows
 the pair, the number and the word together — `T57 + die 4`, `0340  clerk` —
 to be checked against the table before it is used. After 11 or 23 words, 7 or 3
 loose coin flips and BIP39's checksum finish the mnemonic, exactly as **Flip
