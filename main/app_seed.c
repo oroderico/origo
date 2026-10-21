@@ -561,10 +561,21 @@ static bool create_seed(void)
             }
             const size_t words = length ? 24 : 12;
             if (source == SOURCE_ROW_TICKETS) {
-                if (pick_words(words, enter_ticket_word, confirm_ticket_word, review_ticket_draws)) {
-                    return true;
+                for (;;) {
+                    /* Says how many draws, and the one rule the device cannot
+                     * see kept: the ticket goes back in the bag every time. */
+                    char needed[24];
+                    (void)snprintf(needed, sizeof(needed), "%u draws needed", (unsigned)picked_word_count(words));
+                    if (nav_screen("SeedPicker tickets", needed, "Put each ticket back", "Start", false, NULL)
+                        != NAV_CONFIRM) {
+                        break; /* Back: the length picker, one stage. */
+                    }
+                    if (pick_words(words, enter_ticket_word, confirm_ticket_word, review_ticket_draws)) {
+                        return true;
+                    }
+                    /* Backed out of the first ticket: this screen again. */
                 }
-                continue; /* Backed out before any entry: the length picker. */
+                continue;
             }
             if (source == SEEDTOOL_COIN) {
                 bool run_hashed = false;
