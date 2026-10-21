@@ -598,6 +598,41 @@ def coin_words(args):
     print("mnemonic:  ", mnemonic_from_entropy(entropy))
 
 
+def tickets(args):
+    """The device's SeedPicker tickets method, from the draws alone.
+
+    A ticket T1..T342, put back after each draw, and a six-sided die name word
+    number (ticket - 1) * 6 + die: 2052 pairs for 2048 words, the four past
+    2048 (T342 with 3 to 6) drawn again from the ticket. Eleven or twenty-three
+    words, then the 7 or 3 loose coin bits, finish exactly as `coin-words`
+    does. Three tails reproduce SeedPicker's own last-word calculator, which
+    always picks the first valid word alphabetically.
+    """
+    if len(args.draws) not in (11, 23):
+        raise ValueError(f"11 or 23 draws make a mnemonic, got {len(args.draws)}")
+    needed = 7 if len(args.draws) == 11 else 3
+    if len(args.bits) != needed or any(character not in "01" for character in args.bits):
+        raise ValueError(f"{len(args.draws)} draws need {needed} loose bits, 1 for heads and 0 for tails")
+    wl = words()
+    indices = []
+    for position, draw in enumerate(args.draws, start=1):
+        try:
+            ticket, die = (int(part) for part in draw.split(":"))
+        except ValueError as exc:
+            raise ValueError(f"draw {position} is {draw!r}, not TICKET:DIE") from exc
+        if not 1 <= ticket <= 342 or not 1 <= die <= 6:
+            raise ValueError(f"draw {position}: tickets run T1 to T342 and the die 1 to 6")
+        number = (ticket - 1) * 6 + die
+        if number > 2048:
+            raise ValueError(f"draw {position}: T{ticket} + {die} is past 2048; draw a new ticket")
+        indices.append(number - 1)
+        print(f"word {position:2}: T{ticket} + {die}  {number:04}  {wl[number - 1]}")
+    entropy = ((int("".join(f"{i:011b}" for i in indices), 2) << needed) | int(args.bits, 2)).to_bytes(
+        16 if needed == 7 else 32, "big")
+    print(f"loose bits: {args.bits}")
+    print("mnemonic:  ", mnemonic_from_entropy(entropy))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(required=True)
@@ -622,6 +657,10 @@ def main():
     coin.add_argument("flips", help="128 or 256 flips, 1 for heads and 0 for tails; spaces ignored")
     coin.add_argument("--words", type=int, choices=(12, 24), default=12)
     coin.set_defaults(func=coin_words)
+    tick = sub.add_parser("tickets")
+    tick.add_argument("draws", nargs="+", help="11 or 23 draws as TICKET:DIE, e.g. 57:4")
+    tick.add_argument("--bits", required=True, help="the 7 or 3 loose coin bits, 1 for heads and 0 for tails")
+    tick.set_defaults(func=tickets)
     args = parser.parse_args()
     try:
         args.func(args)

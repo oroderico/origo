@@ -29,7 +29,9 @@ ROM bootloader for power and flashing.
 ## What it does
 
 - **Makes a seed** of 12 or 24 words from D6 or D20 dice, coin flips or cards,
-  and shows the transcript so the result can be recomputed anywhere.
+  and shows the transcript so the result can be recomputed anywhere; or word by
+  word from coin flips or [SeedPicker](docs/entropy.md#seedpicker-tickets)'s
+  paper tickets, each word checkable against a printed table.
 - **Finishes a checksum** for 11 or 23 words you already have, with 7 or 3 coin
   flips.
 - **Restores and checks** a mnemonic, typed as letters or as word numbers. Only

@@ -12,6 +12,7 @@ Examples:
 python3 tools/origo_verify.py generate d20 --words 12 1 2 3 ...
 python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py coin-words 0110011001101100110011...   # 128 flips
+python3 tools/origo_verify.py tickets 57:4 201:1 ... 97:3 --bits 000    # 23 draws
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0 --change
 ```
@@ -20,7 +21,9 @@ python3 tools/origo_verify.py inspect "abandon ... about" --index 0 --change
 printing each group of eleven with the word it names before the finished
 mnemonic — so the device's screens can be checked one at a time, or the whole
 run at once. It is the same arithmetic `complete` performs, entered from the
-coins rather than from words already converted by hand.
+coins rather than from words already converted by hand. `tickets` does the
+same for SeedPicker's tickets: each ticket and die with the number and word
+they name, then the mnemonic the loose bits finish.
 
 `inspect` prints the checksum verdict, one-based word numbers, the Compact
 SeedQR payload, master fingerprint, both account xpubs, the exact payload of

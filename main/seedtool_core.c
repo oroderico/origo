@@ -417,6 +417,19 @@ static seedtool_result_t pack_prefix(const char* prefix_mnemonic, uint8_t entrop
     return ret;
 }
 
+seedtool_result_t seedtool_ticket_word(const unsigned ticket, const unsigned die, uint16_t* index_out)
+{
+    if (!index_out || ticket < 1 || ticket > SEEDTOOL_TICKETS || die < 1 || die > SEEDTOOL_TICKET_DIE) {
+        return SEEDTOOL_EINVAL;
+    }
+    const unsigned number = (ticket - 1) * SEEDTOOL_TICKET_DIE + die;
+    if (number > SEEDTOOL_WORDLIST_LEN) {
+        return SEEDTOOL_EINVAL;
+    }
+    *index_out = (uint16_t)(number - 1);
+    return SEEDTOOL_OK;
+}
+
 seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const uint8_t* coin_bits,
     const size_t coin_bits_len, char* output, const size_t output_len)
 {

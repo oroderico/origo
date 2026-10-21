@@ -115,6 +115,60 @@ second-guess the reader's coin. The hashed method keeps its bar unchanged.
 eleven flips against a printed wordlist, then hand it those words and the loose
 flips.
 
+### SeedPicker tickets
+
+[SeedPicker](https://seedpicker.net) draws each word by hand from 342 paper
+tickets, T1 to T342, and one six-sided die. Origo is not affiliated with it;
+it takes the method, not any code. Print SeedPicker's ticket cutouts and lookup
+table, cut the tickets out into a bag, then for each word draw a ticket, put it
+back, mix, and roll the die. The pair names word number
+
+```
+(ticket - 1) x 6 + die
+```
+
+so T1 with a 1 is `0001 abandon` and T342 with a 2 is `2048 zoo`. 342 tickets
+and six faces make 2052 pairs: the 2048 words once each, and four left over —
+T342 with a 3, 4, 5 or 6 — which SeedPicker's table answers with "Draw a new
+ticket". Origo does the same and says so. Drawing a new *ticket* matters:
+rolling only the die again would make T342's two words three times as likely
+as any other. Because the ticket goes back every time, every word is equally
+likely and independent of the rest, eleven bits each, and SeedPicker's
+printed table is all it takes to check one.
+
+On the device it is `SeedPicker tickets` in the entropy source list. Each word
+asks for the ticket on the number keypad and the die on a carousel, then shows
+the pair, the number and the word together — `T57 + die 4`, `0340  clerk` —
+to be checked against the table before it is used. After 11 or 23 words, 7 or 3
+loose coin flips and BIP39's checksum finish the mnemonic, exactly as **Flip
+each word** does; there is no hash and no quality bar.
+
+SeedPicker itself only makes 24 words, and its last-word calculator always
+takes the alphabetically first valid 24th word. That is the one whose three
+loose bits are zero, because the wordlist is alphabetical and those bits lead
+the last word's index: three tails on Origo give SeedPicker's own result.
+Flipping them instead gives the full 256 bits rather than 253.
+
+A worked example, 24 words:
+
+| | | | |
+|---|---|---|---|
+| T57+4 → 0340 clerk | T201+1 → 1201 noodle | T342+2 → 2048 zoo | T1+1 → 0001 abandon |
+| T118+6 → 0708 flash | T300+3 → 1797 they | T23+5 → 0137 baby | T171+2 → 1022 leisure |
+| T256+4 → 1534 sausage | T89+6 → 0534 dress | T14+3 → 0081 anxiety | T330+1 → 1975 walnut |
+| T77+2 → 0458 decrease | T142+5 → 0851 heart | T5+6 → 0030 admit | T268+1 → 1603 sign |
+| T199+3 → 1191 network | T36+4 → 0214 boy | T311+2 → 1862 trim | T160+6 → 0960 jewel |
+| T44+1 → 0259 cake | T228+5 → 1367 print | T97+3 → 0579 embark | |
+
+Three tails finish it with `cabin`, master fingerprint `60c2d222`, which is
+what SeedPicker's calculator gives for those 23 words; heads, tails, heads
+gives `phrase` instead. `tools/origo_verify.py tickets` reproduces it from the
+draws:
+
+```sh
+python3 tools/origo_verify.py tickets 57:4 201:1 342:2 ... 97:3 --bits 000
+```
+
 ### The quality bar
 
 Every source's run opens on a screen naming how many rolls, flips or cards it

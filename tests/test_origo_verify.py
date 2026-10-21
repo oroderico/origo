@@ -168,6 +168,49 @@ class SeedToolVerifierTests(unittest.TestCase):
         entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16, "big")
         self.assertEqual(verify.mnemonic_from_entropy(entropy), expected)
 
+    def test_seedpicker_tickets_match_seedpickers_own_last_word(self):
+        # A ticket and a die name word number (ticket - 1) * 6 + die. The
+        # worked example in docs/entropy.md, checked here end to end through
+        # the `tickets` subcommand; with three tails it must give the word
+        # SeedPicker's calculator gives, which takes the alphabetically first
+        # valid 24th word. That calculator is reimplemented below from its
+        # source (lib/logic.js, firstChecksumWordAlphabetically) rather than
+        # trusted to agree.
+        import contextlib, io
+        draws = ("57:4 201:1 342:2 1:1 118:6 300:3 23:5 171:2 256:4 89:6 14:3 330:1 77:2 142:5 5:6 "
+                 "268:1 199:3 36:4 311:2 160:6 44:1 228:5 97:3").split()
+
+        def run(bits, these=draws):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                verify.tickets(type("Args", (), {"draws": list(these), "bits": bits})())
+            return out.getvalue()
+
+        printed = run("000")
+        self.assertIn("word  1: T57 + 4  0340  clerk", printed)
+        self.assertIn("word  3: T342 + 2  2048  zoo", printed)
+        mnemonic = printed.splitlines()[-1].split(None, 1)[1]
+        self.assertEqual(mnemonic.split()[-2:], ["embark", "cabin"])
+        self.assertTrue(run("101").rstrip().endswith("embark phrase"))
+
+        wl = verify.words()
+        prefix = mnemonic.split()[:23]
+
+        def valid(candidate):
+            try:
+                verify.mnemonic_entropy(" ".join(prefix + [candidate]))
+                return True
+            except ValueError:
+                return False
+
+        self.assertEqual(next(w for w in wl if valid(w)), "cabin")
+        self.assertEqual(verify.addresses(mnemonic, "", 0, 0, 0)[0], "60c2d222")
+
+        # The four pairs past 2048, and anything out of range, are refused.
+        for bad in ("342:3", "342:6", "343:1", "0:1", "1:7"):
+            with self.assertRaises(ValueError):
+                run("000", draws[:22] + [bad])
+
     def test_d6_transcript_pipeline_against_a_krux_vector(self):
         # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
         # against a run Krux produces the same mnemonic from, which is what
@@ -475,6 +518,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # A mnemonic by another name: word indices, the bits they are packed
         # from, and the strings a screen shows them in.
         "indices", "bits", "tail", "history", "bitline", "prefix", "digits",
+        "picked", "drawn", "named",
     )
 
     @staticmethod
@@ -637,7 +681,9 @@ class SeedToolVerifierTests(unittest.TestCase):
         warnings = (
             "A photo reveals every address",
             "A photo = total loss of funds",
-            "These flips are lost",
+            # confirm_word's discard question, whose warning ("These flips
+            # are lost", "This draw is lost") arrives as `lost`.
+            "question, subject, lost",
         )
         calls = re.findall(r"nav_acknowledge\(\s*(.*?)\)\s*\)", source, re.S)
         calls += re.findall(r"nav_screen\(\s*(.*?),\s*NULL\s*\)", source, re.S)

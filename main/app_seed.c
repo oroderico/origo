@@ -1,5 +1,6 @@
-/* Where a mnemonic comes from: entropy collected and hashed, coins flipped
- * straight into words, a checksum completed, or a backup restored. */
+/* Where a mnemonic comes from: entropy collected and hashed, coins flipped or
+ * SeedPicker tickets drawn straight into words, a checksum completed, or a
+ * backup restored. */
 #include "app_internal.h"
 
 #include <math.h>
@@ -232,11 +233,11 @@ static bool collect_entropy(const int source, const size_t words)
  * screen shows the arithmetic the seed is built from. */
 #define COIN_WORD_BITS 11
 
-/* Eleven flipped words are 121 bits and twenty-three are 253; the entropy needs
+/* Eleven picked words are 121 bits and twenty-three are 253; the entropy needs
  * 128 and 256. The remainder is flipped loose at the end, and BIP39's checksum
  * supplies the last 4 or 8 bits of the final word. */
-static size_t coin_flipped_words(const size_t words) { return words == 12 ? 11 : 23; }
-static size_t coin_tail_bits(const size_t words) { return words == 12 ? 7 : 3; }
+static size_t picked_word_count(const size_t words) { return words == 12 ? 11 : 23; }
+static size_t loose_bit_count(const size_t words) { return words == 12 ? 7 : 3; }
 
 /* Flips bits[from..count) one coin at a time, the flips so far shown under
  * `title`. Backing out of a flip undoes the one before it; returns false when
@@ -288,16 +289,16 @@ static bool enter_flipped_word(const unsigned position, const unsigned total, ui
     return flipped_all;
 }
 
-/* The flips, the one-based number they spell and the word, checkable against a
- * printed wordlist. Going back discards eleven flips, so it is asked rather
- * than done. Returns true to accept, false to flip the word again. */
-static bool confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
+/* What a word was made from (`made`), the one-based number it names and the
+ * word, checkable against a printed table. Going back discards that entry, so
+ * it is asked rather than done: `verb` names redoing it ("Flip", "Draw") and
+ * `lost` what is thrown away. Returns true to accept, false to enter the word
+ * again. */
+static bool confirm_word(const unsigned position, const unsigned total, const uint16_t index, const char* made,
+    const char* verb, const char* lost)
 {
-    char title[48], bitline[COIN_WORD_BITS + 1] = { 0 }, number[16];
+    char title[48], number[16];
     (void)snprintf(title, sizeof(title), "Word %u/%u", position, total);
-    for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
-        bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
-    }
     (void)snprintf(number, sizeof(number), "%04u", (unsigned)index + 1u);
     char named[48];
     (void)snprintf(named, sizeof(named), "%s  %s", number, seedtool_word(index));
@@ -305,16 +306,17 @@ static bool confirm_flipped_word(const unsigned position, const unsigned total, 
     for (;;) {
         /* Number and word on one line, so both body lines carry what is
          * checked. */
-        if (nav_screen(title, bitline, named, "Use this word", false, NULL) == NAV_CONFIRM) {
+        if (nav_screen(title, made, named, "Use this word", false, NULL) == NAV_CONFIRM) {
             accepted = true;
             break;
         }
         /* The question names the word it would discard. */
-        char question[48], subject[32];
-        (void)snprintf(question, sizeof(question), "Flip word %u again?", position);
+        char question[48], subject[32], again[16];
+        (void)snprintf(question, sizeof(question), "%s word %u again?", verb, position);
         (void)snprintf(subject, sizeof(subject), "%s  %s", number, seedtool_word(index));
-        /* Opens on the arrow: the bar throws eleven flips away. */
-        const int answer = nav_screen(question, subject, "These flips are lost", "Flip again", true, NULL);
+        (void)snprintf(again, sizeof(again), "%s again", verb);
+        /* Opens on the arrow: the bar throws the entry away. */
+        const int answer = nav_screen(question, subject, lost, again, true, NULL);
         seedtool_zero(subject, sizeof(subject));
         if (answer == NAV_CONFIRM) {
             accepted = false;
@@ -322,30 +324,100 @@ static bool confirm_flipped_word(const unsigned position, const unsigned total, 
         }
         /* Declined: back to the word, unchanged. */
     }
-    seedtool_zero(bitline, sizeof(bitline));
+    seedtool_zero(named, sizeof(named));
     seedtool_zero(number, sizeof(number));
     return accepted;
 }
 
-/* Coins packed straight into the entropy rather than hashed: eleven flips per
- * word, then 7 or 3 loose bits, and BIP39's checksum finishes the last word,
- * through the same seedtool_complete_checksum complete_checksum uses. No
- * quality gate: eleven flips are eleven bits. Returns false only when the
- * reader backed out before any flip. */
-static bool flip_words(const size_t words)
+/* The eleven flips behind a flipped word. */
+static bool confirm_flipped_word(const unsigned position, const unsigned total, const uint16_t index)
 {
-    const size_t word_count = coin_flipped_words(words);
-    const size_t tail_count = coin_tail_bits(words);
+    char bitline[COIN_WORD_BITS + 1] = { 0 };
+    for (size_t b = 0; b < COIN_WORD_BITS; ++b) {
+        bitline[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
+    }
+    const bool accepted = confirm_word(position, total, index, bitline, "Flip", "These flips are lost");
+    seedtool_zero(bitline, sizeof(bitline));
+    return accepted;
+}
+
+/* One word from SeedPicker's tickets: the ticket on the keypad, then the die
+ * on its carousel. A pair past 2048 is drawn again from the ticket, not just
+ * rerolled: rerolling the die alone would make T342's two words three times as
+ * likely as any other. Back from the die returns to the ticket; returns false
+ * when the reader backs out of the ticket. */
+static bool enter_ticket_word(const unsigned position, const unsigned total, uint16_t* index_out)
+{
+    char title[48];
+    (void)snprintf(title, sizeof(title), "Ticket, word %u/%u", position, total);
+    for (;;) {
+        uint32_t ticket = 0;
+        if (!enter_number(title, 3, &ticket)) {
+            return false;
+        }
+        if (ticket < 1 || ticket > SEEDTOOL_TICKETS) {
+            notice("No such ticket", "Tickets run", "T1 to T342");
+            seedtool_zero(&ticket, sizeof(ticket));
+            continue;
+        }
+        /* The ticket stays in view while the die is set. */
+        char die_title[32];
+        (void)snprintf(die_title, sizeof(die_title), "T%u die, word", (unsigned)ticket);
+        unsigned die = 1;
+        bool rolled = enter_value(die_title, position, total, 1, SEEDTOOL_TICKET_DIE, &die, NULL, NULL, NULL, NULL);
+        seedtool_zero(die_title, sizeof(die_title));
+        if (rolled && seedtool_ticket_word(ticket, die, index_out) != SEEDTOOL_OK) {
+            char past[32];
+            (void)snprintf(past, sizeof(past), "T%u + %u is past 2048", (unsigned)ticket, die);
+            notice("Draw a new ticket", past, "Put this one back");
+            seedtool_zero(past, sizeof(past));
+            rolled = false;
+        }
+        seedtool_zero(&ticket, sizeof(ticket));
+        seedtool_zero(&die, sizeof(die));
+        if (rolled) {
+            return true;
+        }
+    }
+}
+
+/* The ticket and die behind a word, recovered from its index: each word has
+ * exactly one pair. */
+static bool confirm_ticket_word(const unsigned position, const unsigned total, const uint16_t index)
+{
+    char drawn[32];
+    (void)snprintf(drawn, sizeof(drawn), "T%u + die %u", (unsigned)index / SEEDTOOL_TICKET_DIE + 1u,
+        (unsigned)index % SEEDTOOL_TICKET_DIE + 1u);
+    const bool accepted = confirm_word(position, total, index, drawn, "Draw", "This draw is lost");
+    seedtool_zero(drawn, sizeof(drawn));
+    return accepted;
+}
+
+/* One word of a run made word by word: `enter` returns false when the reader
+ * backs out of its first step, `confirm` false to enter the word again. */
+typedef bool (*word_entry_fn)(unsigned position, unsigned total, uint16_t* index_out);
+typedef bool (*word_confirm_fn)(unsigned position, unsigned total, uint16_t index);
+
+/* Words chosen one at a time and packed straight into the entropy rather than
+ * hashed - eleven coin flips, or a ticket and a die, per word - then 7 or 3
+ * loose coin bits, and BIP39's checksum finishes the last word, through the same
+ * seedtool_complete_checksum complete_checksum uses. No quality gate: every
+ * word is eleven bits by construction. Returns false only when the reader
+ * backed out before any entry. */
+static bool pick_words(const size_t words, const word_entry_fn enter, const word_confirm_fn confirm)
+{
+    const size_t word_count = picked_word_count(words);
+    const size_t tail_count = loose_bit_count(words);
     uint16_t indices[23] = { 0 };
-    char words_flipped[23][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
+    char picked[23][SEEDTOOL_MAX_WORD_LEN + 1] = { { 0 } };
     uint8_t tail[7] = { 0 };
     char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
     char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
     bool started = true;
     size_t w = 0;
 
-    /* Set when the run steps back onto a flipped word, which then reopens at
-     * its confirmation rather than losing its flips. */
+    /* Set when the run steps back onto a finished word, which then reopens at
+     * its confirmation rather than losing its entry. */
     bool reopen = false;
 
     for (;;) {
@@ -353,9 +425,9 @@ static bool flip_words(const size_t words)
             uint16_t index = indices[w];
             if (reopen) {
                 reopen = false;
-            } else if (!enter_flipped_word((unsigned)(w + 1), (unsigned)word_count, &index)) {
-                /* Back from a word's first flip reopens the word before it;
-                 * only the very first flip leaves the run. */
+            } else if (!enter((unsigned)(w + 1), (unsigned)word_count, &index)) {
+                /* Back from a word's first entry reopens the word before it;
+                 * only the very first entry leaves the run. */
                 if (!w) {
                     started = false;
                     break;
@@ -364,8 +436,8 @@ static bool flip_words(const size_t words)
                 reopen = true;
                 continue;
             }
-            /* Declined at the confirmation: flip this same word again. */
-            if (!confirm_flipped_word((unsigned)(w + 1), (unsigned)word_count, index)) {
+            /* Declined at the confirmation: enter this same word again. */
+            if (!confirm((unsigned)(w + 1), (unsigned)word_count, index)) {
                 continue;
             }
             indices[w++] = index;
@@ -383,10 +455,10 @@ static bool flip_words(const size_t words)
         }
 
         for (size_t i = 0; i < word_count; ++i) {
-            strcpy(words_flipped[i], seedtool_word(indices[i]));
+            strcpy(picked[i], seedtool_word(indices[i]));
         }
         /* Checked, not assumed: a truncated prefix would be a wrong seed. */
-        seedtool_require(join_words(words_flipped, word_count, prefix, sizeof(prefix)));
+        seedtool_require(join_words(picked, word_count, prefix, sizeof(prefix)));
 
         if (seedtool_complete_checksum(prefix, tail, tail_count, completed, sizeof(completed)) != SEEDTOOL_OK) {
             notice("Error", "Could not complete", "the mnemonic");
@@ -397,7 +469,7 @@ static bool flip_words(const size_t words)
     }
 
     seedtool_zero(indices, sizeof(indices));
-    seedtool_zero(words_flipped, sizeof(words_flipped));
+    seedtool_zero(picked, sizeof(picked));
     seedtool_zero(tail, sizeof(tail));
     seedtool_zero(prefix, sizeof(prefix));
     seedtool_zero(completed, sizeof(completed));
@@ -416,6 +488,9 @@ static int choose_coin_method(void)
 /* The "Entropy source" menu's rows are the sources, in enum order. */
 _Static_assert(SEEDTOOL_D6 == 0 && SEEDTOOL_D20 == 1 && SEEDTOOL_COIN == 2 && SEEDTOOL_CARDS == 3,
     "the entropy source menu is indexed by seedtool_source_t");
+/* The row after them: SeedPicker's tickets, which build words directly and so
+ * have no transcript and no seedtool_source_t of their own. */
+#define SOURCE_ROW_TICKETS 4
 
 /* Returns whether a seed was generated, rather than the reader backing out of a
  * picker. Leaving the wallet reboots, so true only comes back when the wallet
@@ -424,7 +499,7 @@ static bool create_seed(void)
 {
     size_t cursor = 0;
     for (;;) {
-        const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards" };
+        const char* sources[] = { "D6 dice", "D20 dice", "Coin flips", "Cards", "SeedPicker tickets" };
         const int source = choose_menu_at("Entropy source", sources, ARRAY_LEN(sources), &cursor);
         if (source == NAV_BACK) {
             return false;
@@ -436,6 +511,12 @@ static bool create_seed(void)
                 break;
             }
             const size_t words = length ? 24 : 12;
+            if (source == SOURCE_ROW_TICKETS) {
+                if (pick_words(words, enter_ticket_word, confirm_ticket_word)) {
+                    return true;
+                }
+                continue; /* Backed out before any entry: the length picker. */
+            }
             if (source == SEEDTOOL_COIN) {
                 bool run_hashed = false;
                 for (;;) {
@@ -447,7 +528,7 @@ static bool create_seed(void)
                         run_hashed = true;
                         break;
                     }
-                    if (flip_words(words)) {
+                    if (pick_words(words, enter_flipped_word, confirm_flipped_word)) {
                         return true;
                     }
                     /* Backed out before any entry: this menu again. */

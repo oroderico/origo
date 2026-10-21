@@ -148,6 +148,20 @@ seedtool_result_t seedtool_complete_checksum(
  * one SHA256 per candidate and no wordlist search. */
 seedtool_result_t seedtool_final_word_candidates(const char* prefix_mnemonic, seedtool_wordset_t* allowed);
 
+/* SeedPicker's tickets (seedpicker.net): a ticket drawn from T1..T342 and put
+ * back, then a six-sided die, name word number (ticket - 1) * 6 + die. The 2052
+ * pairs cover the 2048 words once each; the four past 2048 (T342 with 3 to 6)
+ * are drawn again from the ticket, which keeps every word equally likely. */
+#define SEEDTOOL_TICKETS 342
+#define SEEDTOOL_TICKET_DIE 6
+_Static_assert(SEEDTOOL_TICKETS * SEEDTOOL_TICKET_DIE >= SEEDTOOL_WORDLIST_LEN
+        && (SEEDTOOL_TICKETS - 1) * SEEDTOOL_TICKET_DIE < SEEDTOOL_WORDLIST_LEN,
+    "the tickets and die must cover the wordlist with only the last ticket's tail left over");
+
+/* The zero-based word index a ticket and die name, or SEEDTOOL_EINVAL when
+ * either is out of range or the pair is one of the four past 2048. */
+seedtool_result_t seedtool_ticket_word(unsigned ticket, unsigned die, uint16_t* index_out);
+
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 

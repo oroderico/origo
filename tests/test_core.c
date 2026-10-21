@@ -76,6 +76,71 @@ static bool coin_word_encoding_is_sound(void)
     return SEEDTOOL_WORDLIST_LEN == (1u << 11);
 }
 
+/* SeedPicker's tickets: every word is named by exactly one ticket and die, and
+ * the only pairs refused are the four past 2048 and those out of range. The
+ * worked example in docs/entropy.md finishes to SeedPicker's own 24th word when
+ * the loose bits are three tails, as its calculator picks. */
+static bool ticket_words_cover_the_wordlist(void)
+{
+    unsigned hits[SEEDTOOL_WORDLIST_LEN] = { 0 };
+    unsigned refused = 0;
+    for (unsigned ticket = 0; ticket <= SEEDTOOL_TICKETS + 1; ++ticket) {
+        for (unsigned die = 0; die <= SEEDTOOL_TICKET_DIE + 1; ++die) {
+            uint16_t index = 0;
+            const bool in_range = ticket >= 1 && ticket <= SEEDTOOL_TICKETS && die >= 1 && die <= SEEDTOOL_TICKET_DIE;
+            if (seedtool_ticket_word(ticket, die, &index) != SEEDTOOL_OK) {
+                /* In range, only T342 with 3 to 6 may be refused. */
+                if (in_range && !(ticket == SEEDTOOL_TICKETS && die >= 3)) {
+                    return false;
+                }
+                refused += in_range;
+                continue;
+            }
+            if (!in_range || index != (ticket - 1) * SEEDTOOL_TICKET_DIE + die - 1) {
+                return false;
+            }
+            ++hits[index];
+        }
+    }
+    for (size_t i = 0; i < SEEDTOOL_WORDLIST_LEN; ++i) {
+        if (hits[i] != 1) {
+            return false;
+        }
+    }
+    if (refused != 4 || seedtool_ticket_word(1, 1, NULL) != SEEDTOOL_EINVAL) {
+        return false;
+    }
+
+    static const uint16_t draws[23][2] = { { 57, 4 }, { 201, 1 }, { 342, 2 }, { 1, 1 }, { 118, 6 }, { 300, 3 },
+        { 23, 5 }, { 171, 2 }, { 256, 4 }, { 89, 6 }, { 14, 3 }, { 330, 1 }, { 77, 2 }, { 142, 5 }, { 5, 6 },
+        { 268, 1 }, { 199, 3 }, { 36, 4 }, { 311, 2 }, { 160, 6 }, { 44, 1 }, { 228, 5 }, { 97, 3 } };
+    char prefix[SEEDTOOL_MAX_MNEMONIC_LEN + 1] = { 0 };
+    size_t used = 0;
+    for (size_t i = 0; i < 23; ++i) {
+        uint16_t index = 0;
+        if (seedtool_ticket_word(draws[i][0], draws[i][1], &index) != SEEDTOOL_OK) {
+            return false;
+        }
+        used += (size_t)snprintf(prefix + used, sizeof(prefix) - used, "%s%s", i ? " " : "", seedtool_word(index));
+    }
+    static const char expected[] = "clerk noodle zoo abandon flash they baby leisure sausage dress anxiety walnut "
+                                   "decrease heart admit sign network boy trim jewel cake print embark ";
+    if (strncmp(prefix, expected, sizeof(expected) - 2) != 0) {
+        return false;
+    }
+    const uint8_t tails[3] = { 0, 0, 0 }, mixed[3] = { 1, 0, 1 };
+    char completed[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
+    char wanted[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
+    (void)snprintf(wanted, sizeof(wanted), "%scabin", expected);
+    if (seedtool_complete_checksum(prefix, tails, 3, completed, sizeof(completed)) != SEEDTOOL_OK
+        || strcmp(completed, wanted) != 0) {
+        return false;
+    }
+    (void)snprintf(wanted, sizeof(wanted), "%sphrase", expected);
+    return seedtool_complete_checksum(prefix, mixed, 3, completed, sizeof(completed)) == SEEDTOOL_OK
+        && strcmp(completed, wanted) == 0;
+}
+
 /* `count` words, all "abandon" when `spread` is zero and a spread of the
  * wordlist otherwise. An all-zero prefix cannot catch a packing offset, hence
  * the spread. */
@@ -624,6 +689,7 @@ int main(void)
     }
     static const test_t tests[] = {
         TEST(coin_word_encoding_is_sound),
+        TEST(ticket_words_cover_the_wordlist),
         TEST(final_word_filter_is_exact),
         TEST(wordlist_completion_is_sound),
         TEST(word_numbers_are_reachable),
