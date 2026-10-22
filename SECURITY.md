@@ -1,7 +1,7 @@
 # Security policy
 
 Origo is an offline calculation tool, not a hardware wallet. Never include a
-real mnemonic, passphrase, entropy transcript, private key, or funded address
+real mnemonic, passphrase, rolls or flips, private key, or funded address
 in an issue, log, screenshot, crash report, or test vector.
 
 Report vulnerabilities through a private GitHub security advisory for this

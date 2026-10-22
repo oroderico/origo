@@ -8,7 +8,7 @@ The board has two buttons and no select button. In a list, the left button
 moves to the previous item and the right button to the next; both pressed
 together select. Holding one button repeats it. A press is acted on only once
 both buttons are released, so a chord is never mistaken for a step. A numeric
-carousel (dice rolls, cards) reads the same two buttons the other way: left
+carousel (a die's face) reads the same two buttons the other way: left
 raises the value, right lowers it, since there the physical button read as
 "up" raising what is on screen matters more than reusing a list's sense of
 "previous".
@@ -23,7 +23,11 @@ tick in the header rather than a bar along the bottom. The one footer that still
 names a consequence rather than a gesture — the timeout's `Press any button to
 stay` — is always shown, because missing it costs a session.
 
-### Carousels: dice, coins and cards
+### Dice, coins and tickets
+
+A die's face is set on a carousel that holds only the faces that count — 1 to
+4 on a D6, 1 to 16 on a D20 ([Entropy](entropy.md#dice) says why) — so a face
+to be rolled again cannot be entered at all.
 
 Coin flips are a direct choice rather than a carousel position: left picks
 Heads, right picks Tails, one press per flip. With a run as long as 128 or 256
@@ -31,13 +35,8 @@ flips, halving the presses per flip halves the whole entry. Both buttons
 together undoes the last flip, since there is no longer a neutral carousel
 position to step onto for that.
 
-A card is picked in two carousels rather than one: suit first, then rank
-within it. Scanning the whole deck from `AC` for every one of the 25 cards a
-seed needs averages around 26 presses per card; splitting a 4-way suit
-carousel from a 13-way rank carousel cuts that to around 8.5. Stepping back
-off the rank carousel returns to the suit carousel for the same card, one
-stage back as everywhere else; only stepping back off the suit carousel
-undoes the card before it.
+A SeedPicker ticket is typed on the number keypad, which darkens every digit
+that would take the number past T342, then its die is set on a carousel.
 
 ### Going back
 
@@ -47,16 +46,15 @@ above it carries a back arrow at the left of its title bar, and it steps back
 exactly one stage rather than abandoning the flow. On the word keyboard,
 backspace deletes a letter; deleting past the start of a word returns to the
 previous word, and past the first word to the menu before it. The numeric
-carousel carries `[back]` one step below its lowest value, so a misread
-roll 29 of 60 is corrected by stepping back to it rather than by waiting out the
-session timeout and starting the transcript again. Coin flips are the one
+carousel carries `[back]` one step below its lowest value, so a misread roll
+is corrected by stepping back to it rather than by waiting out the session
+timeout and starting the run again. Coin flips are the one
 exception: both a value and its confirmation used to cost two of the three
 gestures, so freeing the one that used to confirm turns it into "undo" instead
 of a screen position, since a direct choice has nothing left to confirm. Neither of
 these is visible until it is used, so the entry screens say where they are in
-a footer that stays: `BOTH take   back below 1` (or the rank; `first` for a
-suit, whose name does not fit beside it) on a carousel, `BOTH undoes the last
-flip` on a coin.
+a footer that stays: `BOTH take   back below 1` on a carousel, `BOTH undoes
+the last flip` on a coin.
 
 ### Settings
 

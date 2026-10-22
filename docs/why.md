@@ -23,7 +23,8 @@ does need *somewhere to run*, and the usual answers each cost something:
 
 Origo is a fourth answer: a development board costing about as much as lunch,
 running firmware that does this arithmetic and has no facility for anything
-else. It generates a 12- or 24-word mnemonic from dice, coins or cards;
+else. It generates a 12- or 24-word mnemonic from dice, coins or SeedPicker's
+paper tickets, a word at a time;
 finishes a checksum from 11 or 23 words already known; validates a mnemonic
 you already have; shows that mnemonic's master fingerprint, its BIP84, BIP86,
 BIP49 or BIP44 account key — as `xpub`, as a SLIP-132 `ypub` or `zpub` where one
@@ -66,13 +67,11 @@ one and move their funds.
 Origo exists to make that class of bug structurally impossible rather than
 merely unlikely. There is no RNG-to-seed code path for a misconfigured build
 flag to misroute in the first place: a mnemonic is a pure function of what the
-human recorded by hand — dice, coins or cards — and the device RNG plays no
-part in it. Two derivations turn that record into words,
-both deterministic and neither touching the RNG: the transcript reduced with
-SHA256, which every source uses, and — for coins only — the flips packed
-straight into the entropy without a hash, which is the one path a reader can
-check against a printed wordlist with no device at all. Both are described
-in [Entropy](entropy.md). A firmware regression that silently swapped the entropy source behind
+human recorded by hand — dice, coins or tickets — and the device RNG plays no
+part in it. Every method packs what was recorded straight into the entropy, a
+word at a time, with no hash in between, so each word can be checked against
+a printed table with no device at all; [Entropy](entropy.md) describes them.
+A firmware regression that silently swapped the entropy source behind
 a device owner's back, the same shape of bug that cost Coldcard users tens of
 millions of dollars, has nothing to act on here: stub the RNG out entirely
 and Origo generates the identical mnemonic.

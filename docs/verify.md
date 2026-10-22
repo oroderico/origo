@@ -9,21 +9,20 @@ BIP39, BIP32, BIP44, BIP49, BIP84, BIP86, Base58Check and Bech32/Bech32m.
 Examples:
 
 ```sh
-python3 tools/origo_verify.py generate d20 --words 12 1 2 3 ...
-python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py coin-words 0110011001101100110011...   # 128 flips
+python3 tools/origo_verify.py dice d6 4 2 1 3 3 2 ... --bits 1011001  # 66 rolls
 python3 tools/origo_verify.py tickets 57:4 201:1 ... 97:3 --bits 000    # 23 draws
+python3 tools/origo_verify.py complete "abandon ... abandon" 0000000
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0
 python3 tools/origo_verify.py inspect "abandon ... about" --index 0 --change
 ```
 
-`coin-words` reproduces the Flip-each-word method from the flips alone,
-printing each group of eleven with the word it names before the finished
-mnemonic — so the device's screens can be checked one at a time, or the whole
-run at once. It is the same arithmetic `complete` performs, entered from the
-coins rather than from words already converted by hand. `tickets` does the
-same for SeedPicker's tickets: each ticket and die with the number and word
-they name, then the mnemonic the loose bits finish.
+`coin-words`, `dice` and `tickets` reproduce the device's methods from what
+was written down alone — flips, rolls, or tickets and dice — printing each
+word's entries with the number and word they name before the finished
+mnemonic, so the device's screens can be checked one at a time, or the whole
+run at once. Each is the same arithmetic `complete` performs, entered from
+the coins, dice or tickets rather than from words already converted by hand.
 
 `inspect` prints the checksum verdict, one-based word numbers, the Compact
 SeedQR payload, master fingerprint, both account xpubs, the exact payload of
@@ -38,7 +37,7 @@ and it is what to hand a wallet that rejects `<0;1>`.
 
 Do not type a real mnemonic or passphrase into a network-connected computer.
 Boot a trusted offline environment, verify this repository and tool first, and
-compare the transcript, full hash, fingerprint, xpubs, and addresses.
+compare the words, fingerprint, xpubs, and addresses.
 
 ### The QR encoder
 
