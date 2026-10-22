@@ -157,6 +157,75 @@ static bool ticket_words_cover_the_wordlist(void)
         && strcmp(completed, wanted) == 0;
 }
 
+/* A die read word by word: every word comes from exactly as many rolls as
+ * every other (two, since a word's last roll keeps only its first bits), so
+ * none is favoured; faces that do not count and wrong roll counts are refused. */
+static bool die_words_cover_the_wordlist(void)
+{
+    const seedtool_die_t dice[] = { SEEDTOOL_D6, SEEDTOOL_D20 };
+    for (size_t d = 0; d < 2; ++d) {
+        const seedtool_die_t die = dice[d];
+        const unsigned faces = seedtool_die_faces(die);
+        const size_t count = seedtool_die_rolls_per_word(die);
+        if (count > SEEDTOOL_DIE_MAX_ROLLS) {
+            return false;
+        }
+        unsigned hits[SEEDTOOL_WORDLIST_LEN] = { 0 };
+        uint8_t rolls[SEEDTOOL_DIE_MAX_ROLLS];
+        size_t total = 1;
+        for (size_t r = 0; r < count; ++r) {
+            total *= faces;
+        }
+        for (size_t n = 0; n < total; ++n) {
+            size_t rest = n;
+            for (size_t r = count; r-- > 0;) {
+                rolls[r] = (uint8_t)(rest % faces + 1);
+                rest /= faces;
+            }
+            uint16_t index = 0;
+            if (seedtool_die_word(die, rolls, count, &index) != SEEDTOOL_OK) {
+                return false;
+            }
+            ++hits[index];
+        }
+        for (size_t i = 0; i < SEEDTOOL_WORDLIST_LEN; ++i) {
+            if (hits[i] != total / SEEDTOOL_WORDLIST_LEN) {
+                return false;
+            }
+        }
+        /* Each face that does not count, in each position, is refused. */
+        for (size_t r = 0; r < count; ++r) {
+            memset(rolls, 1, sizeof(rolls));
+            uint16_t index = 0;
+            rolls[r] = 0;
+            if (seedtool_die_word(die, rolls, count, &index) != SEEDTOOL_EINVAL) {
+                return false;
+            }
+            rolls[r] = (uint8_t)(faces + 1);
+            if (seedtool_die_word(die, rolls, count, &index) != SEEDTOOL_EINVAL) {
+                return false;
+            }
+        }
+        uint16_t index = 0;
+        if (seedtool_die_word(die, rolls, count - 1, &index) != SEEDTOOL_EINVAL
+            || seedtool_die_word(die, NULL, count, &index) != SEEDTOOL_EINVAL) {
+            return false;
+        }
+    }
+
+    /* The table by hand: faces 1..4 are 00, 01, 10, 11, and the last roll
+     * keeps its first bit. 4 4 4 4 4 4 is zoo, 4 4 4 4 4 2 is zone (2046:
+     * the last 2 is 01, kept as 0), 1 2 3 4 1 3 is 00 01 10 11 00 1. */
+    const uint8_t zoo[6] = { 4, 4, 4, 4, 4, 4 }, zone[6] = { 4, 4, 4, 4, 4, 2 }, mixed[6] = { 1, 2, 3, 4, 1, 3 };
+    const uint8_t d20[3] = { 16, 1, 10 };
+    uint16_t index = 0;
+    return seedtool_die_word(SEEDTOOL_D6, zoo, 6, &index) == SEEDTOOL_OK && index == 2047
+        && seedtool_die_word(SEEDTOOL_D6, zone, 6, &index) == SEEDTOOL_OK && index == 2046
+        && seedtool_die_word(SEEDTOOL_D6, mixed, 6, &index) == SEEDTOOL_OK && index == 0x0D9
+        /* 1111 0000 100: 15 << 7 | 0 << 3 | (9 >> 1). */
+        && seedtool_die_word(SEEDTOOL_D20, d20, 3, &index) == SEEDTOOL_OK && index == (15u << 7 | 4u);
+}
+
 /* `count` words, all "abandon" when `spread` is zero and a spread of the
  * wordlist otherwise. An all-zero prefix cannot catch a packing offset, hence
  * the spread. */
@@ -584,6 +653,7 @@ int main(void)
     static const test_t tests[] = {
         TEST(coin_word_encoding_is_sound),
         TEST(ticket_words_cover_the_wordlist),
+        TEST(die_words_cover_the_wordlist),
         TEST(final_word_filter_is_exact),
         TEST(wordlist_completion_is_sound),
         TEST(word_numbers_are_reachable),

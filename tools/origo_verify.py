@@ -410,6 +410,49 @@ def coin_words(args):
     print("mnemonic:  ", mnemonic_from_entropy(entropy))
 
 
+# The faces that count, the bits each gives, and the rolls a word takes.
+DICE = {"d6": (4, 2, 6), "d20": (16, 4, 3)}
+
+
+def dice(args):
+    """The device's D6 and D20 methods, from the rolls alone.
+
+    Only as many faces count as are a power of two - 1 to 4 on a D6, 1 to 16
+    on a D20 - and the rest are rolled again, so every counted face is equally
+    likely. Face f is the bits of f - 1, most significant first. A word is
+    eleven bits, which 2 and 4 do not divide, so its last roll keeps only its
+    first bits: a D6 word is five rolls of 2 bits and one of 1, a D20 word two
+    of 4 bits and one of 3. Then the 7 or 3 loose coin bits finish the
+    mnemonic, as `coin-words` does.
+    """
+    faces, bits, per_word = DICE[args.die]
+    rolls = [int(roll) for roll in " ".join(args.rolls).replace(",", " ").split()]
+    if len(rolls) not in (11 * per_word, 23 * per_word):
+        raise ValueError(f"{args.die} needs {11 * per_word} or {23 * per_word} rolls, got {len(rolls)}")
+    if any(not 1 <= roll <= faces for roll in rolls):
+        raise ValueError(f"only faces 1 to {faces} count on a {args.die}; roll the others again")
+    word_count = len(rolls) // per_word
+    needed = 7 if word_count == 11 else 3
+    if len(args.bits) != needed or any(character not in "01" for character in args.bits):
+        raise ValueError(f"{word_count} words need {needed} loose bits, 1 for heads and 0 for tails")
+    wl = words()
+    last_bits = 11 - bits * (per_word - 1)
+    indices = []
+    for position in range(word_count):
+        word_rolls = rolls[position * per_word : (position + 1) * per_word]
+        index = 0
+        for roll in word_rolls[:-1]:
+            index = (index << bits) | (roll - 1)
+        index = (index << last_bits) | ((word_rolls[-1] - 1) >> (bits - last_bits))
+        indices.append(index)
+        shown = " ".join(str(roll) for roll in word_rolls)
+        print(f"word {position + 1:2}: {shown}  {index + 1:04}  {wl[index]}")
+    entropy = ((int("".join(f"{i:011b}" for i in indices), 2) << needed) | int(args.bits, 2)).to_bytes(
+        16 if needed == 7 else 32, "big")
+    print(f"loose bits: {args.bits}")
+    print("mnemonic:  ", mnemonic_from_entropy(entropy))
+
+
 def tickets(args):
     """The device's SeedPicker tickets method, from the draws alone.
 
@@ -463,6 +506,11 @@ def main():
     coin.add_argument("flips", help="128 or 256 flips, 1 for heads and 0 for tails; spaces ignored")
     coin.add_argument("--words", type=int, choices=(12, 24), default=12)
     coin.set_defaults(func=coin_words)
+    die = sub.add_parser("dice")
+    die.add_argument("die", choices=sorted(DICE))
+    die.add_argument("rolls", nargs="+", help="every roll in order, spaces or commas between them")
+    die.add_argument("--bits", required=True, help="the 7 or 3 loose coin bits, 1 for heads and 0 for tails")
+    die.set_defaults(func=dice)
     tick = sub.add_parser("tickets")
     tick.add_argument("draws", nargs="+", help="11 or 23 draws as TICKET:DIE, e.g. 57:4")
     tick.add_argument("--bits", required=True, help="the 7 or 3 loose coin bits, 1 for heads and 0 for tails")

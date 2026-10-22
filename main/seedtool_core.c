@@ -136,6 +136,32 @@ seedtool_result_t seedtool_word_ticket(const uint16_t index, unsigned* ticket_ou
     return SEEDTOOL_OK;
 }
 
+unsigned seedtool_die_faces(const seedtool_die_t die) { return die == SEEDTOOL_D6 ? 4 : 16; }
+
+size_t seedtool_die_rolls_per_word(const seedtool_die_t die) { return die == SEEDTOOL_D6 ? 6 : 3; }
+
+seedtool_result_t seedtool_die_word(
+    const seedtool_die_t die, const uint8_t* rolls, const size_t count, uint16_t* index_out)
+{
+    if ((die != SEEDTOOL_D6 && die != SEEDTOOL_D20) || !rolls || !index_out || count != seedtool_die_rolls_per_word(die)) {
+        return SEEDTOOL_EINVAL;
+    }
+    const unsigned faces = seedtool_die_faces(die);
+    const unsigned bits = die == SEEDTOOL_D6 ? 2 : 4;
+    /* What the last roll keeps: whatever of the eleven the others left. */
+    const unsigned last_bits = SEEDTOOL_WORD_BITS - bits * (unsigned)(count - 1);
+    unsigned index = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (rolls[i] < 1 || rolls[i] > faces) {
+            return SEEDTOOL_EINVAL;
+        }
+        const unsigned value = rolls[i] - 1u;
+        index = i + 1 < count ? (index << bits) | value : (index << last_bits) | (value >> (bits - last_bits));
+    }
+    *index_out = (uint16_t)index;
+    return SEEDTOOL_OK;
+}
+
 seedtool_result_t seedtool_complete_checksum(const char* prefix_mnemonic, const uint8_t* coin_bits,
     const size_t coin_bits_len, char* output, const size_t output_len)
 {

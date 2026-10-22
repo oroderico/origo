@@ -92,6 +92,27 @@ seedtool_result_t seedtool_ticket_word(unsigned ticket, unsigned die, uint16_t* 
  * index past the wordlist. */
 seedtool_result_t seedtool_word_ticket(uint16_t index, unsigned* ticket_out, unsigned* die_out);
 
+/* A die read as bits, one word at a time. Only as many faces count as are a
+ * power of two - 1 to 4 on a D6, 1 to 16 on a D20 - and the rest are rolled
+ * again, so every counted face is equally likely: face f is the bits of f - 1,
+ * most significant first, from a printed table. Eleven bits do not divide by 2
+ * or 4, so a word's last roll keeps only its first bits: a D6 word is five
+ * rolls of 2 bits and one of 1 (1 or 2 is 0, 3 or 4 is 1), a D20 word two of 4
+ * bits and one of 3. */
+typedef enum {
+    SEEDTOOL_D6,
+    SEEDTOOL_D20,
+} seedtool_die_t;
+
+/* The faces that count (4 or 16) and the rolls a word takes (6 or 3). */
+unsigned seedtool_die_faces(seedtool_die_t die);
+size_t seedtool_die_rolls_per_word(seedtool_die_t die);
+#define SEEDTOOL_DIE_MAX_ROLLS 6
+
+/* The zero-based word index a word's rolls name, or SEEDTOOL_EINVAL for a
+ * wrong roll count or a face that does not count. */
+seedtool_result_t seedtool_die_word(seedtool_die_t die, const uint8_t* rolls, size_t count, uint16_t* index_out);
+
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);
 

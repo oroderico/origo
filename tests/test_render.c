@@ -817,10 +817,14 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
         /* The run intros and a word's confirmation, from app_seed.c. */
+        { "D6 dice", "Only 1 to 4 count", "Roll 5 or 6 again", "Start" },
+        { "D20 dice", "Only 1 to 16 count", "Roll 17 to 20 again", "Start" },
         { "Coin flips", "256 flips needed", "Heads 1, tails 0", "Start" },
         { "SeedPicker tickets", "23 draws needed", "Put each ticket back", "Start" },
+        { "Word 23/23", "16 16 16", "2048  mosquito", "Use this word" },
         { "Word 23/23", "T195 + die 3", "2048  mosquito", "Use this word" },
         { "Flip word 23 again?", "2048  mosquito", "These flips are lost", "Flip again" },
+        { "Roll word 23 again?", "2048  mosquito", "These rolls are lost", "Roll again" },
         { "Draw word 23 again?", "2048  mosquito", "This draw is lost", "Draw again" },
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {

@@ -215,6 +215,33 @@ class SeedToolVerifierTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 run("000", draws[:22] + [bad])
 
+    def test_dice_words_match_the_firmware_vectors(self):
+        # The D6 and D20 methods read faces as bits with no hash, so the
+        # verifier must reproduce them from the rolls alone. The vectors are
+        # the ones tests/test_core.c pins for seedtool_die_word: all-4 D6
+        # rolls are zoo, a last 2 keeps only its first bit (zone, not zoo),
+        # and D20 16 1 10 is word 1925.
+        import argparse, contextlib, io
+
+        def run(die, rolls, bits):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                verify.dice(argparse.Namespace(die=die, rolls=[str(r) for r in rolls], bits=bits))
+            return out.getvalue()
+
+        # Eleven all-1 words and seven tails are 128 zero bits: BIP39's own
+        # vector, so the packing is fixed to something outside this project.
+        self.assertTrue(run("d6", [1] * 66, "0000000").rstrip().endswith(self.MNEMONIC))
+        self.assertTrue(run("d20", [1] * 69, "000").rstrip().endswith(self.MNEMONIC_24))
+        self.assertIn("word  1: 4 4 4 4 4 4  2048  zoo", run("d6", [4] * 66, "0000000"))
+        self.assertIn("word  1: 4 4 4 4 4 2  2047  zone", run("d6", [4, 4, 4, 4, 4, 2] + [1] * 60, "0000000"))
+        self.assertIn("word  1: 16 1 10  1925  vacuum", run("d20", [16, 1, 10] + [1] * 30, "0000000"))
+
+        # The faces that do not count are rolled again, never entered.
+        for die, rolls in (("d6", [5] + [1] * 65), ("d20", [17] + [1] * 32), ("d6", [1] * 65)):
+            with self.assertRaises(ValueError):
+                run(die, rolls, "0000000")
+
     def test_checksum_completion_all_zero(self):
         prefix = " ".join(["abandon"] * 11)
         wl = verify.words()

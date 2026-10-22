@@ -1,5 +1,5 @@
-/* Where a mnemonic comes from: coins flipped or SeedPicker tickets drawn
- * straight into words, a checksum completed, or a backup restored. */
+/* Where a mnemonic comes from: dice rolled, coins flipped or SeedPicker tickets
+ * drawn straight into words, a checksum completed, or a backup restored. */
 #include "app_internal.h"
 
 #include <stdio.h>
@@ -85,7 +85,7 @@ static bool confirm_word(const unsigned position, const unsigned total, const ui
 
 /* A source that makes a mnemonic a word at a time, each word eleven bits by
  * construction and checkable against a printed table. `run` is the source's
- * own state for one run, or NULL. `intro` opens the run and
+ * own state for one run - a die's rolls - or NULL. `intro` opens the run and
  * returns whether the reader started it; `enter` makes word `position` and
  * returns false when the reader backs out of its first step; `made` writes what
  * made a word, for its confirmation and for the review of the whole run. */
@@ -97,6 +97,9 @@ typedef struct {
     const char* verb;
     const char* lost;
     const char* review_title;
+    /* The dice keep their rolls in a dice_run_t for this die. */
+    bool rolled;
+    seedtool_die_t die;
 } word_source_t;
 
 /* The intro every source opens on: what to do, in two lines, and Start. */
@@ -147,6 +150,71 @@ static void flips_made(const void* run, const unsigned position, const uint16_t 
         out[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
     }
     out[b] = '\0';
+}
+
+/* Dice: the faces that count give bits through seedtool_die_word; the rest
+ * are rolled again before anything is entered, so the carousel offers only
+ * the faces that count. The rolls are kept for the confirmation and the review:
+ * a word's last roll keeps only its first bits, so two faces name the same
+ * word and the word alone cannot say which was rolled. */
+typedef struct {
+    seedtool_die_t die;
+    uint8_t rolls[23][SEEDTOOL_DIE_MAX_ROLLS];
+} dice_run_t;
+
+static bool d6_intro(const size_t words)
+{
+    (void)words;
+    return intro_screen("D6 dice", "Only 1 to 4 count", "Roll 5 or 6 again");
+}
+
+static bool d20_intro(const size_t words)
+{
+    (void)words;
+    return intro_screen("D20 dice", "Only 1 to 16 count", "Roll 17 to 20 again");
+}
+
+/* One word's rolls, one at a time. Backing out of a later roll returns to the
+ * roll before it. */
+static bool enter_rolled_word(void* run, const unsigned position, const unsigned total, uint16_t* index_out)
+{
+    dice_run_t* const dice = run;
+    uint8_t* const rolls = dice->rolls[position - 1];
+    const size_t count = seedtool_die_rolls_per_word(dice->die);
+    /* "Word 3/11, roll 2/6", told apart by name as the coins' are. */
+    char title[48];
+    (void)snprintf(title, sizeof(title), "Word %u/%u, roll", position, total);
+    size_t r = 0;
+    while (r < count) {
+        unsigned face = 1;
+        if (!enter_value(title, (unsigned)(r + 1), (unsigned)count, 1, seedtool_die_faces(dice->die), &face)) {
+            if (!r) {
+                return false;
+            }
+            --r;
+            continue;
+        }
+        rolls[r++] = (uint8_t)face;
+    }
+    seedtool_require(seedtool_die_word(dice->die, rolls, count, index_out) == SEEDTOOL_OK);
+    return true;
+}
+
+/* A word's rolls, spaced so a D20's two-digit faces stay apart. */
+static void rolls_made(const void* run, const unsigned position, const uint16_t index, char* out, const size_t out_len)
+{
+    (void)index;
+    const dice_run_t* const dice = run;
+    size_t used = 0;
+    out[0] = '\0';
+    for (size_t r = 0; r < seedtool_die_rolls_per_word(dice->die) && used < out_len; ++r) {
+        const int written = snprintf(
+            out + used, out_len - used, "%s%u", r ? " " : "", (unsigned)dice->rolls[position - 1][r]);
+        if (written < 0) {
+            break;
+        }
+        used += (size_t)written;
+    }
 }
 
 /* SeedPicker's tickets: says how many draws, and the one rule the device
@@ -329,10 +397,15 @@ static bool pick_words(const size_t words, const word_source_t* source, void* ru
 }
 
 /* The sources, in the order the menu lists them. */
-static const char* const SOURCE_NAMES[] = { "Coin flips", "SeedPicker tickets" };
+static const char* const SOURCE_NAMES[] = { "D6 dice", "D20 dice", "Coin flips", "SeedPicker tickets" };
 static const word_source_t SOURCES[] = {
-    { coin_intro, enter_flipped_word, flips_made, "Flip", "These flips are lost", "Check the flips" },
-    { ticket_intro, enter_ticket_word, ticket_made, "Draw", "This draw is lost", "Check the draws" },
+    { d6_intro, enter_rolled_word, rolls_made, "Roll", "These rolls are lost", "Check the rolls", true, SEEDTOOL_D6 },
+    { d20_intro, enter_rolled_word, rolls_made, "Roll", "These rolls are lost", "Check the rolls", true,
+        SEEDTOOL_D20 },
+    { coin_intro, enter_flipped_word, flips_made, "Flip", "These flips are lost", "Check the flips", false,
+        SEEDTOOL_D6 },
+    { ticket_intro, enter_ticket_word, ticket_made, "Draw", "This draw is lost", "Check the draws", false,
+        SEEDTOOL_D6 },
 };
 _Static_assert(ARRAY_LEN(SOURCE_NAMES) == ARRAY_LEN(SOURCES), "every source has a menu row");
 
@@ -354,11 +427,14 @@ static bool create_seed(void)
                 break;
             }
             const size_t words = length ? 24 : 12;
+            dice_run_t dice = { .die = SOURCES[source].die };
+            void* const run = SOURCES[source].rolled ? &dice : NULL;
             bool generated = false;
             while (!generated && SOURCES[source].intro(words)) {
                 /* Backing out of the first entry returns to the intro. */
-                generated = pick_words(words, &SOURCES[source], NULL);
+                generated = pick_words(words, &SOURCES[source], run);
             }
+            seedtool_zero(&dice, sizeof(dice));
             if (generated) {
                 return true;
             }
