@@ -8,7 +8,6 @@ Run this script from a trusted, offline environment.
 import argparse
 import hashlib
 import hmac
-import math
 from pathlib import Path
 import sys
 
@@ -28,29 +27,6 @@ PURPOSES = (44, 49, 84, 86)
 # Each type's output descriptor wrapper (BIP381-386).
 SCRIPT_WRAP = {44: ("pkh(", ")"), 49: ("sh(wpkh(", "))"), 84: ("wpkh(", ")"), 86: ("tr(", ")")}
 WORDLIST = Path(__file__).parents[1] / "components/libwally-core/upstream/src/data/wordlists/english.txt"
-
-# How many events each source needs, as (12 words, 24 words); None where that
-# combination is not offered. This has to agree exactly with
-# seedtool_required_events() in main/seedtool_core.c, because transcript()
-# below refuses any other count - a verifier that expects a different number
-# of rolls than the device asked for cannot check the device at all, which is
-# the one job it has. It drifted once already: D20 was padded from 30/60 to
-# 36/68 in the firmware and this table kept the old numbers, so no D20 seed
-# this firmware produced could be verified here. test_origo_verify.py parses
-# the C and fails if the two ever disagree again.
-REQUIRED_EVENTS = {
-    "d6": (60, 120),
-    "d20": (36, 68),
-    "coin": (128, 256),
-    "cards": (25, None),
-    # Without replacement, a single deck tops out around 225.6 bits
-    # (log2(52!)) - short of 256 even drawing every card - so 24 words
-    # instead returns the card to the deck and reshuffles before every
-    # draw, needing more draws (see shannon_bits/pattern_detected,
-    # which grade this the same way as any other die).
-    "cards-replace": (None, 50),
-}
-
 
 def words():
     result = WORDLIST.read_text(encoding="ascii").splitlines()
@@ -189,142 +165,6 @@ def compact_seedqr_payload(mnemonic):
     warn about.
     """
     return mnemonic_entropy(mnemonic)
-
-
-def transcript(kind, entries, count):
-    if len(entries) != count:
-        raise ValueError(f"expected exactly {count} entries, got {len(entries)}")
-    if kind == "d6":
-        vals = [int(x) for x in entries]
-        if any(x < 1 or x > 6 for x in vals):
-            raise ValueError("D6 values must be 1..6")
-        return "".join(map(str, vals))
-    if kind == "d20":
-        vals = [int(x) for x in entries]
-        if any(x < 1 or x > 20 for x in vals):
-            raise ValueError("D20 values must be 1..20")
-        return "-".join(map(str, vals))
-    if kind == "coin":
-        vals = [{"h": "1", "heads": "1", "1": "1", "t": "0", "tails": "0", "0": "0"}.get(x.lower()) for x in entries]
-        if any(x is None for x in vals):
-            raise ValueError("coins must be H/T or 1/0")
-        return "".join(vals)
-    # "cards" and "cards-replace" share the same rank+suit encoding; only
-    # "cards" (drawn without replacement) rejects a repeat.
-    ranks, suits = "A23456789TJQK", "CDHS"
-    vals = [x.upper() for x in entries]
-    allowed = {r + s for s in suits for r in ranks}
-    if any(x not in allowed for x in vals):
-        raise ValueError("cards must be rank+suit codes (AC..KS)")
-    if kind == "cards" and len(set(vals)) != len(vals):
-        raise ValueError("cards must be distinct rank+suit codes (AC..KS)")
-    return "cards-v1:" + "".join(vals)
-
-
-def shannon_bits(kind, values):
-    """Shannon's entropy, in bits, of a D6/D20/coin roll sequence.
-
-    A UI quality signal, not a cryptographic one: the mnemonic is generated
-    from the transcript's SHA256 regardless of this value. A coin flip is a
-    two-sided die, 1..2 like every other kind here - not the 0/1 the
-    transcript itself uses; see coin_faces. Mirrors seedtool_dice_entropy_bits,
-    adapted from Krux's dice-roll entropy screen (github.com/selfcustody/krux,
-    src/krux/pages/new_mnemonic/dice_rolls.py).
-    """
-    sides = {"d6": 6, "d20": 20, "coin": 2, "cards-replace": 52}[kind]
-    if any(v < 1 or v > sides for v in values):
-        raise ValueError(f"{kind} values must be 1..{sides}")
-    if not values:
-        return 0
-    counts = [0] * sides
-    for v in values:
-        counts[v - 1] += 1
-    bits = 0.0
-    for count in counts:
-        if count:
-            p = count / len(values)
-            bits -= p * math.log2(p)
-    return int(bits * len(values))
-
-
-def derivative_pattern_detected(values_1indexed, sides):
-    """Shared by pattern_detected and card_pattern_detected: whether a
-    `sides`-valued 1-indexed sequence's consecutive differences look like an
-    arithmetic run (an operator counting up or down through the faces)
-    rather than random. Mirrors seedtool_core.c's derivative_pattern_detected.
-    """
-    derivative_range = 2 * sides - 1
-    counts = [0] * derivative_range
-    for a, b in zip(values_1indexed, values_1indexed[1:]):
-        counts[b - a + sides - 1] += 1
-    derivatives = len(values_1indexed) - 1
-    entropy = 0.0
-    for count in counts:
-        if count:
-            p = count / derivatives
-            entropy -= p * math.log2(p)
-    max_entropy = math.log2(derivative_range)
-    normalized = (max_entropy - entropy) / max_entropy * 100 if max_entropy > 0 else 0
-    return normalized > 30
-
-
-def pattern_detected(kind, values):
-    """Whether consecutive rolls look like an arithmetic run rather than random.
-
-    Mirrors seedtool_dice_pattern_detected: below 10 rolls this always reports
-    False, since a handful of rolls can look patterned by chance alone.
-    """
-    sides = {"d6": 6, "d20": 20, "coin": 2, "cards-replace": 52}[kind]
-    if any(v < 1 or v > sides for v in values):
-        raise ValueError(f"{kind} values must be 1..{sides}")
-    if len(values) < 10:
-        return False
-    return derivative_pattern_detected(values, sides)
-
-
-def coin_faces(entries):
-    """0/1 per entry, remapped to a 1/2 face: mirrors the local remap
-    main/seedtool_app.c's entropy_quality does before calling
-    seedtool_dice_entropy_bits/seedtool_dice_pattern_detected, since those
-    expect every source they cover to be 1-indexed like D6/D20 already are.
-    """
-    bits = [{"h": "1", "heads": "1", "1": "1", "t": "0", "tails": "0", "0": "0"}.get(x.lower()) for x in entries]
-    if any(x is None for x in bits):
-        raise ValueError("coins must be H/T or 1/0")
-    return [int(b) + 1 for b in bits]
-
-
-def card_values(entries):
-    """0..51 per entry (rank + suit*13), the same encoding transcript() and
-    seedtool_transcript use. Does not itself check for a repeat - card
-    draws are only ever passed here after transcript() has already applied
-    whichever distinctness rule its kind calls for."""
-    ranks, suits = "A23456789TJQK", "CDHS"
-    vals = [x.upper() for x in entries]
-    allowed = {r + s for s in suits for r in ranks}
-    if any(x not in allowed for x in vals):
-        raise ValueError("cards must be rank+suit codes (AC..KS)")
-    return [suits.index(v[1]) * 13 + ranks.index(v[0]) for v in vals]
-
-
-def card_entropy_bits(drawn_count):
-    """Mirrors seedtool_card_entropy_bits: cards are drawn without
-    replacement, so unlike a die's distribution this is exact rather than
-    estimated - log2 of how many equally likely ordered draws of that length
-    exist, not a value estimated from a sample.
-    """
-    if drawn_count > 52:
-        raise ValueError("cannot draw more than 52 distinct cards")
-    return int(sum(math.log2(52 - i) for i in range(drawn_count)))
-
-
-def card_pattern_detected(values):
-    """Mirrors seedtool_card_pattern_detected: rank alone (ignoring suit),
-    re-indexed 1..13, through the same derivative-entropy check dice uses.
-    """
-    if len(values) < 10:
-        return False
-    return derivative_pattern_detected([v % 13 + 1 for v in values], 13)
 
 
 def inv(x):
@@ -497,34 +337,6 @@ def addresses(mnemonic, passphrase, index, account_index=0, chain=0):
     return hash160(pubkey(root[0]))[:4].hex(), result, accounts
 
 
-def generate(args):
-    count = REQUIRED_EVENTS[args.source][0 if args.words == 12 else 1]
-    if count is None:
-        supported = 24 if args.words == 12 else 12
-        raise ValueError(f"{args.source} mode supports {supported} words only")
-    text = transcript(args.source, args.entries, count)
-    digest = hashlib.sha256(text.encode("ascii")).digest()
-    mnemonic = mnemonic_from_entropy(digest[:16] if args.words == 12 else digest)
-    print("transcript:", text)
-    print("sha256:    ", digest.hex())
-    print("mnemonic:  ", mnemonic)
-    if args.stats:
-        min_bits = 128 if args.words == 12 else 256
-        if args.source == "cards":
-            values = card_values(args.entries)
-            print(f"bits:       {card_entropy_bits(len(values))} bits (min {min_bits})")
-            print("pattern:   ", "detected" if card_pattern_detected(values) else "not detected")
-        else:
-            if args.source == "cards-replace":
-                values = [v + 1 for v in card_values(args.entries)]
-            elif args.source == "coin":
-                values = coin_faces(args.entries)
-            else:
-                values = [int(x) for x in args.entries]
-            print(f"shannon:    {shannon_bits(args.source, values)} bits (min {min_bits})")
-            print("pattern:   ", "detected" if pattern_detected(args.source, values) else "not detected")
-
-
 def inspect(args):
     mnemonic_entropy(args.mnemonic)
     chain = 1 if args.change else 0
@@ -636,12 +448,6 @@ def tickets(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(required=True)
-    gen = sub.add_parser("generate")
-    gen.add_argument("source", choices=("d6", "d20", "coin", "cards", "cards-replace"))
-    gen.add_argument("entries", nargs="+")
-    gen.add_argument("--words", type=int, choices=(12, 24), default=12)
-    gen.add_argument("--stats", action="store_true", help="print Shannon's entropy and pattern check (d6/d20 only)")
-    gen.set_defaults(func=generate)
     check = sub.add_parser("inspect")
     check.add_argument("mnemonic")
     check.add_argument("--passphrase", default="")

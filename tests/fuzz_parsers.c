@@ -1,6 +1,6 @@
 /* Coverage-guided fuzzing of every core entry point that takes data a user can
- * shape: a mnemonic typed in during restore, a descriptor, a transcript's raw
- * values, the BBQr part arithmetic. Built with libFuzzer and run under ASan
+ * shape: a mnemonic typed in during restore, a descriptor, a ticket, the BBQr
+ * part arithmetic. Built with libFuzzer and run under ASan
  * and UBSan, so the bar is not "fails gracefully" but "never reads or writes
  * outside a buffer" - which is the property the firmware's fixed-size arrays
  * rest on and which reading the code can only argue for.
@@ -68,21 +68,12 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         (void)seedtool_descriptor_checksum(str, out, sizeof(out));
         break;
     }
-    case 4: { /* transcript com valores arbitrarios, para cada fonte */
-        char out[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-        for (int s = 0; s <= 4; ++s) {
-            (void)seedtool_transcript((seedtool_source_t)s, (const uint8_t*)str, n > 300 ? 300 : n, out, sizeof(out));
-        }
-        break;
-    }
-    case 5: { /* estimadores de entropia com valores fora de faixa */
-        int bits = 0; bool pat = false;
-        for (int s = 0; s <= 4; ++s) {
-            (void)seedtool_dice_entropy_bits((seedtool_source_t)s, (const uint8_t*)str, n > 256 ? 256 : n, &bits);
-            (void)seedtool_dice_pattern_detected((seedtool_source_t)s, (const uint8_t*)str, n > 256 ? 256 : n, &pat);
-        }
-        (void)seedtool_card_entropy_bits(n, &bits);
-        (void)seedtool_card_pattern_detected((const uint8_t*)str, n > 60 ? 60 : n, &pat);
+    case 4: { /* bilhete e dado do SeedPicker, e a volta, com valores arbitrarios */
+        if (n < 4) break;
+        uint16_t index = 0;
+        unsigned ticket = 0, die = 0;
+        (void)seedtool_ticket_word((uint8_t)str[0] | (unsigned)(uint8_t)str[1] << 8, (uint8_t)str[2], &index);
+        (void)seedtool_word_ticket((uint16_t)((uint8_t)str[2] | (uint8_t)str[3] << 8), &ticket, &die);
         break;
     }
     case 6: { /* BBQr: contagem e indice vindos do proprio input */

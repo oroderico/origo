@@ -1,17 +1,19 @@
-/* The input screens: keyboards, digit and value boxes, the entropy bar,
- * dice and Stackbit. Drawn with the primitives in render_internal.h. */
+/* The input screens: keyboards, digit and value boxes, levels and
+ * Stackbit. Drawn with the primitives in render_internal.h. */
 #include "render_internal.h"
 
 #include <stdio.h>
 #include <string.h>
 
-/* In the gap seedtool_render_screen leaves between the transcript line (ends
- * y=81) and the footer (starts y=111). */
-#define DICE_BAR_MARGIN 20
-#define DICE_BAR_X DICE_BAR_MARGIN
-#define DICE_BAR_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * DICE_BAR_MARGIN)
-#define DICE_BAR_Y 90
-#define DICE_BAR_HEIGHT 14
+/* The band under an entry field, in the gap seedtool_render_screen leaves
+ * between its second line (ends y=81) and the footer (starts y=111): the
+ * brightness level's segments fill it, the keyboard's word bar spans its
+ * width, and the value box centres above it. */
+#define BAND_MARGIN 20
+#define BAND_X BAND_MARGIN
+#define BAND_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * BAND_MARGIN)
+#define BAND_Y 90
+#define BAND_HEIGHT 14
 
 #define KEYBOARD_COLUMNS 10
 #define KEY_WIDTH (SEEDTOOL_DISPLAY_WIDTH / KEYBOARD_COLUMNS)
@@ -170,30 +172,6 @@ static const char* key_label(const char key, char* scratch)
     }
 }
 
-static int clamp_pct(int pct) { return pct < 0 ? 0 : pct > 100 ? 100 : pct; }
-
-/* The entropy quality bar, for every screen with room above DICE_BAR_Y. NULL
- * draws nothing. */
-static void draw_progress_bar(const seedtool_progress_t* progress)
-{
-    if (!progress) {
-        return;
-    }
-    const int inner_x = DICE_BAR_X + 2;
-    const int inner_width = DICE_BAR_WIDTH - 4;
-    const int segment_height = (DICE_BAR_HEIGHT - 4) / 2;
-    const int rolls_width = clamp_pct(progress->rolls_pct) * inner_width / 100;
-    const int entropy_width = clamp_pct(progress->entropy_pct) * inner_width / 100;
-    if (rolls_width > 0) {
-        fill_rect(inner_x, DICE_BAR_Y + 2, rolls_width, segment_height, COLOR_HIGHLIGHT);
-    }
-    if (entropy_width > 0) {
-        fill_rect(inner_x, DICE_BAR_Y + 2 + segment_height + 1, entropy_width, segment_height,
-            progress->warn ? COLOR_WARN : COLOR_HIGHLIGHT);
-    }
-    draw_border(DICE_BAR_X, DICE_BAR_Y, DICE_BAR_WIDTH, DICE_BAR_HEIGHT, progress->complete ? COLOR_GO : COLOR_DIM);
-}
-
 /* A row of digit boxes, the one being set carrying up and down arrows, so the
  * value scrolls in place: up and down are the digit. Adapted from Jade's PIN
  * and index entry (main/ui/digit_entry.c). */
@@ -222,22 +200,19 @@ _Static_assert(SEEDTOOL_DIGIT_BOXES_MAX * DIGIT_BOX_WIDTH + (SEEDTOOL_DIGIT_BOXE
 _Static_assert(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y) >= SCREEN_TITLE_BOTTOM, "the digit field runs into the title");
 _Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(SCREEN_FOOTER_Y)) + DIGIT_ARROW_HEIGHT <= SCREEN_FOOTER_Y,
     "the digit field runs into the footer");
-_Static_assert(DIGIT_FIELD_TOP(DICE_BAR_Y) >= SCREEN_TITLE_BOTTOM, "the value box runs into the title");
-_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(DICE_BAR_Y)) + DIGIT_ARROW_HEIGHT <= DICE_BAR_Y,
-    "the value box runs into the quality bar");
+_Static_assert(DIGIT_FIELD_TOP(BAND_Y) >= SCREEN_TITLE_BOTTOM, "the value box runs into the title");
+_Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(BAND_Y)) + DIGIT_ARROW_HEIGHT <= BAND_Y,
+    "the value box runs into the band below it");
 
 /* One wider box for a value scrolled whole, a die face or a D20. `back` puts
  * the way out on the ring, as the digit field does. */
 #define VALUE_BOX_WIDTH 60
 
-void seedtool_render_value_box(
-    const char* title, const char* text, const bool back, const char* footer, const seedtool_progress_t* progress)
+void seedtool_render_value_box(const char* title, const char* text, const bool back, const char* footer)
 {
     seedtool_render_clear();
     draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
-    /* Centred above the quality bar whether or not `progress` draws it, so the
-     * box does not move between graded and ungraded runs. */
-    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
+    const int top = DIGIT_FIELD_TOP(BAND_Y);
     const int box_y = DIGIT_FIELD_BOX_Y(top);
     const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
     fill_rect(x, box_y, VALUE_BOX_WIDTH, DIGIT_BOX_HEIGHT, COLOR_HIGHLIGHT);
@@ -253,9 +228,6 @@ void seedtool_render_value_box(
     draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
     draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
-    if (progress) {
-        draw_progress_bar(progress);
-    }
 }
 
 #define LEVEL_SEGMENT_GAP 4
@@ -264,7 +236,7 @@ void seedtool_render_level(const char* title, const unsigned level, const unsign
 {
     seedtool_render_clear();
     draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
-    const int top = DIGIT_FIELD_TOP(DICE_BAR_Y);
+    const int top = DIGIT_FIELD_TOP(BAND_Y);
     const int box_y = DIGIT_FIELD_BOX_Y(top);
     const int x = (SEEDTOOL_DISPLAY_WIDTH - VALUE_BOX_WIDTH) / 2;
     char text[24];
@@ -282,21 +254,21 @@ void seedtool_render_level(const char* title, const unsigned level, const unsign
         draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
     }
     if (max) {
-        const int segment = (DICE_BAR_WIDTH - (int)(max - 1) * LEVEL_SEGMENT_GAP) / (int)max;
+        const int segment = (BAND_WIDTH - (int)(max - 1) * LEVEL_SEGMENT_GAP) / (int)max;
         for (unsigned i = 0; i < max; ++i) {
-            const int sx = DICE_BAR_X + (int)i * (segment + LEVEL_SEGMENT_GAP);
+            const int sx = BAND_X + (int)i * (segment + LEVEL_SEGMENT_GAP);
             if (i < level) {
-                fill_rect(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_HIGHLIGHT);
+                fill_rect(sx, BAND_Y, segment, BAND_HEIGHT, COLOR_HIGHLIGHT);
             } else {
-                draw_border(sx, DICE_BAR_Y, segment, DICE_BAR_HEIGHT, COLOR_DIM);
+                draw_border(sx, BAND_Y, segment, BAND_HEIGHT, COLOR_DIM);
             }
         }
     }
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
 }
 
-void seedtool_render_digits(const char* title, const char* digits, const size_t count, const size_t active,
-    const char* footer, const seedtool_progress_t* progress)
+void seedtool_render_digits(
+    const char* title, const char* digits, const size_t count, const size_t active, const char* footer)
 {
     seedtool_render_clear();
     draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
@@ -339,25 +311,6 @@ void seedtool_render_digits(const char* title, const char* digits, const size_t 
     }
 
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
-    if (progress) {
-        draw_progress_bar(progress);
-    }
-}
-
-void seedtool_render_dice_screen(const char* title, const char* line1, const char* line2, const char* footer,
-    const seedtool_progress_t* progress)
-{
-    seedtool_render_screen(title, line1, line2, footer);
-    draw_progress_bar(progress);
-}
-
-void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
-    const seedtool_progress_t* progress)
-{
-    /* The quality bar (y=90..103) takes the footer's row, which the chrome
-     * replaces. */
-    seedtool_render_nav_text(nav, title, line1, line2, NULL);
-    draw_progress_bar(progress);
 }
 
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
@@ -368,10 +321,10 @@ void seedtool_render_keyboard(const char* title, const char* text, const char* l
     draw_typed(FONT_BODY, text, 32);
     if (total && position) {
         const size_t done = position > total ? total : position - 1;
-        const int filled = (int)(DICE_BAR_WIDTH * done / total);
-        fill_rect(DICE_BAR_X, WORD_BAR_Y, DICE_BAR_WIDTH, WORD_BAR_HEIGHT, COLOR_DIM);
+        const int filled = (int)(BAND_WIDTH * done / total);
+        fill_rect(BAND_X, WORD_BAR_Y, BAND_WIDTH, WORD_BAR_HEIGHT, COLOR_DIM);
         if (filled) {
-            fill_rect(DICE_BAR_X, WORD_BAR_Y, filled, WORD_BAR_HEIGHT, COLOR_HIGHLIGHT);
+            fill_rect(BAND_X, WORD_BAR_Y, filled, WORD_BAR_HEIGHT, COLOR_HIGHLIGHT);
         }
     }
 

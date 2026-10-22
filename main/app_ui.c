@@ -1,5 +1,5 @@
 /* The app's screen machinery: key input and the session timeout, the nav
- * chrome's lists and confirms, paged text, and the value, coin and card
+ * chrome's lists and confirms, paged text, and the value and coin
  * entry screens every flow builds on. */
 #include "app_internal.h"
 
@@ -148,10 +148,9 @@ static size_t nav_selection(const size_t position, const size_t count, const boo
 }
 
 /* The loop behind every screen whose only controls are the arrow and the
- * confirm. `label` NULL leaves out the confirm; `progress` adds the entropy
- * bar. Returns NAV_BACK or NAV_CONFIRM. */
-int nav_screen(const char* title, const char* one, const char* two, const char* label,
-    const bool start_on_back, const seedtool_progress_t* progress)
+ * confirm. `label` NULL leaves out the confirm. Returns NAV_BACK or
+ * NAV_CONFIRM. */
+int nav_screen(const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
 {
     seedtool_nav_t nav = {
         /* A screen with no confirm opens on the arrow, whatever the caller
@@ -162,11 +161,7 @@ int nav_screen(const char* title, const char* one, const char* two, const char* 
         .back = true,
     };
     for (;;) {
-        if (progress) {
-            seedtool_render_nav_dice(&nav, title, one, two, progress);
-        } else {
-            seedtool_render_nav_text(&nav, title, one, two, NULL);
-        }
+        seedtool_render_nav_text(&nav, title, one, two, NULL);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
@@ -191,20 +186,13 @@ int nav_screen(const char* title, const char* one, const char* two, const char* 
 bool nav_acknowledge(
     const char* title, const char* one, const char* two, const char* label, const bool start_on_back)
 {
-    return nav_screen(title, one, two, label, start_on_back, NULL) == NAV_CONFIRM;
-}
-
-/* The same with the entropy quality bar drawn in. */
-bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label,
-    const bool start_on_back, const seedtool_progress_t* progress)
-{
-    return nav_screen(title, one, two, label, start_on_back, progress) == NAV_CONFIRM;
+    return nav_screen(title, one, two, label, start_on_back) == NAV_CONFIRM;
 }
 
 /* A notice: the reader reads it and leaves, so the arrow is its only control. */
 void notice(const char* title, const char* one, const char* two)
 {
-    (void)nav_screen(title, one, two, NULL, true, NULL);
+    (void)nav_screen(title, one, two, NULL, true);
 }
 
 /* A list under the nav chrome. `cursor` carries the selection in and out, so a
@@ -339,73 +327,23 @@ int choose_menu(const char* title, const char* const* items, const size_t count)
 }
 
 
-static unsigned step_value(
-    unsigned current, const unsigned min, const unsigned max, const bool forward, const bool* allowed)
-{
-    for (unsigned i = 0; i <= max - min; ++i) {
-        current = forward ? (current == max ? min : current + 1) : (current == min ? max : current - 1);
-        if (!allowed || allowed[current - min]) {
-            return current;
-        }
-    }
-    return current;
-}
-
-/* The "N/M" counter an entry screen's title carries, plus the bits so far when
- * `progress` is graded. The minimum is shown elsewhere; leaving it out keeps a
- * coin's title clear of the edge. */
-static void format_progress_heading(char* heading, const size_t heading_len, const char* title,
-    const unsigned position, const unsigned total, const seedtool_progress_t* progress)
-{
-    if (progress && progress->graded) {
-        (void)snprintf(heading, heading_len, "%s %u/%u %d bits", title, position, total, progress->bits);
-    } else {
-        (void)snprintf(heading, heading_len, "%s %u/%u", title, position, total);
-    }
-}
-
-/* Entry `position` of `total` in a run, on a numeric carousel. `allowed` is
- * optional and indexed from `min`; disallowed values (cards already drawn) are
- * skipped. Returns true with `*value` set, or false when the reader took
- * `[back]`, a stop on the ring since both keys change the value. */
+/* Entry `position` of `total` in a run, on a numeric carousel from `min` to
+ * `max`. Returns true with `*value` set, or false when the reader took the way
+ * back: a stop on the ring below `min`, since both keys change the value. */
 bool enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
-    const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history,
-    const seedtool_progress_t* progress)
+    const unsigned max, unsigned* value)
 {
-    const unsigned first = allowed && !allowed[0] ? step_value(min, min, max, true, allowed) : min;
-    /* One step back from the first value wraps to the last reachable one. */
-    const unsigned last = step_value(first, min, max, false, allowed);
-    unsigned current = first;
+    unsigned current = min;
     bool on_back = false;
-    /* The way back is a stop on the ring with no label of its own until it is
-     * reached, so the footer says where it is. */
-    char footer[56], first_shown[24];
-    if (format) {
-        format(first, first_shown, sizeof(first_shown));
-    } else {
-        (void)snprintf(first_shown, sizeof(first_shown), "%u", first);
-    }
-    /* A suit's name does not fit the footer beside the chord; a die face or a
-     * rank does. */
-    (void)snprintf(
-        footer, sizeof(footer), "BOTH take   back below %s", strlen(first_shown) > 2 ? "first" : first_shown);
-
+    /* The way back has no label of its own until it is reached, so the footer
+     * says where it is. */
+    char footer[56], heading[48];
+    (void)snprintf(footer, sizeof(footer), "BOTH take   back below %u", min);
+    (void)snprintf(heading, sizeof(heading), "%s %u/%u", title, position, total);
     for (;;) {
-        char heading[48], shown[48];
-        format_progress_heading(heading, sizeof(heading), title, position, total, progress);
-        if (format) {
-            format(current, shown, sizeof(shown));
-        } else {
-            (void)snprintf(shown, sizeof(shown), "%u", current);
-        }
-        /* A plain number scrolls in its own box. A formatted value (a card) is
-         * too wide for one and uses the text screen, with the running
-         * transcript under it so a mis-keyed entry is caught against the paper. */
-        if (!format) {
-            seedtool_render_value_box(heading, shown, on_back, footer, progress);
-        } else {
-            seedtool_render_dice_screen(heading, on_back ? "[back]" : shown, history, footer, progress);
-        }
+        char shown[16];
+        (void)snprintf(shown, sizeof(shown), "%u", current);
+        seedtool_render_value_box(heading, shown, on_back, footer);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
@@ -419,21 +357,21 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
         case KEY_PREV:
             if (on_back) {
                 on_back = false;
-                current = first;
-            } else if (current == last) {
+                current = min;
+            } else if (current == max) {
                 on_back = true;
             } else {
-                current = step_value(current, min, max, true, allowed);
+                ++current;
             }
             break;
         case KEY_NEXT:
             if (on_back) {
                 on_back = false;
-                current = last;
-            } else if (current == first) {
+                current = max;
+            } else if (current == min) {
                 on_back = true;
             } else {
-                current = step_value(current, min, max, false, allowed);
+                --current;
             }
             break;
         default:
@@ -445,13 +383,13 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
 /* One coin flip: KEY_PREV ("up") is heads, KEY_NEXT tails, and the chord undoes
  * the last flip. One press per flip, for runs of 128 or 256. Returns true with
  * `*bit` set, or false to step back. */
-bool enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
-    const char* history, const seedtool_progress_t* progress)
+bool enter_coin_flip(
+    const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history)
 {
     char heading[48];
-    format_progress_heading(heading, sizeof(heading), title, position, total, progress);
+    (void)snprintf(heading, sizeof(heading), "%s %u/%u", title, position, total);
     for (;;) {
-        seedtool_render_dice_screen(heading, "Heads (up)   Tails (down)", history, COIN_FOOTER, progress);
+        seedtool_render_screen(heading, "Heads (up)   Tails (down)", history, COIN_FOOTER);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
@@ -464,55 +402,6 @@ bool enter_coin_flip(const char* title, const unsigned position, const unsigned 
             return true;
         default:
             break;
-        }
-    }
-}
-
-static const char CARD_RANKS[] = "A23456789TJQK";
-static const char* const CARD_SUIT_NAMES[4] = { "Clubs", "Diamonds", "Hearts", "Spades" };
-
-static void format_rank(const unsigned value, char* output, const size_t output_len)
-{
-    (void)snprintf(output, output_len, "%c", CARD_RANKS[value]);
-}
-
-static void format_suit(const unsigned value, char* output, const size_t output_len)
-{
-    (void)snprintf(output, output_len, "%s", CARD_SUIT_NAMES[value]);
-}
-
-/* A card in two carousels, suit then rank: about 8.5 presses a card rather than
- * 26 through one 52-way ring. Backing out of the rank returns to the suit;
- * backing out of the suit undoes the card. Same contract as enter_value. */
-/* `available` NULL means every card can be drawn (with replacement). */
-bool enter_card(const unsigned position, const unsigned total, unsigned* value, const bool* available,
-    const char* history, const seedtool_progress_t* progress)
-{
-    for (;;) {
-        bool suit_allowed[4];
-        for (unsigned s = 0; s < 4; ++s) {
-            suit_allowed[s] = !available;
-            for (unsigned r = 0; available && r < 13; ++r) {
-                if (available[s * 13 + r]) {
-                    suit_allowed[s] = true;
-                    break;
-                }
-            }
-        }
-        unsigned suit = 0;
-        if (!enter_value("Suit", position, total, 0, 3, &suit, format_suit, suit_allowed, history, progress)) {
-            return false;
-        }
-
-        bool rank_allowed[13];
-        for (unsigned r = 0; r < 13; ++r) {
-            rank_allowed[r] = !available || available[suit * 13 + r];
-        }
-        unsigned rank = 0;
-        if (enter_value(
-                CARD_SUIT_NAMES[suit], position, total, 0, 12, &rank, format_rank, rank_allowed, history, progress)) {
-            *value = suit * 13 + rank;
-            return true;
         }
     }
 }
@@ -591,7 +480,7 @@ bool page_text_impl(const char* title, const char* text, const bool confirmable,
 }
 
 /* Paged text with something to take at the end of it - the descriptor, the
- * account key, the transcript and its hash, the completed mnemonic. The
+ * account key, the completed mnemonic. The
  * caller acts on the answer, so the tick is there to give one. */
 bool page_text(const char* title, const char* text)
 {

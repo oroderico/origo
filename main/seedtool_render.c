@@ -390,16 +390,6 @@ static void draw_row(const uint8_t* font, const char* text, const int x, const i
 
 size_t seedtool_render_fit_row(const char* text) { return fit_in(FONT_BODY, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
-size_t seedtool_render_fit_tail(const char* text)
-{
-    const size_t length = strlen(text);
-    size_t start = 0;
-    while (start < length && text_width(FONT_BODY, text + start, length - start) > TEXT_WIDTH) {
-        ++start;
-    }
-    return length - start;
-}
-
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
 
 /* The splash is the logo, and nothing else: it holds the screen briefly and the

@@ -855,7 +855,7 @@ bool review_backup_and_show_wallet(const char* mnemonic, const size_t words)
             (void)snprintf(
                 intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
             const int taken
-                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", false, NULL);
+                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
             stage = taken == NAV_CONFIRM ? STAGE_QUIZ : STAGE_WORDS;
             break;
         }

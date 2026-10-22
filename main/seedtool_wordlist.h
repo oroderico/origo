@@ -6,6 +6,9 @@
 #include <stdint.h>
 
 #define SEEDTOOL_WORDLIST_LEN 2048
+/* Bits that name one word: the wordlist is exactly 2^11 long. */
+#define SEEDTOOL_WORD_BITS 11
+_Static_assert(SEEDTOOL_WORDLIST_LEN == 1 << SEEDTOOL_WORD_BITS, "a word is eleven bits");
 #define SEEDTOOL_MAX_WORD_LEN 8
 #define SEEDTOOL_LETTERS 26
 #define SEEDTOOL_DIGITS 10

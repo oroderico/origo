@@ -146,7 +146,7 @@ static bool enter_word_number(const size_t position, const size_t total, const s
         for (size_t i = at + 1; i < SEEDTOOL_MAX_WORD_DIGITS; ++i) {
             shown[i] = ' ';
         }
-        seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
+        seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER);
         seedtool_display_flush();
 
         const seedtool_key_t key = wait_key();
@@ -194,7 +194,7 @@ static bool enter_word_number(const size_t position, const size_t total, const s
         (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
         /* The number just typed is what is being checked, so the bar names
          * it rather than saying "Continue". */
-        const int answer = word ? nav_screen(title, word, counted, "Use this word", false, NULL) : NAV_BACK;
+        const int answer = word ? nav_screen(title, word, counted, "Use this word", false) : NAV_BACK;
         seedtool_zero(counted, sizeof(counted));
         if (answer == NAV_CONFIRM) {
             strcpy(output, word);

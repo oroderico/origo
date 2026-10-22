@@ -370,90 +370,6 @@ static bool word_numbers_round_trip_is_sound(void)
     return seedtool_mnemonic_word_numbers("abandon notaword", numbers, 2, &count) != SEEDTOOL_OK;
 }
 
-/* seedtool_generate succeeds for every source and word count at the real
- * required event count, which is where a too-small buffer would show. */
-static bool full_entropy_events_generate(void)
-{
-    static const seedtool_source_t sources[]
-        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
-    static const size_t word_counts[] = { 12, 24 };
-    uint8_t values[SEEDTOOL_MAX_EVENTS];
-    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
-        for (size_t w = 0; w < sizeof(word_counts) / sizeof(word_counts[0]); ++w) {
-            const size_t words = word_counts[w];
-            const size_t count = seedtool_required_events(sources[s], words);
-            if (!count) {
-                /* Not every source offers every word count (Cards doesn't do
-                 * 24, Cards-with-replacement doesn't do 12) - skip those. */
-                continue;
-            }
-            for (size_t i = 0; i < count; ++i) {
-                switch (sources[s]) {
-                case SEEDTOOL_D6:
-                    values[i] = (uint8_t)(1 + i % 6);
-                    break;
-                case SEEDTOOL_D20:
-                    values[i] = (uint8_t)(1 + i % 20);
-                    break;
-                case SEEDTOOL_COIN:
-                    values[i] = (uint8_t)(i % 2);
-                    break;
-                case SEEDTOOL_CARDS:
-                    /* No repeats allowed; count never exceeds the 52-card
-                     * deck, so a straight index is always distinct. */
-                    values[i] = (uint8_t)i;
-                    break;
-                case SEEDTOOL_CARDS_REPLACE:
-                    values[i] = (uint8_t)(i % 5);
-                    break;
-                default:
-                    values[i] = 0;
-                    break;
-                }
-            }
-            seedtool_generated_t generated;
-            const seedtool_result_t ret = seedtool_generate(sources[s], words, values, count, &generated);
-            seedtool_zero(&generated, sizeof(generated));
-            if (ret != SEEDTOOL_OK) {
-                return false;
-            }
-        }
-    }
-    seedtool_zero(values, sizeof(values));
-    return true;
-}
-
-/* A pairing with no required count must not generate from an empty run, and a
- * rejected run must not leave its transcript behind. */
-static bool invalid_runs_do_not_generate(void)
-{
-    const uint8_t values[] = { 1 };
-    const uint8_t bad[] = { 1, 2, 7 };
-    seedtool_generated_t generated;
-    char transcript[8];
-    memset(&generated, 0xa5, sizeof(generated));
-    if (seedtool_generate(SEEDTOOL_CARDS, 24, values, 0, &generated) != SEEDTOOL_EINVAL
-        || seedtool_generate(SEEDTOOL_CARDS_REPLACE, 12, values, 0, &generated) != SEEDTOOL_EINVAL
-        || seedtool_generate(SEEDTOOL_D6, 13, values, 0, &generated) != SEEDTOOL_EINVAL
-        || seedtool_transcript(SEEDTOOL_D6, values, 1, NULL, 8) != SEEDTOOL_EINVAL
-        || seedtool_transcript(SEEDTOOL_D6, values, 1, transcript, 0) != SEEDTOOL_EINVAL
-        || seedtool_transcript(SEEDTOOL_D6, NULL, 1, transcript, sizeof(transcript)) != SEEDTOOL_EINVAL) {
-        return false;
-    }
-    uint8_t run[60];
-    memset(run, 1, sizeof(run));
-    memcpy(run, bad, sizeof(bad));
-    if (seedtool_generate(SEEDTOOL_D6, 12, run, sizeof(run), &generated) != SEEDTOOL_EINVAL) {
-        return false;
-    }
-    for (size_t i = 0; i < sizeof(generated); ++i) {
-        if (((const uint8_t*)&generated)[i]) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /* BIP380's published example (raw(deadbeef)#89f8spxm) and a wpkh() descriptor
  * over the BIP84 vector with BIP389's "<0;1>" step, cross-checked against an
  * independent Python transcription of the spec. Also EINVAL on a character
@@ -482,44 +398,6 @@ static bool descriptor_checksum_matches_bip380_vector(void)
     }
     char tiny[5];
     return seedtool_descriptor_checksum("raw(deadbeef)", tiny, sizeof(tiny)) == SEEDTOOL_ENOSPACE;
-}
-
-/* Every buffer a run passes through (values[], faces[] and the transcript) is
- * sized by SEEDTOOL_MAX_EVENTS or SEEDTOOL_MAX_TRANSCRIPT_LEN and not checked
- * again, so every source's count must fit both: coin binds the event count, D20
- * the transcript length. */
-/* The compile-time half is in seedtool_core.h; the counts are function results,
- * so this asks every source and word count. */
-static bool required_events_fit_the_collection_buffers(void)
-{
-    const seedtool_source_t sources[]
-        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
-    const size_t words[] = { 12, 24 };
-    for (size_t s = 0; s < sizeof(sources) / sizeof(sources[0]); ++s) {
-        for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w) {
-            const size_t required = seedtool_required_events(sources[s], words[w]);
-            if (!required) {
-                continue;
-            }
-            if (required > SEEDTOOL_MAX_EVENTS) {
-                return false;
-            }
-            /* The widest transcript a source can print: its highest face, or
-             * distinct cards. */
-            uint8_t values[SEEDTOOL_MAX_EVENTS];
-            for (size_t i = 0; i < required; ++i) {
-                values[i] = sources[s] == SEEDTOOL_D6 ? 6
-                    : sources[s] == SEEDTOOL_D20      ? 20
-                    : sources[s] == SEEDTOOL_COIN     ? 1
-                                                      : (uint8_t)(i % 52);
-            }
-            char transcript[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-            if (seedtool_transcript(sources[s], values, required, transcript, sizeof(transcript)) != SEEDTOOL_OK) {
-                return false;
-            }
-        }
-    }
-    return true;
 }
 
 /* Vectors from Krux's base32 tests (tests/test_bbqr.py, unpadded), so the
@@ -710,10 +588,7 @@ int main(void)
         TEST(wordlist_completion_is_sound),
         TEST(word_numbers_are_reachable),
         TEST(word_numbers_round_trip_is_sound),
-        TEST(full_entropy_events_generate),
-        TEST(invalid_runs_do_not_generate),
         TEST(descriptor_checksum_matches_bip380_vector),
-        TEST(required_events_fit_the_collection_buffers),
         TEST(bbqr_base32_is_sound),
         TEST(published_vectors_match),
         TEST(account_and_chain_reach_the_path),
