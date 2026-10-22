@@ -8,8 +8,8 @@ The board has two buttons and no select button. In a list, the left button
 moves to the previous item and the right button to the next; both pressed
 together select. Holding one button repeats it. A press is acted on only once
 both buttons are released, so a chord is never mistaken for a step. A numeric
-carousel (a die's face) reads the same two buttons the other way: left
-raises the value, right lowers it, since there the physical button read as
+carousel (a die's face, a word number's digit) reads the same two buttons the
+other way: left raises the value, right lowers it, since there the physical button read as
 "up" raising what is on screen matters more than reusing a list's sense of
 "previous".
 

@@ -153,12 +153,15 @@ static bool enter_word_number(const size_t position, const size_t total, const s
         if (key == KEY_REDRAW) {
             continue;
         }
+        /* KEY_PREV, the physical "up" button, raises the digit, as on
+         * enter_value's carousel: up from 9 is OK, then backspace, then 0
+         * again, and down from 0 is backspace. */
         if (key == KEY_PREV) {
-            on = on ? on - 1 : ring_len - 1;
+            on = on + 1 < ring_len ? on + 1 : 0;
             continue;
         }
         if (key == KEY_NEXT) {
-            on = on + 1 < ring_len ? on + 1 : 0;
+            on = on ? on - 1 : ring_len - 1;
             continue;
         }
 
