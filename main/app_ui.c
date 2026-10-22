@@ -328,10 +328,11 @@ int choose_menu(const char* title, const char* const* items, const size_t count)
 
 
 /* Entry `position` of `total` in a run, on a numeric carousel from `min` to
- * `max`. Returns true with `*value` set, or false when the reader took the way
- * back: a stop on the ring below `min`, since both keys change the value. */
+ * `max`, with the run's bit tally under it when `tally` is not NULL. Returns
+ * true with `*value` set, or false when the reader took the way back: a stop
+ * on the ring below `min`, since both keys change the value. */
 bool enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
-    const unsigned max, unsigned* value)
+    const unsigned max, unsigned* value, const seedtool_tally_t* tally)
 {
     unsigned current = min;
     bool on_back = false;
@@ -343,7 +344,7 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
     for (;;) {
         char shown[16];
         (void)snprintf(shown, sizeof(shown), "%u", current);
-        seedtool_render_value_box(heading, shown, on_back, footer);
+        seedtool_render_value_box(heading, shown, on_back, footer, tally);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:
@@ -381,15 +382,16 @@ bool enter_value(const char* title, const unsigned position, const unsigned tota
 }
 
 /* One coin flip: KEY_PREV ("up") is heads, KEY_NEXT tails, and the chord undoes
- * the last flip. One press per flip, for runs of 128 or 256. Returns true with
- * `*bit` set, or false to step back. */
-bool enter_coin_flip(
-    const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history)
+ * the last flip. One press per flip, for runs of 128 or 256, with the run's
+ * bit tally under the flips when `tally` is not NULL. Returns true with `*bit`
+ * set, or false to step back. */
+bool enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
+    const char* history, const seedtool_tally_t* tally)
 {
     char heading[48];
     (void)snprintf(heading, sizeof(heading), "%s %u/%u", title, position, total);
     for (;;) {
-        seedtool_render_screen(heading, "Heads (up)   Tails (down)", history, COIN_FOOTER);
+        seedtool_render_tally_screen(heading, "Heads (up)   Tails (down)", history, COIN_FOOTER, tally);
         seedtool_display_flush();
         switch (wait_key()) {
         case KEY_SELECT:

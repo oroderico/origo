@@ -21,6 +21,21 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
+/* The entropy a run has taken so far against what its seed needs, in bits.
+ * Counted, not estimated: every entry that counts is a whole number of bits -
+ * a flip one, a D6 roll two, a D20 roll four, a ticket and its die eleven - so
+ * the count is arithmetic the reader can repeat, and says nothing about how
+ * fair the dice were. Drawn as a bar and "done/total bits" in the band under
+ * an entry field. */
+typedef struct {
+    unsigned done;
+    unsigned total;
+} seedtool_tally_t;
+
+/* seedtool_render_screen with the tally under line2; NULL draws none. */
+void seedtool_render_tally_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_tally_t* tally);
+
 /* The opening screen: the logo, centred, and nothing else. */
 void seedtool_render_splash(void);
 
@@ -129,8 +144,10 @@ void seedtool_render_nav_list(
 void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer);
 
 /* One wider box for a value scrolled whole (a die face, a D20 roll) rather
- * than digit by digit. `back` draws the backspace glyph in place of `text`. */
-void seedtool_render_value_box(const char* title, const char* text, bool back, const char* footer);
+ * than digit by digit. `back` draws the backspace glyph in place of `text`;
+ * `tally` draws under the box when not NULL. */
+void seedtool_render_value_box(
+    const char* title, const char* text, bool back, const char* footer, const seedtool_tally_t* tally);
 
 /* A level from 1 to `max` set in place, as the value box is: the box shows
  * "level/max", a row of `max` segments fills to the level, and an arrow is

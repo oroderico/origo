@@ -214,10 +214,11 @@ static bool enter_word_number(const size_t position, const size_t total, const s
 /* A number in [min, max] of up to `max_digits` digits on the word-number
  * keypad. Only digits that keep the number at or below `max` are offered, and
  * Accept only once it is at least `min`, so a number out of range cannot be
- * typed rather than being refused after it has been. Returns true with
+ * typed rather than being refused after it has been. A `tally` fills the
+ * keyboard's thin bar with a run's bits; NULL draws none. Returns true with
  * `*value` set on Accept, false when the reader backed out of the first digit. */
-bool enter_number(
-    const char* title, const size_t max_digits, const uint32_t min, const uint32_t max, uint32_t* value)
+bool enter_number(const char* title, const size_t max_digits, const uint32_t min, const uint32_t max,
+    uint32_t* value, const seedtool_tally_t* tally)
 {
     char digits[NUMBER_MAX_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
@@ -245,7 +246,9 @@ bool enter_number(
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_render_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            /* The bar fills with position - 1 of total, so done + 1. */
+            seedtool_render_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected,
+                tally ? tally->done + 1 : 0, tally ? tally->total : 0);
             seedtool_display_flush();
             switch (wait_key()) {
             case KEY_SELECT:

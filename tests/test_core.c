@@ -170,6 +170,12 @@ static bool die_words_cover_the_wordlist(void)
         if (count > SEEDTOOL_DIE_MAX_ROLLS) {
             return false;
         }
+        /* Each roll is a whole number of bits, and all but the last fall
+         * short of a word: what the tally adds per roll. */
+        const unsigned bits = seedtool_die_bits(die);
+        if (faces != 1u << bits || bits * (count - 1) >= SEEDTOOL_WORD_BITS || bits * count < SEEDTOOL_WORD_BITS) {
+            return false;
+        }
         unsigned hits[SEEDTOOL_WORDLIST_LEN] = { 0 };
         uint8_t rolls[SEEDTOOL_DIE_MAX_ROLLS];
         size_t total = 1;

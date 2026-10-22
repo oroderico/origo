@@ -104,8 +104,10 @@ typedef enum {
     SEEDTOOL_D20,
 } seedtool_die_t;
 
-/* The faces that count (4 or 16) and the rolls a word takes (6 or 3). */
+/* The faces that count (4 or 16), the bits each roll gives (2 or 4; a
+ * word's last roll keeps fewer) and the rolls a word takes (6 or 3). */
 unsigned seedtool_die_faces(seedtool_die_t die);
+unsigned seedtool_die_bits(seedtool_die_t die);
 size_t seedtool_die_rolls_per_word(seedtool_die_t die);
 #define SEEDTOOL_DIE_MAX_ROLLS 6
 

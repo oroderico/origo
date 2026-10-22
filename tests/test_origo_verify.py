@@ -208,7 +208,7 @@ class SeedToolVerifierTests(unittest.TestCase):
 
         # The device's keypad offers only digits that lead to T1..T342, so a
         # ticket out of range cannot be typed at all.
-        self.assertIn("enter_number(title, TICKET_DIGITS, 1, SEEDTOOL_TICKETS, &ticket)", app_source())
+        self.assertIn("enter_number(title, TICKET_DIGITS, 1, SEEDTOOL_TICKETS, &ticket, tally)", app_source())
 
         # The four pairs past 2048, and anything out of range, are refused.
         for bad in ("342:3", "342:6", "343:1", "0:1", "1:7"):

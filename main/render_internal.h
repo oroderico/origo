@@ -64,6 +64,7 @@ typedef enum { TRIANGLE_UP, TRIANGLE_DOWN, TRIANGLE_LEFT, TRIANGLE_RIGHT } trian
  * described where it is defined. */
 void fill_rect(int x, int y, int width, int height, const uint16_t color);
 int glyph_advance(const uint8_t* font, const unsigned char character);
+int text_width(const uint8_t* font, const char* text, const size_t length);
 void draw_glyph(const uint8_t* font, const unsigned char character, const int x, const int y, const uint16_t color);
 void draw_line_at(const uint8_t* font, const char* text, const size_t length, int x, const int y, const uint16_t color);
 void draw_centered_in(
@@ -78,5 +79,9 @@ void draw_triangle(
     const int x, const int y, const int width, const int height, const triangle_dir_t dir, const uint16_t color);
 void draw_border(const int x, const int y, const int width, const int height, const uint16_t color);
 void nav_begin(const seedtool_nav_t* nav, const char* title);
+
+/* render_entry.c: the tally in the band under an entry field; NULL draws
+ * nothing. */
+void draw_tally(const seedtool_tally_t* tally);
 
 #endif

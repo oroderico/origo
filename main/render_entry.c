@@ -1,5 +1,5 @@
-/* The input screens: keyboards, digit and value boxes, levels and
- * Stackbit. Drawn with the primitives in render_internal.h. */
+/* The input screens: keyboards, digit and value boxes, the bit tally, levels
+ * and Stackbit. Drawn with the primitives in render_internal.h. */
 #include "render_internal.h"
 
 #include <stdio.h>
@@ -7,8 +7,8 @@
 
 /* The band under an entry field, in the gap seedtool_render_screen leaves
  * between its second line (ends y=81) and the footer (starts y=111): the
- * brightness level's segments fill it, the keyboard's word bar spans its
- * width, and the value box centres above it. */
+ * brightness level's segments and the bit tally fill it, the keyboard's word
+ * bar spans its width, and the value box centres above it. */
 #define BAND_MARGIN 20
 #define BAND_X BAND_MARGIN
 #define BAND_WIDTH (SEEDTOOL_DISPLAY_WIDTH - 2 * BAND_MARGIN)
@@ -208,7 +208,33 @@ _Static_assert(DIGIT_FIELD_DOWN_Y(DIGIT_FIELD_TOP(BAND_Y)) + DIGIT_ARROW_HEIGHT 
  * the way out on the ring, as the digit field does. */
 #define VALUE_BOX_WIDTH 60
 
-void seedtool_render_value_box(const char* title, const char* text, const bool back, const char* footer)
+/* The tally's count to the right of its bar, in a slot sized for the widest
+ * count it will show, so the bar keeps one length while the count grows. */
+#define TALLY_GAP 8
+
+void draw_tally(const seedtool_tally_t* tally)
+{
+    if (!tally || !tally->total) {
+        return;
+    }
+    const unsigned done = tally->done > tally->total ? tally->total : tally->done;
+    char count[32], widest[32];
+    (void)snprintf(count, sizeof(count), "%u/%u bits", done, tally->total);
+    (void)snprintf(widest, sizeof(widest), "%u/%u bits", tally->total, tally->total);
+    const int slot = text_width(tft_DefaultFont, widest, strlen(widest));
+    const int bar_width = BAND_WIDTH - TALLY_GAP - slot;
+    const int filled = (int)((unsigned)(bar_width - 4) * done / tally->total);
+    if (filled > 0) {
+        fill_rect(BAND_X + 2, BAND_Y + 2, filled, BAND_HEIGHT - 4, COLOR_HIGHLIGHT);
+    }
+    draw_border(BAND_X, BAND_Y, bar_width, BAND_HEIGHT, COLOR_DIM);
+    const int text_x = BAND_X + BAND_WIDTH - text_width(tft_DefaultFont, count, strlen(count));
+    draw_line_at(tft_DefaultFont, count, strlen(count), text_x, BAND_Y + (BAND_HEIGHT - tft_DefaultFont[1]) / 2,
+        COLOR_SOFT);
+}
+
+void seedtool_render_value_box(
+    const char* title, const char* text, const bool back, const char* footer, const seedtool_tally_t* tally)
 {
     seedtool_render_clear();
     draw_centered(FONT_TITLE, title, SCREEN_TITLE_Y);
@@ -228,6 +254,7 @@ void seedtool_render_value_box(const char* title, const char* text, const bool b
     draw_triangle(arrow_x, top, DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_UP, COLOR_WHITE);
     draw_triangle(arrow_x, DIGIT_FIELD_DOWN_Y(top), DIGIT_ARROW_WIDTH, DIGIT_ARROW_HEIGHT, TRIANGLE_DOWN, COLOR_WHITE);
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+    draw_tally(tally);
 }
 
 #define LEVEL_SEGMENT_GAP 4

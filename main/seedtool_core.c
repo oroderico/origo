@@ -138,6 +138,8 @@ seedtool_result_t seedtool_word_ticket(const uint16_t index, unsigned* ticket_ou
 
 unsigned seedtool_die_faces(const seedtool_die_t die) { return die == SEEDTOOL_D6 ? 4 : 16; }
 
+unsigned seedtool_die_bits(const seedtool_die_t die) { return die == SEEDTOOL_D6 ? 2 : 4; }
+
 size_t seedtool_die_rolls_per_word(const seedtool_die_t die) { return die == SEEDTOOL_D6 ? 6 : 3; }
 
 seedtool_result_t seedtool_die_word(
@@ -147,7 +149,7 @@ seedtool_result_t seedtool_die_word(
         return SEEDTOOL_EINVAL;
     }
     const unsigned faces = seedtool_die_faces(die);
-    const unsigned bits = die == SEEDTOOL_D6 ? 2 : 4;
+    const unsigned bits = seedtool_die_bits(die);
     /* What the last roll keeps: whatever of the eleven the others left. */
     const unsigned last_bits = SEEDTOOL_WORD_BITS - bits * (unsigned)(count - 1);
     unsigned index = 0;

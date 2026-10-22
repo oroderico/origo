@@ -116,9 +116,9 @@ seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* c
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor);
 int choose_menu(const char* title, const char* const* items, const size_t count);
 bool enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
-    const unsigned max, unsigned* value);
-bool enter_coin_flip(
-    const char* title, const unsigned position, const unsigned total, unsigned* bit, const char* history);
+    const unsigned max, unsigned* value, const seedtool_tally_t* tally);
+bool enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
+    const char* history, const seedtool_tally_t* tally);
 void hexstr(const uint8_t* bytes, const size_t len, char* output);
 bool page_text_impl(const char* title, const char* text, const bool confirmable, const bool grouped);
 bool page_text(const char* title, const char* text);
@@ -132,8 +132,8 @@ const char* passphrase_layout(const size_t page);
 /* app_words.c */
 bool enter_word(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
     char output[SEEDTOOL_MAX_WORD_LEN + 1]);
-bool enter_number(
-    const char* title, const size_t max_digits, const uint32_t min, const uint32_t max, uint32_t* value);
+bool enter_number(const char* title, const size_t max_digits, const uint32_t min, const uint32_t max,
+    uint32_t* value, const seedtool_tally_t* tally);
 bool join_words(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len);
 bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number);
 bool revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number);

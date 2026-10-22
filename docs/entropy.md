@@ -149,6 +149,14 @@ which faces count — and then, for each word:
    `4 2 1 3 3 2`, `1685  spoon` — to check against the table before it is
    used. Declining throws that word's entries away and asks for them again.
 
+Under each flip, roll and ticket a bar counts the bits taken so far against
+the 128 or 256 the seed needs — `13/128 bits`. It is a count, not a grade:
+every entry that counts is a whole number of bits (a flip one, a D6 roll two,
+a D20 roll four, a ticket and its die eleven), so it says how far the run has
+come and nothing about how fair the dice are. No device can tell that from a
+hundred rolls: a sequence like `1 2 3 4 1 2 3 4` has perfectly even faces and
+no randomness at all, which is why Origo estimates nothing.
+
 After the last word, a review lists every word with what made it, four to a
 page — `01. 4 2 1 3 3 2 spoon`, `01. T57 + die 4 clerk` — to compare with the
 paper in one pass; its arrow returns to the last word. Then the loose coin
