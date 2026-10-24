@@ -3,9 +3,9 @@
 How dice, coins and SeedPicker's tickets become a mnemonic, a word at a time,
 each word checkable against a printed table.
 
-**Print [the worksheet](worksheet.pdf)** before a run: the rules and the
-faces-to-bits tables on one page, a grid to record the run on the next, then
-all 2048 words with the coin flips, D6 rolls, D20 rolls and SeedPicker ticket
+**Print [the worksheet](worksheet.pdf)** before a run: a guide to how each
+method is done and how its entries convert to a word number by hand, a grid to
+record the run, then all 2048 words with the coin flips, D6 rolls, D20 rolls and SeedPicker ticket
 that make each, so any word is checked by eye with no arithmetic. Once a run is
 written on it, the sheet is the seed.
 
