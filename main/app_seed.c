@@ -93,12 +93,12 @@ static bool confirm_word(const unsigned position, const unsigned total, const ui
  * own state for one run - a die's rolls - or NULL. `intro` opens the run and
  * returns whether the reader started it; `enter` makes word `position`, the
  * run's bits before it in `tally`, and returns false when the reader backs out
- * of its first step; `made` writes what made a word, for its confirmation and
- * for the review of the whole run. */
+ * of its first step; `made` writes what made a word, for its confirmation and,
+ * `compact`, for a row of the review of the whole run. */
 typedef struct {
     bool (*intro)(size_t words);
     bool (*enter)(void* run, unsigned position, unsigned total, const seedtool_tally_t* tally, uint16_t* index_out);
-    void (*made)(const void* run, unsigned position, uint16_t index, char* out, size_t out_len);
+    void (*made)(const void* run, unsigned position, uint16_t index, bool compact, char* out, size_t out_len);
     /* Redoing a word, and what that throws away, for confirm_word. */
     const char* verb;
     const char* lost;
@@ -148,10 +148,12 @@ static bool enter_flipped_word(
 }
 
 /* The eleven flips behind a word, read back from its index. */
-static void flips_made(const void* run, const unsigned position, const uint16_t index, char* out, const size_t out_len)
+static void flips_made(const void* run, const unsigned position, const uint16_t index, const bool compact, char* out,
+    const size_t out_len)
 {
     (void)run;
     (void)position;
+    (void)compact;
     size_t b = 0;
     for (; b < COIN_WORD_BITS && b + 1 < out_len; ++b) {
         out[b] = (char)('0' + ((index >> (COIN_WORD_BITS - 1 - b)) & 1u));
@@ -212,8 +214,11 @@ static bool enter_rolled_word(
     return true;
 }
 
-/* A word's rolls, spaced so a D20's two-digit faces stay apart. */
-static void rolls_made(const void* run, const unsigned position, const uint16_t index, char* out, const size_t out_len)
+/* A word's rolls, separated by commas so a D20's two-digit faces stay apart:
+ * "4, 2, 1, 3, 3, 2", or "4,2,1,3,3,2" in a review row, which six spaced D6
+ * rolls and the widest word overrun. */
+static void rolls_made(const void* run, const unsigned position, const uint16_t index, const bool compact, char* out,
+    const size_t out_len)
 {
     (void)index;
     const dice_run_t* const dice = run;
@@ -221,7 +226,7 @@ static void rolls_made(const void* run, const unsigned position, const uint16_t 
     out[0] = '\0';
     for (size_t r = 0; r < seedtool_die_rolls_per_word(dice->die) && used < out_len; ++r) {
         const int written = snprintf(
-            out + used, out_len - used, "%s%u", r ? " " : "", (unsigned)dice->rolls[position - 1][r]);
+            out + used, out_len - used, "%s%u", !r ? "" : compact ? "," : ", ", (unsigned)dice->rolls[position - 1][r]);
         if (written < 0) {
             break;
         }
@@ -279,14 +284,16 @@ static bool enter_ticket_word(
 }
 
 /* The ticket and die behind a word, recovered from its index: each word has
- * exactly one pair. */
-static void ticket_made(const void* run, const unsigned position, const uint16_t index, char* out, const size_t out_len)
+ * exactly one pair. "T57 + die 4", or "T57+4" in a review row, the notation of
+ * SeedPicker's form, which "T195 + die 3 mushroom" overruns. */
+static void ticket_made(const void* run, const unsigned position, const uint16_t index, const bool compact, char* out,
+    const size_t out_len)
 {
     (void)run;
     (void)position;
     unsigned ticket = 0, die = 0;
     seedtool_require(seedtool_word_ticket(index, &ticket, &die) == SEEDTOOL_OK);
-    (void)snprintf(out, out_len, "T%u + die %u", ticket, die);
+    (void)snprintf(out, out_len, compact ? "T%u+%u" : "T%u + die %u", ticket, die);
     seedtool_zero(&ticket, sizeof(ticket));
     seedtool_zero(&die, sizeof(die));
 }
@@ -307,7 +314,7 @@ static bool review_words(
         const size_t page = page_shown(cursor, pages);
         for (size_t i = 0; i < 4 && page * 4 + i < count; ++i) {
             const size_t w = page * 4 + i;
-            source->made(run, (unsigned)(w + 1), indices[w], made, sizeof(made));
+            source->made(run, (unsigned)(w + 1), indices[w], true, made, sizeof(made));
             (void)snprintf(rows[i], sizeof(rows[i]), "%02u. %s %s", (unsigned)(w + 1), made, seedtool_word(indices[w]));
         }
         seedtool_zero(made, sizeof(made));
@@ -365,7 +372,7 @@ static bool pick_words(const size_t words, const word_source_t* source, void* ru
                 reopen = true;
                 continue;
             }
-            source->made(run, (unsigned)(w + 1), index, made, sizeof(made));
+            source->made(run, (unsigned)(w + 1), index, false, made, sizeof(made));
             const bool accepted
                 = confirm_word((unsigned)(w + 1), (unsigned)word_count, index, made, source->verb, source->lost);
             seedtool_zero(made, sizeof(made));

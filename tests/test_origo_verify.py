@@ -233,9 +233,9 @@ class SeedToolVerifierTests(unittest.TestCase):
         # vector, so the packing is fixed to something outside this project.
         self.assertTrue(run("d6", [1] * 66, "0000000").rstrip().endswith(self.MNEMONIC))
         self.assertTrue(run("d20", [1] * 69, "000").rstrip().endswith(self.MNEMONIC_24))
-        self.assertIn("word  1: 4 4 4 4 4 4  2048  zoo", run("d6", [4] * 66, "0000000"))
-        self.assertIn("word  1: 4 4 4 4 4 2  2047  zone", run("d6", [4, 4, 4, 4, 4, 2] + [1] * 60, "0000000"))
-        self.assertIn("word  1: 16 1 10  1925  vacuum", run("d20", [16, 1, 10] + [1] * 30, "0000000"))
+        self.assertIn("word  1: 4, 4, 4, 4, 4, 4  2048  zoo", run("d6", [4] * 66, "0000000"))
+        self.assertIn("word  1: 4, 4, 4, 4, 4, 2  2047  zone", run("d6", [4, 4, 4, 4, 4, 2] + [1] * 60, "0000000"))
+        self.assertIn("word  1: 16, 1, 10  1925  vacuum", run("d20", [16, 1, 10] + [1] * 30, "0000000"))
 
         # The faces that do not count are rolled again, never entered.
         for die, rolls in (("d6", [5] + [1] * 65), ("d20", [17] + [1] * 32), ("d6", [1] * 65)):

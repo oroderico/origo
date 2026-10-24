@@ -33,7 +33,7 @@ GAP_COLOUR = b"\x2b\x2b\x2b"
 WALLET = "t" + "snss" + "ns" + "sssss" * 11 + "n" * 7 + "nns"
 SCREENS = (
     ("wallet", WALLET),
-    # A D6 word's six rolls, 4 2 1 3 3 2, at its confirmation: New Seed, From
+    # A D6 word's six rolls, 4, 2, 1, 3, 3, 2, at its confirmation: New Seed, From
     # entropy, D6 dice, 12 words, Start, then each face raised from 1.
     ("dice", "tsssss" + "ppps" + "ps" + "s" + "pps" + "pps" + "ps"),
     ("keyboard", "tnsss"),
