@@ -31,7 +31,7 @@ static bool flip_bits(
             history[f] = (char)('0' + bits[f]);
         }
         unsigned bit = 0;
-        const seedtool_tally_t so_far = tally ? (seedtool_tally_t){ tally->done + (unsigned)i, tally->total }
+        const seedtool_tally_t so_far = tally ? (seedtool_tally_t){ .done = tally->done + (unsigned)i, .total = tally->total }
                                               : (seedtool_tally_t){ 0 };
         const bool flipped
             = enter_coin_flip(title, (unsigned)(i + 1), (unsigned)count, &bit, history, tally ? &so_far : NULL);
@@ -199,7 +199,8 @@ static bool enter_rolled_word(
         unsigned face = 1;
         /* Only the last roll keeps fewer bits, and it adds them as the word
          * ends, so every roll shown is preceded by whole ones. */
-        const seedtool_tally_t so_far = { tally->done + (unsigned)r * seedtool_die_bits(dice->die), tally->total };
+        const seedtool_tally_t so_far
+            = { .done = tally->done + (unsigned)r * seedtool_die_bits(dice->die), .total = tally->total };
         if (!enter_value(
                 title, (unsigned)(r + 1), (unsigned)count, 1, seedtool_die_faces(dice->die), &face, &so_far)) {
             if (!r) {
@@ -358,7 +359,7 @@ static bool pick_words(const size_t words, const word_source_t* source, void* ru
     for (;;) {
         while (w < word_count) {
             uint16_t index = indices[w];
-            const seedtool_tally_t tally = { (unsigned)w * SEEDTOOL_WORD_BITS, entropy_bits };
+            const seedtool_tally_t tally = { .done = (unsigned)w * SEEDTOOL_WORD_BITS, .total = entropy_bits };
             if (reopen) {
                 reopen = false;
             } else if (!source->enter(run, (unsigned)(w + 1), (unsigned)word_count, &tally, &index)) {
@@ -395,7 +396,7 @@ static bool pick_words(const size_t words, const word_source_t* source, void* ru
         }
 
         /* The loose bits; backing out of the first returns to the review. */
-        const seedtool_tally_t tally = { (unsigned)word_count * SEEDTOOL_WORD_BITS, entropy_bits };
+        const seedtool_tally_t tally = { .done = (unsigned)word_count * SEEDTOOL_WORD_BITS, .total = entropy_bits };
         if (!flip_bits("Final bits", tail, tail_count, 0, &tally)) {
             continue;
         }

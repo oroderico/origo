@@ -8,6 +8,9 @@ compromised display, malicious firmware, biased physical dice/coins/tickets,
 shoulder surfing, mistakes copying entropy, or a Compact SeedQR photographed
 by anyone other than the person who asked to see it. Reproduce the result on a
 second independent implementation before funding an address.
+`Find by ending` can say an address is this wallet's; it cannot say an address
+that is not found belongs to no one, since it searches only the type, account
+and passphrase now set.
 
 Nor does it defend against someone reading the board's memory directly. There
 is no secure element, no secure boot, no flash encryption, and JTAG is not

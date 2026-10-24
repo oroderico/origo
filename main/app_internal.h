@@ -22,6 +22,10 @@
 #define MAX_PAGE_LINES 24
 #define MAX_LINE_CHARS 48
 #define PASSPHRASE_TAIL 24
+/* Characters typed to find an address by its ending: the same six the address
+ * list keeps of each end. Bech32's 30 bits make a chance match among the 20,000
+ * addresses searched about one in 50,000. */
+#define ADDRESS_ENDING_LEN 6
 
 /* The first ADDRESS_SHOWN_ROWS addresses are derived and listed; "Go to index"
  * derives any other up to SEEDTOOL_MAX_ADDRESS_INDEX on its own. */
@@ -140,6 +144,7 @@ bool revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count,
 bool restore_mnemonic(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number,
     char* mnemonic, const size_t mnemonic_len, bool resume);
 bool enter_passphrase_once(char* output, const size_t output_len);
+bool enter_address_ending(const bool bech32, char output[ADDRESS_ENDING_LEN + 1]);
 
 /* app_wallet.c */
 void show_wallet_data(const char* mnemonic);

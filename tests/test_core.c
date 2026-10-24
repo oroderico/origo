@@ -632,6 +632,58 @@ static bool address_ranges_are_consistent(void)
     return true;
 }
 
+/* Find by ending reaches both branches and every type, reports the first
+ * match, case and all, and finds nothing for an ending no address in the range
+ * has. Endings from tools/origo_verify.py inspect for the BIP39 test mnemonic,
+ * so the search is held to an independent derivation. */
+static bool find_address_reaches_both_branches(void)
+{
+    const seedtool_root_t root = vector_root();
+    static const struct {
+        seedtool_address_type_t type;
+        const char* ending;
+        seedtool_chain_t chain;
+        uint32_t index;
+    } cases[] = {
+        { SEEDTOOL_BIP84, "a00fd9", SEEDTOOL_RECEIVE, 37 }, /* bc1q5nlgay52...a00fd9 */
+        { SEEDTOOL_BIP84, "3agj6j", SEEDTOOL_CHANGE, 5 }, /* bc1qu3936zt3...3agj6j */
+        { SEEDTOOL_BIP86, "ftnfrv", SEEDTOOL_RECEIVE, 37 }, /* bc1pr84ywlf3...ftnfrv */
+        { SEEDTOOL_BIP86, "rsf345hm", SEEDTOOL_CHANGE, 5 }, /* bc1ps8a93qnn...rsf345hm */
+        { SEEDTOOL_BIP44, "Lj5AcCsbi", SEEDTOOL_RECEIVE, 37 }, /* 17E2kxsHFG...Lj5AcCsbi */
+        { SEEDTOOL_BIP49, "eisYacRmr", SEEDTOOL_CHANGE, 5 }, /* 3AvPKjZV3G...eisYacRmr */
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        seedtool_chain_t chain = SEEDTOOL_RECEIVE;
+        uint32_t index = 0;
+        bool found = false;
+        CHECK(seedtool_find_address(&root, cases[i].type, 0, cases[i].ending, 0, 40, &chain, &index, &found)
+            == SEEDTOOL_OK);
+        CHECK(found && chain == cases[i].chain && index == cases[i].index);
+        /* A window that stops short of the index does not reach it. */
+        CHECK(seedtool_find_address(&root, cases[i].type, 0, cases[i].ending, 0, cases[i].index, &chain, &index,
+                  &found)
+            == SEEDTOOL_OK);
+        CHECK(!found);
+    }
+    seedtool_chain_t chain = SEEDTOOL_RECEIVE;
+    uint32_t index = 0;
+    bool found = true;
+    /* Case matters in base58: the same letters lowercased are another address. */
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP44, 0, "lj5accsbi", 0, 40, &chain, &index, &found) == SEEDTOOL_OK);
+    CHECK(!found);
+    /* A window starting past zero still finds what is in it. */
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, "kjplp", 100, 30, &chain, &index, &found) == SEEDTOOL_OK);
+    CHECK(found && chain == SEEDTOOL_CHANGE && index == 120); /* bc1q8tfsax...3kjplp */
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, "", 0, 1, &chain, &index, &found) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, NULL, 0, 1, &chain, &index, &found) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, "a00fd9", 0, 0, &chain, &index, &found) == SEEDTOOL_EINVAL);
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, "a00fd9", SEEDTOOL_MAX_ADDRESS_INDEX, 2, &chain, &index,
+              &found)
+        == SEEDTOOL_EINVAL);
+    CHECK(seedtool_find_address(&root, SEEDTOOL_BIP84, 0, "a00fd9", 0, 1, NULL, &index, &found) == SEEDTOOL_EINVAL);
+    return true;
+}
+
 /* The fingerprint the BIP84 vector's key origin states, and one that moves
  * with the passphrase: the wallet title is the reader's only sign of which
  * seed is in force. */
@@ -671,6 +723,7 @@ int main(void)
         TEST(legacy_and_nested_vectors_match),
         TEST(fingerprint_follows_the_passphrase),
         TEST(address_ranges_are_consistent),
+        TEST(find_address_reaches_both_branches),
     };
     const int ret = run_tests("core", tests, sizeof(tests) / sizeof(tests[0]));
     wally_cleanup(0);

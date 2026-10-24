@@ -518,3 +518,75 @@ bool enter_passphrase_once(char* output, const size_t output_len)
         }
     }
 }
+
+/* The last ADDRESS_ENDING_LEN characters of an address, to look it up: on the
+ * passphrase keyboard's pages, with only the characters an address of this
+ * type can hold reachable. Bech32 is lowercase letters and digits (no 1, b, i
+ * or o after the separator); base58 is both cases and digits less 0, O, I and
+ * l, and its case matters. Accept only once all the characters are in, so a
+ * short ending cannot match by chance. Returns true on Accept, false on
+ * backspace with nothing left to delete. */
+bool enter_address_ending(const bool bech32, char output[ADDRESS_ENDING_LEN + 1])
+{
+    static const char BECH32[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    static const char BASE58[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const char* const alphabet = bech32 ? BECH32 : BASE58;
+    /* Bech32 has no capitals, so its keyboard skips that page; neither has
+     * punctuation. */
+    static const size_t bech32_pages[] = { 0, 2 };
+    static const size_t base58_pages[] = { 0, 1, 2 };
+    const size_t* const pages = bech32 ? bech32_pages : base58_pages;
+    const size_t page_count = bech32 ? ARRAY_LEN(bech32_pages) : ARRAY_LEN(base58_pages);
+    static const char* const page_names[PASSPHRASE_PAGES] = { "abc", "ABC", "123", "#+=" };
+
+    size_t used = strlen(output), page = 0;
+    size_t selected = seedtool_layout_center(passphrase_layout(pages[0]));
+    for (;;) {
+        const char* const layout = passphrase_layout(pages[page]);
+        const size_t keys = seedtool_layout_keys(layout);
+        bool enabled[32] = { false };
+        seedtool_require(keys <= ARRAY_LEN(enabled));
+        for (size_t i = 0; i < keys; ++i) {
+            const char key = seedtool_layout_key(layout, i);
+            enabled[i] = key == SEEDTOOL_KEY_BACKSPACE || (key == SEEDTOOL_KEY_PAGE && page_count > 1)
+                || (key == SEEDTOOL_KEY_ACCEPT ? used == ADDRESS_ENDING_LEN
+                                               : used < ADDRESS_ENDING_LEN && key != ' ' && strchr(alphabet, key));
+        }
+        /* With the ending complete, the cursor goes to Accept. */
+        selected = used == ADDRESS_ENDING_LEN ? layout_key_index(layout, SEEDTOOL_KEY_ACCEPT)
+                                              : nearest_enabled(enabled, keys, selected);
+        char title[40];
+        (void)snprintf(title, sizeof(title), "Last %u %s %u/%u", (unsigned)ADDRESS_ENDING_LEN,
+            page_names[pages[page]], (unsigned)used, (unsigned)ADDRESS_ENDING_LEN);
+        seedtool_render_keyboard(title, used ? output : "-", layout, enabled, selected, 0, 0);
+        seedtool_display_flush();
+        switch (wait_key()) {
+        case KEY_PREV:
+            selected = step_key(enabled, keys, selected, false);
+            continue;
+        case KEY_NEXT:
+            selected = step_key(enabled, keys, selected, true);
+            continue;
+        case KEY_SELECT:
+            break;
+        default:
+            continue;
+        }
+        const char pressed = seedtool_layout_key(layout, selected);
+        if (pressed == SEEDTOOL_KEY_ACCEPT) {
+            return true;
+        }
+        if (pressed == SEEDTOOL_KEY_PAGE) {
+            page = (page + 1) % page_count;
+            selected = seedtool_layout_center(passphrase_layout(pages[page]));
+        } else if (pressed == SEEDTOOL_KEY_BACKSPACE) {
+            if (!used) {
+                return false;
+            }
+            output[--used] = '\0';
+        } else if (used < ADDRESS_ENDING_LEN) {
+            output[used++] = pressed;
+            output[used] = '\0';
+        }
+    }
+}

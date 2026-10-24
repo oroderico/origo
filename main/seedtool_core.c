@@ -382,19 +382,28 @@ done:
     return ret;
 }
 
-/* Address at chain/index below an account node: public, non-hardened
- * derivation only, cheap enough to repeat per address. */
-static seedtool_result_t address_from_account(const struct ext_key* account, const seedtool_address_type_t type,
-    const seedtool_chain_t chain, const uint32_t index, char* output, const size_t output_len)
+/* The receive or change node below an account node, derived once for a run of
+ * addresses rather than once per address: each public derivation is a point
+ * multiplication, the cost of an address. */
+static seedtool_result_t chain_from_account(
+    const struct ext_key* account, const seedtool_chain_t chain, struct ext_key* chain_key)
+{
+    return bip32_key_from_parent(account, (uint32_t)chain, BIP32_FLAG_KEY_PUBLIC, chain_key) == WALLY_OK
+        ? SEEDTOOL_OK
+        : SEEDTOOL_ECRYPTO;
+}
+
+/* Address at `index` below a chain node: one public, non-hardened derivation,
+ * cheap enough to repeat per address. */
+static seedtool_result_t address_from_chain(const struct ext_key* chain_key, const seedtool_address_type_t type,
+    const uint32_t index, char* output, const size_t output_len)
 {
     uint8_t script[WALLY_SCRIPTPUBKEY_P2TR_LEN];
     struct ext_key child;
     char* address = NULL;
     size_t script_len = 0;
-    const uint32_t path[] = { (uint32_t)chain, index };
     seedtool_result_t ret = SEEDTOOL_OK;
-    if (bip32_key_from_parent_path(account, path, sizeof(path) / sizeof(path[0]), BIP32_FLAG_KEY_PUBLIC, &child)
-        != WALLY_OK) {
+    if (bip32_key_from_parent(chain_key, index, BIP32_FLAG_KEY_PUBLIC, &child) != WALLY_OK) {
         ret = SEEDTOOL_ECRYPTO;
         goto done;
     }
@@ -460,15 +469,57 @@ seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, const 
         || (chain != SEEDTOOL_RECEIVE && chain != SEEDTOOL_CHANGE)) {
         return SEEDTOOL_EINVAL;
     }
-    struct ext_key account;
+    struct ext_key account, chain_key;
     seedtool_result_t ret = account_from_root(root, type, account_index, &account);
+    if (ret == SEEDTOOL_OK) {
+        ret = chain_from_account(&account, chain, &chain_key);
+    }
     for (uint32_t i = 0; ret == SEEDTOOL_OK && i < count; ++i) {
-        ret = address_from_account(&account, type, chain, first + i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
+        ret = address_from_chain(&chain_key, type, first + i, addresses[i], SEEDTOOL_MAX_ADDRESS_LEN);
     }
     if (ret != SEEDTOOL_OK) {
         seedtool_zero(addresses, count * SEEDTOOL_MAX_ADDRESS_LEN);
     }
     seedtool_zero(&account, sizeof(account));
+    seedtool_zero(&chain_key, sizeof(chain_key));
+    return ret;
+}
+
+seedtool_result_t seedtool_find_address(const seedtool_root_t* root, const seedtool_address_type_t type,
+    const uint32_t account_index, const char* ending, const uint32_t first, const uint32_t count,
+    seedtool_chain_t* chain_out, uint32_t* index_out, bool* found_out)
+{
+    const size_t ending_len = ending ? strnlen(ending, SEEDTOOL_MAX_ADDRESS_LEN) : 0;
+    if (!ending_len || ending_len >= SEEDTOOL_MAX_ADDRESS_LEN || !chain_out || !index_out || !found_out || !count
+        || first > SEEDTOOL_MAX_ADDRESS_INDEX || count > SEEDTOOL_MAX_ADDRESS_INDEX + 1 - first
+        || !valid_account(type, account_index)) {
+        return SEEDTOOL_EINVAL;
+    }
+    *found_out = false;
+    static const seedtool_chain_t chains[] = { SEEDTOOL_RECEIVE, SEEDTOOL_CHANGE };
+    struct ext_key account, chain_keys[2];
+    char address[SEEDTOOL_MAX_ADDRESS_LEN];
+    seedtool_result_t ret = account_from_root(root, type, account_index, &account);
+    for (size_t c = 0; ret == SEEDTOOL_OK && c < 2; ++c) {
+        ret = chain_from_account(&account, chains[c], &chain_keys[c]);
+    }
+    /* Index by index, receive then change, so the addresses a wallet has
+     * actually used, low on both branches, are reached first. */
+    for (uint32_t i = 0; ret == SEEDTOOL_OK && !*found_out && i < count; ++i) {
+        for (size_t c = 0; ret == SEEDTOOL_OK && c < 2; ++c) {
+            ret = address_from_chain(&chain_keys[c], type, first + i, address, sizeof(address));
+            const size_t len = ret == SEEDTOOL_OK ? strlen(address) : 0;
+            if (len >= ending_len && !strcmp(address + len - ending_len, ending)) {
+                *chain_out = chains[c];
+                *index_out = first + i;
+                *found_out = true;
+                break;
+            }
+        }
+    }
+    seedtool_zero(&account, sizeof(account));
+    seedtool_zero(chain_keys, sizeof(chain_keys));
+    seedtool_zero(address, sizeof(address));
     return ret;
 }
 
