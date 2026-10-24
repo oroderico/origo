@@ -3,6 +3,12 @@
 How dice, coins and SeedPicker's tickets become a mnemonic, a word at a time,
 each word checkable against a printed table.
 
+**Print [the worksheet](worksheet.pdf)** before a run: the rules and the
+faces-to-bits tables on one page, a grid to record the run on the next, then
+all 2048 words with the coin flips, D6 rolls, D20 rolls and SeedPicker ticket
+that make each, so any word is checked by eye with no arithmetic. Once a run is
+written on it, the sheet is the seed.
+
 ## Every word from a table
 
 The BIP39 wordlist is exactly 2048 long, so eleven bits name one word. Every
@@ -176,6 +182,11 @@ guessed — and the firmware never picks among the 128 or 8 otherwise-valid
 endings on its own. Every method above ends in this same arithmetic.
 
 ## Checking a run
+
+By hand, each word is a row of [the worksheet](worksheet.pdf): find the word
+the device shows and read its row under the method's column. A D6 row ends in a
+pair such as `1-2`, a D20 row in one such as `9-10`: the last roll keeps only
+its first bits, so either face of the pair makes the word.
 
 `tools/origo_verify.py` reproduces each method from what was written down,
 word by word, printing each word's entries, number and word before the

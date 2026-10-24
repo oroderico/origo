@@ -95,6 +95,7 @@ together select**. Going back is the arrow at the top left of the screen.
 |---|---|
 | [Why Origo](docs/why.md) | What it replaces, and the RNG failure it is built to rule out |
 | [Entropy](docs/entropy.md) | How dice, coins and tickets become words, and how to check each one |
+| [Worksheet](docs/worksheet.pdf) | The tables to print: every word with the flips, rolls and ticket that make it |
 | [Using Origo](docs/using.md) | Controls, entering words and passphrases, the wallet viewer, backup export |
 | [Build, flash and simulate](docs/build.md) | Reproducible builds, the image audit, the simulator and tests |
 | [Verifying Origo](docs/verify.md) | `origo_verify.py`, the QR encoder, the logo and fonts |
