@@ -261,11 +261,13 @@ bool enter_number(const char* title, const size_t max_digits, const uint32_t min
             case KEY_SELECT:
                 picked = true;
                 break;
+            /* KEY_PREV, the physical "up" button, raises the digit under the
+             * cursor, as on the digit and dice carousels: up from 5 is 6. */
             case KEY_PREV:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
                 break;
             case KEY_NEXT:
-                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, true);
+                selected = step_key(enabled, WORD_NUMBER_KEYS, selected, false);
                 break;
             default:
                 break;
