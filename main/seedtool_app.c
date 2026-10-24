@@ -76,8 +76,9 @@ void show_settings_menu(void)
                 "record entropy independently. The two buttons sit one above the other; top and bottom move, both "
                 "together select. Origo is derived from parts of Blockstream Jade (github.com/Blockstream/Jade), "
                 "not affiliated with or endorsed by "
-                "Blockstream. Several UI elements - entropy quality, BBQr export, Compact SeedQR, Zoomed Regions "
-                "and Stackbit 1248 - are adapted from Krux (github.com/selfcustody/krux).");
+                "Blockstream. Several UI elements - BBQr export, Compact SeedQR, Zoomed Regions and Stackbit "
+                "1248 - are adapted from Krux (github.com/selfcustody/krux). The ticket method is SeedPicker's "
+                "(seedpicker.net), not affiliated either.");
         }
     }
 }

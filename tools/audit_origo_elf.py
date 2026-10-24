@@ -65,7 +65,8 @@ def linked_map_text(map_text):
 
 REQUIRED = {
     "app_main",
-    "seedtool_generate",
+    "seedtool_die_word",
+    "seedtool_ticket_word",
     "seedtool_complete_checksum",
     "seedtool_mainnet_addresses",
     "seedtool_account_xpub",

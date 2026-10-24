@@ -18,10 +18,6 @@
 
 #define SESSION_TIMEOUT_MS (10 * 60 * 1000)
 #define WARNING_TIMEOUT_MS (60 * 1000)
-/* Bits of slack below the minimum before a run is flagged, on top of the
- * Miller-Madow correction (seedtool_dice_entropy_bias_bits). Krux's
- * ENTROPY_TOLERANCE. */
-#define DICE_ENTROPY_TOLERANCE 4
 #define SPLASH_MS 2500
 #define MAX_PAGE_LINES 24
 #define MAX_LINE_CHARS 48
@@ -60,9 +56,15 @@ _Static_assert(ADDRESS_SHOWN_ROWS <= SEEDTOOL_MAX_ADDRESS_INDEX + 1, "more addre
 _Static_assert(ADDRESS_INDEX_DIGITS == 4 && SEEDTOOL_MAX_ADDRESS_INDEX == 9999,
     "the address-index keypad width and the derived address range must be changed together");
 
-/* enter_number's buffer, sized for the wider of its two uses. */
+/* A SeedPicker ticket, T1..T342, on the same keypad: three digits reach it. */
+#define TICKET_DIGITS 3
+_Static_assert(TICKET_DIGITS == 3 && SEEDTOOL_TICKETS >= 100 && SEEDTOOL_TICKETS <= 999,
+    "the ticket keypad width and the ticket count must be changed together");
+
+/* enter_number's buffer, sized for the widest of its uses. */
 #define NUMBER_MAX_DIGITS 4
-_Static_assert(ACCOUNT_DIGITS <= NUMBER_MAX_DIGITS && ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS,
+_Static_assert(ACCOUNT_DIGITS <= NUMBER_MAX_DIGITS && ADDRESS_INDEX_DIGITS <= NUMBER_MAX_DIGITS
+        && TICKET_DIGITS <= NUMBER_MAX_DIGITS,
     "enter_number holds NUMBER_MAX_DIGITS digits");
 
 /* The word-number field draws one box per digit, and the renderer bounds how
@@ -73,7 +75,6 @@ _Static_assert(SEEDTOOL_MAX_WORD_DIGITS <= SEEDTOOL_DIGIT_BOXES_MAX,
 
 #define PASSPHRASE_PAGES SEEDTOOL_PASSPHRASE_PAGES
 
-typedef void (*format_fn)(unsigned value, char* output, size_t output_len);
 
 extern uint64_t last_action;
 
@@ -102,11 +103,8 @@ bool show_qr(const bool drawn);
 void screen_text(const char* title, const char* line1, const char* line2, const char* footer);
 seedtool_key_t wait_key(void);
 seedtool_key_t wait_key_or_tick(const uint32_t frame_ms, bool* const ticked);
-int nav_screen(const char* title, const char* one, const char* two, const char* label, const bool start_on_back,
-    const seedtool_progress_t* progress);
+int nav_screen(const char* title, const char* one, const char* two, const char* label, const bool start_on_back);
 bool nav_acknowledge(const char* title, const char* one, const char* two, const char* label, const bool start_on_back);
-bool nav_dice_confirm(const char* title, const char* one, const char* two, const char* label, const bool start_on_back,
-    const seedtool_progress_t* progress);
 void notice(const char* title, const char* one, const char* two);
 int choose_nav(const char* title, const char* fingerprint, const char* const* items, const size_t count,
     const char* confirm, const bool confirm_enabled, const bool back, size_t* const cursor);
@@ -118,12 +116,9 @@ seedtool_nav_t page_nav(const size_t position, const size_t pages, const char* c
 int choose_menu_at(const char* title, const char* const* items, const size_t count, size_t* const cursor);
 int choose_menu(const char* title, const char* const* items, const size_t count);
 bool enter_value(const char* title, const unsigned position, const unsigned total, const unsigned min,
-    const unsigned max, unsigned* value, const format_fn format, const bool* allowed, const char* history,
-    const seedtool_progress_t* progress);
+    const unsigned max, unsigned* value, const seedtool_tally_t* tally);
 bool enter_coin_flip(const char* title, const unsigned position, const unsigned total, unsigned* bit,
-    const char* history, const seedtool_progress_t* progress);
-bool enter_card(const unsigned position, const unsigned total, unsigned* value, const bool* available,
-    const char* history, const seedtool_progress_t* progress);
+    const char* history, const seedtool_tally_t* tally);
 void hexstr(const uint8_t* bytes, const size_t len, char* output);
 bool page_text_impl(const char* title, const char* text, const bool confirmable, const bool grouped);
 bool page_text(const char* title, const char* text);
@@ -137,7 +132,8 @@ const char* passphrase_layout(const size_t page);
 /* app_words.c */
 bool enter_word(const size_t position, const size_t total, const seedtool_wordset_t* allowed,
     char output[SEEDTOOL_MAX_WORD_LEN + 1]);
-bool enter_number(const char* title, const size_t max_digits, uint32_t* value);
+bool enter_number(const char* title, const size_t max_digits, const uint32_t min, const uint32_t max,
+    uint32_t* value, const seedtool_tally_t* tally);
 bool join_words(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, char* mnemonic, const size_t mnemonic_len);
 bool enter_mnemonic_words(const size_t count, char words[][SEEDTOOL_MAX_WORD_LEN + 1], bool* const by_number);
 bool revisit_prefix(char words[][SEEDTOOL_MAX_WORD_LEN + 1], const size_t count, bool* const by_number);

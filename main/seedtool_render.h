@@ -21,26 +21,20 @@
 void seedtool_render_clear(void);
 void seedtool_render_screen(const char* title, const char* line1, const char* line2, const char* footer);
 
-/* The entropy quality bar under an entry screen: rolls against the minimum on
- * top, Shannon entropy against the bits needed below. `warn` marks a pattern;
- * `complete` colours the outline once both minimums are met. Adapted from Krux
- * (src/krux/pages/new_mnemonic/dice_rolls.py). */
+/* The entropy a run has taken so far against what its seed needs, in bits.
+ * Counted, not estimated: every entry that counts is a whole number of bits -
+ * a flip one, a D6 roll two, a D20 roll four, a ticket and its die eleven - so
+ * the count is arithmetic the reader can repeat, and says nothing about how
+ * fair the dice were. Drawn as a bar and "done/total bits" in the band under
+ * an entry field. */
 typedef struct {
-    int rolls_pct; /* 0-100 */
-    int entropy_pct; /* 0-100 */
-    bool warn;
-    bool complete;
-    /* entropy_pct as bits, for a screen that prints the number. `graded` says
-     * there is one: zero bits is a real reading at the start of a run, so it
-     * cannot be the sentinel. */
-    bool graded;
-    int bits;
-} seedtool_progress_t;
+    unsigned done;
+    unsigned total;
+} seedtool_tally_t;
 
-/* Draws the same screen as seedtool_render_screen, then the bar on top of it
- * in the gap between line2 and the footer, when `progress` is not NULL. */
-void seedtool_render_dice_screen(
-    const char* title, const char* line1, const char* line2, const char* footer, const seedtool_progress_t* progress);
+/* seedtool_render_screen with the tally under line2; NULL draws none. */
+void seedtool_render_tally_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_tally_t* tally);
 
 /* The opening screen: the logo, centred, and nothing else. */
 void seedtool_render_splash(void);
@@ -50,11 +44,11 @@ void seedtool_render_splash(void);
  * character count. */
 size_t seedtool_render_fit(const char* text, size_t limit);
 
-/* How many leading characters of a list item fit its row. Values meant to be
- * transcribed are never listed; they are paged with seedtool_render_fit. Only
- * the tests call this: it is the row's fit with no ellipsis, which they hold
- * the drawn row against, and the drawing itself measures with the same
- * fit_in. */
+/* How many leading characters of a list item fit its row, with no ellipsis:
+ * the drawing measures with the same fit_in. Values meant to be transcribed
+ * are never listed; they are paged with seedtool_render_fit. The address list
+ * uses this to cut its rows in the middle, keeping both ends, and the tests
+ * hold the drawn row against it. */
 size_t seedtool_render_fit_row(const char* text);
 
 /* Characters per group, as wallets group addresses. */
@@ -64,10 +58,6 @@ size_t seedtool_render_fit_row(const char* text);
  * seedtool_render_fit, since the gaps take width, and a whole number of groups
  * unless the value ends mid-group. */
 size_t seedtool_render_fit_grouped(const char* text, size_t limit);
-
-/* How many *trailing* characters of `text` fit one body line. A running
- * transcript is read from its end, where what was just entered is. */
-size_t seedtool_render_fit_tail(const char* text);
 
 /* First visible row that keeps `selected` on screen, scrolling as little as
  * possible from `previous_top`. */
@@ -142,34 +132,29 @@ void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, cons
 void seedtool_render_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 
-/* Two body lines with the entropy bar, for the screens before and after an
- * entropy run. */
-void seedtool_render_nav_dice(const seedtool_nav_t* nav, const char* title, const char* line1, const char* line2,
-    const seedtool_progress_t* progress);
-
-/* `enabled` is indexed by key position across the whole layout; disabled keys
- * are dimmed and meant to be unreachable. `selected` is the highlighted key.
- * `position` (1-based) of `total` fills a bar with the words already typed; a
- * `total` of 0 draws no bar. */
 /* A row of digit boxes, the one at `active` carrying up and down arrows. Boxes
  * before `active` are set, those after it still to come; a
- * SEEDTOOL_KEY_BACKSPACE at `active` draws the backspace glyph. `progress`
- * draws the entropy bar when not NULL. `count` must not exceed
+ * SEEDTOOL_KEY_BACKSPACE at `active` draws the backspace glyph. `count` must not exceed
  * SEEDTOOL_DIGIT_BOXES_MAX, or the centred row runs off both edges. */
 #define SEEDTOOL_DIGIT_BOXES_MAX 4
-void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer,
-    const seedtool_progress_t* progress);
+void seedtool_render_digits(const char* title, const char* digits, size_t count, size_t active, const char* footer);
 
 /* One wider box for a value scrolled whole (a die face, a D20 roll) rather
- * than digit by digit. `back` draws the backspace glyph in place of `text`. */
+ * than digit by digit. `back` draws the backspace glyph in place of `text`;
+ * `tally` draws under the box when not NULL. */
 void seedtool_render_value_box(
-    const char* title, const char* text, bool back, const char* footer, const seedtool_progress_t* progress);
+    const char* title, const char* text, bool back, const char* footer, const seedtool_tally_t* tally);
 
 /* A level from 1 to `max` set in place, as the value box is: the box shows
  * "level/max", a row of `max` segments fills to the level, and an arrow is
  * drawn only where the level can still move. */
 void seedtool_render_level(const char* title, unsigned level, unsigned max, const char* footer);
 
+/* `enabled` is indexed by key position across the whole layout; disabled keys
+ * are dimmed and meant to be unreachable. `selected` is the highlighted key.
+ * `position` (1-based) of `total` fills a thin bar above the keys with
+ * position - 1 of total: the words already typed, or a run's bits on the
+ * ticket keypad. A `total` of 0 draws no bar. */
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 

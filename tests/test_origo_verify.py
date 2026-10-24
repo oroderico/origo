@@ -168,115 +168,79 @@ class SeedToolVerifierTests(unittest.TestCase):
         entropy = ((packed << len(tail)) | int(tail, 2)).to_bytes(16, "big")
         self.assertEqual(verify.mnemonic_from_entropy(entropy), expected)
 
-    def test_d6_transcript_pipeline_against_a_krux_vector(self):
-        # Pins the pipeline - digits concatenated, SHA256, truncate, BIP39 -
-        # against a run Krux produces the same mnemonic from, which is what
-        # makes this vector worth keeping. It does NOT pin device interop:
-        # Origo asks for exactly 60 D6 rolls for 12 words where Krux asks for
-        # at least 50, so the 50-roll run below is one the device will no
-        # longer accept. That divergence is deliberate (see
-        # docs/entropy.md) - Krux can absorb a marginal count by letting
-        # the user keep rolling and by grading with a 2-bit tolerance, and
-        # Origo, whose runs are fixed length, pays for the margin in rolls
-        # instead. The count is passed explicitly here for that reason.
-        entries = list("123456" * 8 + "12")
-        text = verify.transcript("d6", entries, 50)
-        self.assertEqual(text, "12345612345612345612345612345612345612345612345612")
-        self.assertEqual(
-            verify.hashlib.sha256(text.encode()).hexdigest(),
-            "ee72ae915a4e6ea7ccbeb8e5e5eecef29a1d0d90f053183726a424b6d3b07325",
-        )
-        self.assertEqual(
-            verify.mnemonic_from_entropy(verify.hashlib.sha256(text.encode()).digest()[:16]),
-            "unveil nice picture region tragic fault cream strike tourist control recipe tourist",
-        )
+    def test_seedpicker_tickets_match_seedpickers_own_last_word(self):
+        # A ticket and a die name word number (ticket - 1) * 6 + die. The
+        # worked example in docs/entropy.md, checked here end to end through
+        # the `tickets` subcommand; with three tails it must give the word
+        # SeedPicker's calculator gives, which takes the alphabetically first
+        # valid 24th word. That calculator is reimplemented below from its
+        # source (lib/logic.js, firstChecksumWordAlphabetically) rather than
+        # trusted to agree.
+        import argparse, contextlib, io
+        draws = ("57:4 201:1 342:2 1:1 118:6 300:3 23:5 171:2 256:4 89:6 14:3 330:1 77:2 142:5 5:6 "
+                 "268:1 199:3 36:4 311:2 160:6 44:1 228:5 97:3").split()
 
-    def test_shannon_bits_of_a_uniform_and_a_constant_run(self):
-        # An all-one-face run carries no information: every roll was foretold by
-        # the last, so entropy is exactly zero regardless of how many there are.
-        self.assertEqual(verify.shannon_bits("d6", [3] * 50), 0)
-        # A perfectly even spread over all six faces is the maximum a D6 can
-        # carry per roll: log2(6) bits each, six rolls here.
-        self.assertEqual(verify.shannon_bits("d6", [1, 2, 3, 4, 5, 6]), int(6 * verify.math.log2(6)))
-        with self.assertRaisesRegex(ValueError, "1..6"):
-            verify.shannon_bits("d6", [7])
+        def run(bits, these=draws):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                verify.tickets(argparse.Namespace(draws=list(these), bits=bits))
+            return out.getvalue()
 
-    def test_pattern_detected_on_an_arithmetic_run(self):
-        # Repeating 1..6 in order is the lazy way to fake fifty rolls: every
-        # face appears equally often (high Shannon entropy by count alone) but
-        # the sequence is entirely predictable, which only the derivative check
-        # below catches.
-        run = [1, 2, 3, 4, 5, 6] * 8 + [1, 2]
-        self.assertEqual(len(run), 50)
-        self.assertTrue(verify.pattern_detected("d6", run))
-        self.assertGreaterEqual(verify.shannon_bits("d6", run), 128)
-        # Too few rolls to judge either way.
-        self.assertFalse(verify.pattern_detected("d6", [1, 2, 3, 4, 5, 6, 1, 2, 3]))
+        printed = run("000")
+        self.assertIn("word  1: T57 + die 4  0340  clerk", printed)
+        self.assertIn("word  3: T342 + die 2  2048  zoo", printed)
+        mnemonic = printed.splitlines()[-1].split(None, 1)[1]
+        self.assertEqual(mnemonic.split()[-2:], ["embark", "cabin"])
+        self.assertTrue(run("101").rstrip().endswith("embark phrase"))
 
-    def test_cards_domain_and_duplicates(self):
-        cards = [rank + suit for suit in "CDHS" for rank in "A23456789TJQK"][:25]
-        self.assertTrue(verify.transcript("cards", cards, 25).startswith("cards-v1:"))
-        with self.assertRaisesRegex(ValueError, "distinct"):
-            verify.transcript("cards", ["AC"] * 25, 25)
+        wl = verify.words()
+        prefix = mnemonic.split()[:23]
 
-    def test_coin_is_a_two_sided_die(self):
-        # A coin flip is read as a two-sided die, 1/2 rather than the 0/1 the
-        # transcript itself uses - coin_faces does that remap.
-        self.assertEqual(verify.coin_faces(["H"] * 10), [2] * 10)
-        self.assertEqual(verify.coin_faces(["tails", "Heads", "0", "1"]), [1, 2, 1, 2])
-        with self.assertRaisesRegex(ValueError, "H/T"):
-            verify.coin_faces(["X"])
-        # All-heads carries no information, same shape as an all-one-face die.
-        self.assertEqual(verify.shannon_bits("coin", verify.coin_faces(["H"] * 128)), 0)
-        self.assertTrue(verify.pattern_detected("coin", verify.coin_faces(["H"] * 128)))
-        # An alternating run is the coin equivalent of counting through a
-        # die's faces: maximum entropy by count, but entirely predictable.
-        alternating = verify.coin_faces(["H", "T"] * 64)
-        self.assertEqual(verify.shannon_bits("coin", alternating), 128)
-        self.assertTrue(verify.pattern_detected("coin", alternating))
+        def valid(candidate):
+            try:
+                verify.mnemonic_entropy(" ".join(prefix + [candidate]))
+                return True
+            except ValueError:
+                return False
 
-    def test_card_entropy_bits_is_exact_not_estimated(self):
-        # Cards are drawn without replacement, so this is exact rather than
-        # estimated: no rolls needed to reach zero, and no upper bound but
-        # the deck itself.
-        self.assertEqual(verify.card_entropy_bits(0), 0)
-        # The required draw count for a 12-word seed clears the 128-bit
-        # minimum by construction.
-        self.assertGreaterEqual(verify.card_entropy_bits(25), 128)
-        # Non-decreasing over the whole deck; the very last card adds
-        # nothing, since the other 51 already determine it.
-        bits = [verify.card_entropy_bits(n) for n in range(53)]
-        self.assertEqual(bits, sorted(bits))
-        with self.assertRaisesRegex(ValueError, "52"):
-            verify.card_entropy_bits(53)
+        self.assertEqual(next(w for w in wl if valid(w)), "cabin")
+        self.assertEqual(verify.addresses(mnemonic, "", 0, 0, 0)[0], "60c2d222")
 
-    def test_card_pattern_detected_on_an_arithmetic_run(self):
-        # A fresh, unshuffled deck read off in order: rank climbs 0..12
-        # within each suit before resetting, the card equivalent of counting
-        # through a die's faces.
-        cards = [rank + suit for suit in "CDHS" for rank in "A23456789TJQK"][:25]
-        self.assertTrue(verify.card_pattern_detected(verify.card_values(cards)))
-        # A full, honestly shuffled draw is not flagged. Ten cards, right at
-        # the pattern check's minimum sample size, is too easily unlucky by
-        # chance alone (the same small-sample noise PATTERN_MIN_ROLLS exists
-        # to guard against for dice) to make a reliable test vector.
-        shuffled = ["TC", "JD", "KD", "4C", "9D", "KH", "4D", "AS", "7D", "QC", "8S", "QD", "8H", "4H", "6H", "5S",
-            "5C", "3H", "JC", "AH", "JH", "AC", "6S", "6D", "4S"]
-        self.assertFalse(verify.card_pattern_detected(verify.card_values(shuffled)))
-        # Too few draws to judge either way.
-        self.assertFalse(verify.card_pattern_detected(verify.card_values(cards[:9])))
+        # The device's keypad offers only digits that lead to T1..T342, so a
+        # ticket out of range cannot be typed at all.
+        self.assertIn("enter_number(title, TICKET_DIGITS, 1, SEEDTOOL_TICKETS, &ticket, tally)", app_source())
 
-    def test_cards_replace_allows_repeats_and_is_a_52_sided_die(self):
-        # Unlike "cards", a repeat is valid here: the card is returned and
-        # the deck reshuffled before every draw, not set aside.
-        self.assertTrue(verify.transcript("cards-replace", ["AC"] * 48, 48).startswith("cards-v1:"))
-        # Graded the same way "coin" already reuses the dice machinery for a
-        # two-sided die - here a genuine 52-sided one.
-        faces = [v + 1 for v in verify.card_values(["AC"] * 48)]
-        self.assertEqual(verify.shannon_bits("cards-replace", faces), 0)
-        self.assertTrue(verify.pattern_detected("cards-replace", faces))
-        with self.assertRaisesRegex(ValueError, "1..52"):
-            verify.shannon_bits("cards-replace", [0])
+        # The four pairs past 2048, and anything out of range, are refused.
+        for bad in ("342:3", "342:6", "343:1", "0:1", "1:7"):
+            with self.assertRaises(ValueError):
+                run("000", draws[:22] + [bad])
+
+    def test_dice_words_match_the_firmware_vectors(self):
+        # The D6 and D20 methods read faces as bits with no hash, so the
+        # verifier must reproduce them from the rolls alone. The vectors are
+        # the ones tests/test_core.c pins for seedtool_die_word: all-4 D6
+        # rolls are zoo, a last 2 keeps only its first bit (zone, not zoo),
+        # and D20 16 1 10 is word 1925.
+        import argparse, contextlib, io
+
+        def run(die, rolls, bits):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                verify.dice(argparse.Namespace(die=die, rolls=[str(r) for r in rolls], bits=bits))
+            return out.getvalue()
+
+        # Eleven all-1 words and seven tails are 128 zero bits: BIP39's own
+        # vector, so the packing is fixed to something outside this project.
+        self.assertTrue(run("d6", [1] * 66, "0000000").rstrip().endswith(self.MNEMONIC))
+        self.assertTrue(run("d20", [1] * 69, "000").rstrip().endswith(self.MNEMONIC_24))
+        self.assertIn("word  1: 4, 4, 4, 4, 4, 4  2048  zoo", run("d6", [4] * 66, "0000000"))
+        self.assertIn("word  1: 4, 4, 4, 4, 4, 2  2047  zone", run("d6", [4, 4, 4, 4, 4, 2] + [1] * 60, "0000000"))
+        self.assertIn("word  1: 16, 1, 10  1925  vacuum", run("d20", [16, 1, 10] + [1] * 30, "0000000"))
+
+        # The faces that do not count are rolled again, never entered.
+        for die, rolls in (("d6", [5] + [1] * 65), ("d20", [17] + [1] * 32), ("d6", [1] * 65)):
+            with self.assertRaises(ValueError):
+                run(die, rolls, "0000000")
 
     def test_checksum_completion_all_zero(self):
         prefix = " ".join(["abandon"] * 11)
@@ -411,40 +375,6 @@ class SeedToolVerifierTests(unittest.TestCase):
                 verify.descriptor_checksum(mutated), checksum, f"undetected edit at index {i}"
             )
 
-    def test_verifier_event_counts_match_the_firmware(self):
-        # The verifier exists to check the device without trusting it, and
-        # transcript() refuses any count but the expected one - so a table
-        # that disagrees with seedtool_required_events() does not merely
-        # report a wrong minimum, it makes every seed from that source
-        # unverifiable. That shipped once: D20 was padded from 30/60 to 36/68
-        # in the firmware and this table kept 30/60, so `generate d20` failed
-        # with "expected exactly 30 entries, got 36" on a perfectly good run.
-        source = (Path(__file__).parents[1] / "main/seedtool_core.c").read_text()
-        body = source.split("size_t seedtool_required_events", 1)[1].split("\n}", 1)[0]
-        names = {
-            "SEEDTOOL_D6": "d6",
-            "SEEDTOOL_D20": "d20",
-            "SEEDTOOL_COIN": "coin",
-            "SEEDTOOL_CARDS": "cards",
-            "SEEDTOOL_CARDS_REPLACE": "cards-replace",
-        }
-        # Each arm reads `return words == N ? <that N's count> : <the other>;`
-        # and N is 12 or 24 depending on which case reads more naturally in C.
-        pattern = re.compile(
-            r"case\s+(SEEDTOOL_\w+):.*?return\s+words\s*==\s*(12|24)\s*\?\s*(\d+)\s*:\s*(\d+);",
-            re.DOTALL,
-        )
-        found = {}
-        for case, pivot, when_pivot, otherwise in pattern.findall(body):
-            twelve, twentyfour = (
-                (when_pivot, otherwise) if pivot == "12" else (otherwise, when_pivot)
-            )
-            # 0 is how the C spells "this combination is not offered"; the
-            # Python table spells the same thing None.
-            found[names[case]] = tuple(int(n) or None for n in (twelve, twentyfour))
-        self.assertEqual(set(found), set(verify.REQUIRED_EVENTS), "a source was added or renamed")
-        self.assertEqual(found, verify.REQUIRED_EVENTS)
-
     def test_firmware_entropy_core_has_no_rng_call(self):
         source = (Path(__file__).parents[1] / "main/seedtool_core.c").read_text()
         for forbidden in ("get_random", "esp_random", "esp_fill_random", "randombytes"):
@@ -475,6 +405,7 @@ class SeedToolVerifierTests(unittest.TestCase):
         # A mnemonic by another name: word indices, the bits they are packed
         # from, and the strings a screen shows them in.
         "indices", "bits", "tail", "history", "bitline", "prefix", "digits",
+        "picked", "drawn", "named", "made", "rows",
     )
 
     @staticmethod
@@ -637,10 +568,12 @@ class SeedToolVerifierTests(unittest.TestCase):
         warnings = (
             "A photo reveals every address",
             "A photo = total loss of funds",
-            "These flips are lost",
+            # confirm_word's discard question, whose warning ("These flips
+            # are lost", "This draw is lost") arrives as `lost`.
+            "question, subject, lost",
         )
         calls = re.findall(r"nav_acknowledge\(\s*(.*?)\)\s*\)", source, re.S)
-        calls += re.findall(r"nav_screen\(\s*(.*?),\s*NULL\s*\)", source, re.S)
+        calls += re.findall(r"nav_screen\(([^()]*)\)", source, re.S)
         seen = 0
         for call in calls:
             if not any(w in call for w in warnings):
@@ -806,12 +739,6 @@ class SeedToolVerifierTests(unittest.TestCase):
         # Version byte plus an all-zero hash160: every leading zero byte must
         # survive as a literal '1', which plain integer encoding would drop.
         self.assertEqual(verify.base58check(bytes(21)), "1" * 21 + "4oLvT2")
-
-    def test_input_ranges(self):
-        with self.assertRaises(ValueError):
-            verify.transcript("d6", ["1"] * 49 + ["7"], 50)
-        with self.assertRaises(ValueError):
-            verify.transcript("coin", ["1"] * 127, 128)
 
 
 if __name__ == "__main__":

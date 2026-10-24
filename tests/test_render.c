@@ -197,46 +197,6 @@ static bool list_viewport_is_sound(void)
     return true;
 }
 
-/* A partial transcript must be a prefix of the finished one, or the reader
- * checked a string the device then rewrote. Every prefix of every source. */
-static bool partial_transcripts_are_prefixes(void)
-{
-    static const seedtool_source_t sources[]
-        = { SEEDTOOL_D6, SEEDTOOL_D20, SEEDTOOL_COIN, SEEDTOOL_CARDS, SEEDTOOL_CARDS_REPLACE };
-    static const uint8_t limits[] = { 6, 20, 1, 51, 51 };
-    for (size_t s = 0; s < 5; ++s) {
-        uint8_t values[52];
-        const size_t count = sources[s] == SEEDTOOL_CARDS ? 25 : sources[s] == SEEDTOOL_CARDS_REPLACE ? 48 : 40;
-        for (size_t i = 0; i < count; ++i) {
-            /* Repeats here must be accepted, unlike SEEDTOOL_CARDS. */
-            if (sources[s] == SEEDTOOL_CARDS_REPLACE) {
-                values[i] = (uint8_t)(i % 5);
-            } else if (sources[s] == SEEDTOOL_CARDS) {
-                values[i] = (uint8_t)(i * 2 + 1);
-            } else {
-                values[i] = (uint8_t)((sources[s] == SEEDTOOL_COIN ? 0 : 1) + (i * 7 + 3) % limits[s]);
-            }
-        }
-        char whole[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-        if (seedtool_transcript(sources[s], values, count, whole, sizeof(whole)) != SEEDTOOL_OK) {
-            return false;
-        }
-        for (size_t k = 0; k <= count; ++k) {
-            char partial[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-            if (seedtool_transcript(sources[s], values, k, partial, sizeof(partial)) != SEEDTOOL_OK
-                || strncmp(whole, partial, strlen(partial)) != 0) {
-                return false;
-            }
-            /* And the tail actually shown must be a tail of it, never longer. */
-            const size_t tail = seedtool_render_fit_tail(partial);
-            if (tail > strlen(partial)) {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
 /* Paging splits by pixel width, so the chunks must reassemble byte for byte. */
 static bool paging_is_lossless(const char* text)
 {
@@ -403,36 +363,6 @@ static bool zoomed_qr_regions_are_sound(void)
         }
     }
     return !seedtool_render_qr_bytes_region("Compact SeedQR", entropy, len, 25, SEEDTOOL_NAV_BACK);
-}
-
-/* The bar's red and green appear nowhere else on the screen, so both are
- * checked by counting pixels. */
-static bool dice_progress_bar_is_bounded(void)
-{
-    const uint16_t warn_color = 0xf800, go_color = 0x07e0, fill_color = 0xfd20;
-    const char* const footer = "L/R move   BOTH select";
-    const seedtool_progress_t low = { .rolls_pct = 10, .entropy_pct = 10, .warn = false, .complete = false };
-    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &low);
-    if (count_pixel_color(warn_color) != 0 || count_pixel_color(go_color) != 0) {
-        return false;
-    }
-    const size_t low_fill = count_pixel_color(fill_color);
-
-    const seedtool_progress_t high = { .rolls_pct = 90, .entropy_pct = 90, .warn = false, .complete = false };
-    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &high);
-    if (count_pixel_color(fill_color) <= low_fill) {
-        return false;
-    }
-
-    const seedtool_progress_t warned = { .rolls_pct = 50, .entropy_pct = 50, .warn = true, .complete = false };
-    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &warned);
-    if (count_pixel_color(warn_color) == 0) {
-        return false;
-    }
-
-    const seedtool_progress_t done = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
-    seedtool_render_dice_screen("D6 dice  1/50", "3", "123", footer, &done);
-    return count_pixel_color(go_color) != 0;
 }
 
 /* Lit rows of the nav chrome, scanned band by band: text wraps rather than
@@ -886,10 +816,16 @@ static bool nav_chrome_bands_do_not_collide(void)
         { "QR export", "Account key included", "A photo reveals every address", "Show QR" },
         { "Descriptor export", "Account key included", "A photo reveals every address", "Show descriptor" },
         { "Confirm passphrase", "Enter it a second time", "Exact match required", "Enter again" },
-        /* The entropy verdicts have no title; the finding is in the body. */
-        { NULL, "Poor entropy!", "128 of 128 bits", "Proceed anyway" },
-        { NULL, "Pattern detected!", NULL, "Proceed anyway" },
+        /* The run intros and a word's confirmation, from app_seed.c. */
+        { "D6 dice", "Only 1 to 4 count", "Roll 5 or 6 again", "Start" },
+        { "D20 dice", "Only 1 to 16 count", "Roll 17 to 20 again", "Start" },
+        { "Coin flips", "256 flips needed", "Heads 1, tails 0", "Start" },
+        { "SeedPicker tickets", "23 draws needed", "Put each ticket back", "Start" },
+        { "Word 23/23", "16 16 16", "2048  mosquito", "Use this word" },
+        { "Word 23/23", "T195 + die 3", "2048  mosquito", "Use this word" },
         { "Flip word 23 again?", "2048  mosquito", "These flips are lost", "Flip again" },
+        { "Roll word 23 again?", "2048  mosquito", "These rolls are lost", "Roll again" },
+        { "Draw word 23 again?", "2048  mosquito", "This draw is lost", "Draw again" },
     };
     for (size_t i = 0; i < sizeof(screens) / sizeof(screens[0]); ++i) {
         for (int on_back = 0; on_back < 2; ++on_back) {
@@ -912,43 +848,6 @@ static bool nav_chrome_bands_do_not_collide(void)
                 .confirm_enabled = true,
                 .back = true };
             seedtool_render_nav_text(&bare, screens[i].title, screens[i].line1, screens[i].line2, NULL);
-            if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
-                return false;
-            }
-        }
-    }
-    /* With the entropy bar (y=90..103), the gap below it must stay clear. */
-    static const struct {
-        const char* title;
-        const char* line1;
-        const char* line2;
-        const char* label;
-    } dice[] = {
-        { "Coins", "256 flips needed", "Red bar = non-random", "Start" },
-        { "D6 dice", "99 rolls needed", "Red bar = non-random", "Start" },
-        { "Diamonds", "99 cards needed", "Return & reshuffle each card", "Start" },
-        { "Coins", "256 of 256 bits", "Looks good", "Generate seed" },
-    };
-    const seedtool_progress_t full = { .rolls_pct = 100, .entropy_pct = 100, .warn = false, .complete = true };
-    for (size_t i = 0; i < sizeof(dice) / sizeof(dice[0]); ++i) {
-        for (int on_back = 0; on_back < 2; ++on_back) {
-            const seedtool_nav_t nav = { .selected = on_back ? SEEDTOOL_NAV_BACK : SEEDTOOL_NAV_CONFIRM,
-                .confirm = SEEDTOOL_CONFIRM_TICK,
-                .confirm_enabled = true,
-                .back = true, };
-            seedtool_render_nav_dice(&nav, dice[i].title, dice[i].line1, dice[i].line2, &full);
-            if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(104, 118)) {
-                return false;
-            }
-            if (!nav_right_slot_is_drawn()) {
-                return false;
-            }
-            /* Title measured tick-free, for the reason given above: the box
-             * stands exactly where an overlong title would land. */
-            const seedtool_nav_t bare = { .selected = nav.selected,
-                .confirm_enabled = true,
-                .back = true };
-            seedtool_render_nav_dice(&bare, dice[i].title, dice[i].line1, dice[i].line2, &full);
             if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
                 return false;
             }
@@ -981,14 +880,14 @@ static bool nav_chrome_bands_do_not_collide(void)
      * so 116..118 must stay clear. */
     static const size_t cursors[] = { SEEDTOOL_NAV_BACK, 0, SEEDTOOL_NAV_CONFIRM };
     for (size_t c = 0; c < sizeof(cursors) / sizeof(cursors[0]); ++c) {
-        /* A full-width transcript line, and the widest counter either paged
+        /* A full-width line, and the widest counter either paged
          * screen can reach: MAX_PAGE_LINES=24 gives page_text eight pages. */
         const seedtool_nav_t paged = { .selected = cursors[c],
             .confirm = SEEDTOOL_CONFIRM_TICK,
             .confirm_enabled = true,
             .back = true,
             .counter = "8/8", };
-        seedtool_render_nav_text(&paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+        seedtool_render_nav_text(&paged, "Completed mnemonic", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_band_is_clear(20, 21) || !nav_band_is_clear(116, 118)) {
             return false;
@@ -1000,7 +899,7 @@ static bool nav_chrome_bands_do_not_collide(void)
         const seedtool_nav_t bare_paged
             = { .selected = paged.selected, .confirm_enabled = true, .back = true,
                   .counter = paged.counter };
-        seedtool_render_nav_text(&bare_paged, "Canonical transcript", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
+        seedtool_render_nav_text(&bare_paged, "Completed mnemonic", "20-1-2-1-4-1-1-1-1-1-1-1-1-",
             "1-1-1-1-1-1-1-1-1-20-1-1-1-", "1-1-1-1-1-1-1-1-1-1");
         if (!nav_title_stays_in_its_column(SEEDTOOL_DISPLAY_WIDTH - (2 + 20))) {
             return false;
@@ -1129,19 +1028,25 @@ static bool vectors_page_losslessly(void)
     CHECK(paging_is_lossless(expected_xpub86));
     CHECK(paging_is_lossless(expected_address));
     CHECK(paging_is_lossless(mnemonic));
-    CHECK(paging_is_lossless("cards-v1:ACKS7D2H"));
     return true;
 }
 
 /* Draws what the other tests do not reach, so the sanitizers see every
- * renderer run: the plain screen, the splash, a scrolled list and each real
- * keyboard layout opened at its centre. */
+ * renderer run: the plain screen, the splash, a scrolled list, the bit tally
+ * empty, part way, full and past full, and each real keyboard layout opened at
+ * its centre. */
 static bool remaining_screens_render(void)
 {
     static const char* const rows[] = { "Master fingerprint", "Native SegWit", "Taproot", "Backup", "Settings",
         "About", "Erase and restart" };
     seedtool_render_screen("ORIGO", "HOST SELF-TEST", expected_address, "OK");
     seedtool_render_splash();
+    const seedtool_tally_t tallies[] = { { 0, 128 }, { 86, 128 }, { 256, 256 }, { 300, 256 }, { 0, 0 } };
+    for (size_t i = 0; i < sizeof(tallies) / sizeof(tallies[0]); ++i) {
+        seedtool_render_tally_screen("Word 1/23, flip 1/11", "Heads (up)   Tails (down)", "0110", "OK", &tallies[i]);
+        seedtool_render_value_box("Word 1/11, roll 1/6", "4", false, "OK", &tallies[i]);
+    }
+    seedtool_render_value_box("T342 die, word 23/23", "6", true, "OK", NULL);
     const seedtool_nav_t scrolled = { .selected = 6, .confirm_enabled = false, .back = true };
     const seedtool_nav_t at_start = { .selected = 0, .confirm_enabled = false, .back = true };
     seedtool_render_nav_list(&scrolled, "Wallet", rows, 7, 4);
@@ -1173,12 +1078,10 @@ int main(void)
         TEST(wire_order_is_big_endian),
         TEST(layouts_are_complete),
         TEST(list_viewport_is_sound),
-        TEST(partial_transcripts_are_prefixes),
         TEST(stackbit_grid_is_sound),
         TEST(stackbit_physical_grid_is_sound),
         TEST(compact_seedqr_is_sound),
         TEST(zoomed_qr_regions_are_sound),
-        TEST(dice_progress_bar_is_bounded),
         TEST(truncated_rows_show_an_ellipsis),
         TEST(grouped_paging_preserves_the_value),
         TEST(qr_address_draws_every_group),

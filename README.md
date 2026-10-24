@@ -11,7 +11,7 @@
   <a href="docs/safety.md">Safety</a>
 </p>
 
-Origo turns dice, coin flips or playing cards into a Bitcoin seed, on a
+Origo turns dice, coin flips or paper tickets into a Bitcoin seed, on a
 development board that costs about as much as lunch and has no radio, no
 storage and no say in the randomness. It is stateless, offline firmware for the
 original LILYGO TTGO T-Display (ESP32, 240x135, two buttons).
@@ -21,15 +21,17 @@ protocol, update itself, or start a radio. USB/UART is used only by the ESP32
 ROM bootloader for power and flashing.
 
 <p align="center">
-  <img src="assets/screens.png" alt="Six Origo screens: the wallet menu titled with its fingerprint, a D6 dice roll, the word keyboard, a Stackbit 1248 punch grid, an account key QR code and a list of addresses">
+  <img src="assets/screens.png" alt="Six Origo screens: the wallet menu titled with its fingerprint, a D6 word checked against its rolls, the word keyboard, a Stackbit 1248 punch grid, an account key QR code and a list of addresses">
 </p>
 
 <p align="center"><sub>Drawn by the firmware's own renderer (<code>tools/make_screens.py</code>), for BIP39's test mnemonic <code>abandon … about</code>.</sub></p>
 
 ## What it does
 
-- **Makes a seed** of 12 or 24 words from D6 or D20 dice, coin flips or cards,
-  and shows the transcript so the result can be recomputed anywhere.
+- **Makes a seed** of 12 or 24 words from D6 or D20 dice, coin flips or
+  [SeedPicker](docs/entropy.md#seedpicker-tickets)'s paper tickets, one word at
+  a time, with no hash in between: every word can be checked against a printed
+  table as it is made.
 - **Finishes a checksum** for 11 or 23 words you already have, with 7 or 3 coin
   flips.
 - **Restores and checks** a mnemonic, typed as letters or as word numbers. Only
@@ -92,7 +94,7 @@ together select**. Going back is the arrow at the top left of the screen.
 | Document | What is in it |
 |---|---|
 | [Why Origo](docs/why.md) | What it replaces, and the RNG failure it is built to rule out |
-| [Entropy](docs/entropy.md) | Recording a transcript, how it becomes words, the quality bar |
+| [Entropy](docs/entropy.md) | How dice, coins and tickets become words, and how to check each one |
 | [Using Origo](docs/using.md) | Controls, entering words and passphrases, the wallet viewer, backup export |
 | [Build, flash and simulate](docs/build.md) | Reproducible builds, the image audit, the simulator and tests |
 | [Verifying Origo](docs/verify.md) | `origo_verify.py`, the QR encoder, the logo and fonts |

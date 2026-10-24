@@ -116,7 +116,9 @@ int glyph_advance(const uint8_t* font, const unsigned char character)
                                                : 0;
 }
 
-static int text_width(const uint8_t* font, const char* text, const size_t length)
+/* The width of `text`'s first `length` characters, from the first glyph's left
+ * edge to the last one's right. */
+int text_width(const uint8_t* font, const char* text, const size_t length)
 {
     int width = 0;
     for (size_t i = 0; i < length; ++i) {
@@ -390,16 +392,6 @@ static void draw_row(const uint8_t* font, const char* text, const int x, const i
 
 size_t seedtool_render_fit_row(const char* text) { return fit_in(FONT_BODY, text, SIZE_MAX, LIST_TEXT_WIDTH); }
 
-size_t seedtool_render_fit_tail(const char* text)
-{
-    const size_t length = strlen(text);
-    size_t start = 0;
-    while (start < length && text_width(FONT_BODY, text + start, length - start) > TEXT_WIDTH) {
-        ++start;
-    }
-    return length - start;
-}
-
 void seedtool_render_clear(void) { fill_rect(0, 0, SEEDTOOL_DISPLAY_WIDTH, SEEDTOOL_DISPLAY_HEIGHT, COLOR_BLACK); }
 
 /* The splash is the logo, and nothing else: it holds the screen briefly and the
@@ -436,6 +428,13 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
     draw_centered(FONT_BODY, line1, 39);
     draw_centered(FONT_BODY, line2, 65);
     draw_centered(tft_DefaultFont, footer, SCREEN_FOOTER_Y);
+}
+
+void seedtool_render_tally_screen(const char* title, const char* line1, const char* line2, const char* footer,
+    const seedtool_tally_t* tally)
+{
+    seedtool_render_screen(title, line1, line2, footer);
+    draw_tally(tally);
 }
 
 seedtool_thumb_t seedtool_list_thumb(const size_t count, const size_t top, const int track)
