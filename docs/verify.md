@@ -109,8 +109,9 @@ library.
 library only (`--paper letter` for US Letter). It writes the PDF by hand with
 the printer's built-in fonts and no dates or IDs, so the same source gives the
 same bytes, and the tests regenerate it and compare. They also feed every
-printed row - its coin flips, each D6 and D20 face it allows and its ticket -
-back through `origo_verify.py`, which must name that row's word.
+printed cell of the lookup - its row's and column's coin flips, and each D6
+and D20 face they allow - back through `origo_verify.py`, which must name that
+cell's word.
 
 ### Fonts
 

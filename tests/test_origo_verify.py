@@ -618,20 +618,31 @@ class SeedToolVerifierTests(unittest.TestCase):
             )
             self.assertEqual(pdf.read_bytes(), (root / "docs/worksheet.pdf").read_bytes())
 
-    def test_worksheet_rows_name_their_words(self):
-        # Every printed row is checked against the verifier, which reads the
-        # methods its own way: the coin flips, each D6 and D20 roll and the
-        # ticket in a row must make that row's word. The last roll prints as a
+    def test_worksheet_lookup_names_its_words(self):
+        # Every printed cell is checked against the verifier, which reads the
+        # methods its own way: a row's first flips and rolls with a column's
+        # last ones must make the word in that cell. The last roll prints as a
         # pair of faces; every face is tried, and exactly the two printed must
-        # give the row's word.
+        # give the cell's word.
         import argparse, contextlib, io
         spec = importlib.util.spec_from_file_location(
             "make_worksheet", Path(__file__).parents[1] / "tools/make_worksheet.py")
         worksheet = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(worksheet)
-        rows = worksheet.rows()
-        self.assertEqual([row[1] for row in rows], verify.words())
-        self.assertEqual([row[0] for row in rows], [f"{n:04}" for n in range(1, 2049)])
+        labels, headings, cells = worksheet.lookup()
+        self.assertEqual(len(headings), 8)
+        self.assertEqual([word for row in cells for word in row], verify.words())
+        self.assertEqual([label[0] for label in labels], [f"{n:04}" for n in range(1, 2049, 8)])
+
+        # Per word, as printed: the flips, and each die's leading rolls and
+        # last pair.
+        flips, d6, d20 = [], [], []
+        for label in labels:
+            for heading in headings:
+                flips.append(label[1].replace(" ", "") + heading[0])
+                fifth, pair = heading[1].split()
+                d6.append(([int(f) for f in label[2].split()] + [int(fifth)], pair))
+                d20.append(([int(f) for f in label[3].split()], heading[2]))
 
         def numbers(command, args):
             out = io.StringIO()
@@ -639,38 +650,26 @@ class SeedToolVerifierTests(unittest.TestCase):
                 command(argparse.Namespace(**args))
             return [int(line.split()[-2]) for line in out.getvalue().splitlines() if line.startswith("word ")]
 
-        # Eleven rows to a call, the shortest run the verifier takes; the last
-        # batch wraps round to the first rows.
+        # Eleven words to a call, the shortest run the verifier takes; the last
+        # batch wraps round to the first words.
         batches = [[(start + k) % 2048 for k in range(11)] for start in range(0, 2048, 11)]
 
         for batch in batches:
-            flips = "".join(rows[i][2].replace(" ", "") for i in batch) + "0" * 7
-            self.assertEqual(numbers(verify.coin_words, {"flips": flips, "words": 12}), [i + 1 for i in batch])
+            run = "".join(flips[i] for i in batch) + "0" * 7
+            self.assertEqual(numbers(verify.coin_words, {"flips": run, "words": 12}), [i + 1 for i in batch])
 
-        for die, faces, rolls_per_word, column in (("d6", 4, 6, 3), ("d20", 16, 3, 4)):
-            parsed = {}
-            for i, row in enumerate(rows):
-                *leading, pair = row[column].split()
-                low, high = (int(face) for face in pair.split("-"))
-                parsed[i] = ([int(face) for face in leading], (low, high))
+        for die, faces, rolls_per_word, printed in (("d6", 4, 6, d6), ("d20", 16, 3, d20)):
             for last in range(1, faces + 1):
                 for batch in batches:
                     rolls = []
                     for i in batch:
-                        leading, _ = parsed[i]
+                        leading, _ = printed[i]
                         self.assertEqual(len(leading), rolls_per_word - 1)
                         rolls += leading + [last]
                     named = numbers(verify.dice, {"die": die, "rolls": [str(r) for r in rolls], "bits": "0000000"})
                     for i, number in zip(batch, named):
-                        low, high = parsed[i][1]
-                        self.assertEqual(number == i + 1, low <= last <= high, (die, rows[i], last))
-
-        for batch in batches:
-            draws = []
-            for i in batch:
-                ticket, die = rows[i][5][1:].split("+")
-                draws.append(f"{ticket}:{die}")
-            self.assertEqual(numbers(verify.tickets, {"draws": draws, "bits": "0000000"}), [i + 1 for i in batch])
+                        low, high = (int(face) for face in printed[i][1].split("-"))
+                        self.assertEqual(number == i + 1, low <= last <= high, (die, printed[i], last))
 
     def test_logo_c_file_is_what_the_cells_generate(self):
         # The C file is committed and the cells are what gets edited, so the two

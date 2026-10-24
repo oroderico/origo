@@ -5,9 +5,9 @@ against.
 Origo makes each word straight from what was rolled, flipped or drawn, and
 shows it before using it, so the reader can check every word by hand - given
 a table. This prints one: a guide to how each method is done and converted to
-a word number by hand, a grid to record a run, and all 2048 words with the coin flips, D6 rolls, D20 rolls and
-SeedPicker ticket that make each, so any method is read off by eye with no
-arithmetic.
+a word number by hand, a grid to record a run, and all 2048 words in one grid
+that coin flips and D6 and D20 rolls lead straight into, so a word is read off
+by eye with no arithmetic.
 
 The PDF is written by hand with the base-14 fonts, no dates and no IDs, so the
 same source always gives the same bytes and the committed file can be checked
@@ -33,7 +33,6 @@ MARGIN = 36
 D6_BITS, D6_ROLLS = 2, 6
 D20_BITS, D20_ROLLS = 4, 3
 WORD_BITS = 11
-TICKETS, TICKET_DIE = 342, 6
 
 
 def words():
@@ -55,30 +54,35 @@ def die_faces(index, bits, rolls):
     return faces, (value * spread + 1, value * spread + spread)
 
 
-def ticket(index):
-    """SeedPicker's ticket and die for word `index`: word number
-    (ticket - 1) x 6 + die."""
-    return index // TICKET_DIE + 1, index % TICKET_DIE + 1
+# The lookup is one grid for the coins and both dice: a word's first eight bits
+# pick its row and its last three its column. Eight bits are 8 flips, 4 D6
+# rolls or 2 D20 rolls; three are the last 3 flips, a D6's fifth roll and its
+# sixth's one bit, or a D20's third roll, so every method reads the same 256
+# rows of 8 words.
+ROW_BITS = 8
+COLUMNS = 1 << (WORD_BITS - ROW_BITS)
 
 
-def rows():
-    """One row per word: number, word, coin flips, D6 rolls, D20 rolls and
-    SeedPicker draw, as printed."""
-    result = []
-    for index, word in enumerate(words()):
+def lookup():
+    """The grid as printed: per row its first number, first 8 flips, first 4
+    D6 rolls and first 2 D20 rolls; per column its last 3 flips, D6 fifth roll
+    and sixth roll's pair, and D20 third roll's pair; and the words, a row at
+    a time."""
+    names = words()
+    labels, headings, cells = [], [], []
+    for row in range(len(names) // COLUMNS):
+        index = row * COLUMNS
         bits = f"{index:011b}"
-        d6, (d6_low, d6_high) = die_faces(index, D6_BITS, D6_ROLLS)
-        d20, (d20_low, d20_high) = die_faces(index, D20_BITS, D20_ROLLS)
-        t, die = ticket(index)
-        result.append((
-            f"{index + 1:04}",
-            word,
-            f"{bits[:4]} {bits[4:8]} {bits[8:]}",
-            " ".join(str(f) for f in d6) + f" {d6_low}-{d6_high}",
-            " ".join(f"{f:2}" for f in d20) + f" {d20_low}-{d20_high}",
-            f"T{t}+{die}",
-        ))
-    return result
+        d6, _ = die_faces(index, D6_BITS, D6_ROLLS)
+        d20, _ = die_faces(index, D20_BITS, D20_ROLLS)
+        labels.append((f"{index + 1:04}", f"{bits[:4]} {bits[4:8]}", " ".join(str(f) for f in d6[:-1]),
+                       " ".join(f"{f:2}" for f in d20)))
+        cells.append(names[index:index + COLUMNS])
+    for column in range(COLUMNS):
+        d6, (d6_low, d6_high) = die_faces(column, D6_BITS, D6_ROLLS)
+        _, (d20_low, d20_high) = die_faces(column, D20_BITS, D20_ROLLS)
+        headings.append((f"{column:03b}", f"{d6[-1]} {d6_low}-{d6_high}", f"{d20_low}-{d20_high}"))
+    return labels, headings, cells
 
 
 def escape(text):
@@ -195,7 +199,7 @@ GUIDE = [
         ("title", "Origo worksheet"),
         ("p", "How coin flips, dice and SeedPicker's tickets become a BIP39 seed, one word at a time, and how to "
               "check every word by hand. After these pages come a grid to write a run on and the lookup: all 2048 "
-              "words, each with the flips, rolls and ticket that make it."),
+              "words on four pages, laid out so that your flips or rolls lead straight to the word."),
         ("b", "The printed sheet holds no secret: it is the same for everyone. It becomes your seed the moment you "
               "write a run on it. From then on keep it like the seed, or destroy it once the words are copied, and "
               "never photograph or scan it."),
@@ -253,9 +257,9 @@ GUIDE = [
             "For each word, make its entries - flips, rolls, or a ticket and a die - and write them in that word's "
             "row as you enter them on Origo, one at a time. Each entry can be undone.",
             "Origo then shows what made the word, its number and the word - 4, 2, 1, 3, 3, 2 and 1685 spoon, say. "
-            "Find that number in the lookup and check that its row, in your method's column, matches what "
-            "you wrote. If it does, write the number and the word in the grid and tick it. If not, decline: that "
-            "word's entries are thrown away and asked for again.",
+            "Find the word in the lookup from what you wrote (see Reading the lookup) and check that it is the "
+            "same. If it is, write the number and the word in the grid and tick it. If not, decline: that word's "
+            "entries are thrown away and asked for again.",
             "After the last word Origo lists the whole run, four words a page. Compare it with the grid in one "
             "pass.",
             "Flip the final 7 or 3 coins and write them in the grid's last row. Origo completes the last word "
@@ -271,8 +275,8 @@ GUIDE = [
             "flips  H H T H   T T H T   H T T",
             "bits   1 1 0 1   0 0 1 0   1 0 0     ->  11010010100  ->  1685  spoon",
         )),
-        ("p", "In the lookup the Coins column is the eleven flips as 1s and 0s, in groups of 4, 4 and 3 to keep "
-              "your place: 1101 0010 100."),
+        ("p", "In the lookup the first 8 flips pick the row, under Coins, and the last 3 the column: row 1101 "
+              "0010, column 100."),
     ],
     [
         ("h", "D6 dice"),
@@ -292,8 +296,8 @@ GUIDE = [
         ("p", "Without bits: number = (1st - 1) × 512 + (2nd - 1) × 128 + (3rd - 1) × 32 + (4th - 1) "
               "× 8 + (5th - 1) × 2 + (0 if the 6th is 1 or 2, 1 if it is 3 or 4) + 1. Here 1536 + 128 + "
               "0 + 16 + 4 + 0 + 1 = 1685."),
-        ("p", "In the lookup the D6 column is the first five rolls, then the last roll's pair: 4 2 1 3 3 1-2. "
-              "Either face of the pair makes the word."),
+        ("p", "In the lookup the first four rolls pick the row, under D6, and the fifth and sixth the column: "
+              "row 4 2 1 3, column 3 1-2, where 1-2 means that either face makes the word."),
     ],
     [
         ("h", "D20 dice"),
@@ -313,7 +317,8 @@ GUIDE = [
         )),
         ("p", "The last roll, 10, is 1001; its first three bits, 100, are kept. Without bits: number = (1st - 1) "
               "× 128 + (2nd - 1) × 8 + half of (3rd - 1), rounded down, + 1. Here 1920 + 0 + 4 + 1 = 1925."),
-        ("p", "In the lookup the D20 column is the first two rolls, then the last roll's pair: 16 1 9-10."),
+        ("p", "In the lookup the first two rolls pick the row, under D20, and the third the column: row 16 1, "
+              "column 9-10."),
     ],
     [
         ("h", "SeedPicker tickets"),
@@ -325,22 +330,23 @@ GUIDE = [
         ("p", "342 tickets and 6 faces make 2052 pairs: the 2048 words once each, and four more, T342 with a 3, 4, "
               "5 or 6, which are past 2048. On those, draw a new ticket - not just a new die, which would make "
               "T342's two words three times as likely as any other. Origo says so when it happens."),
-        ("p", "In the lookup the Ticket column is each word's pair: T57+4. SeedPicker's own printed table gives the "
-              "same pairs."),
+        ("p", "Find the number in the lookup: each row holds eight words, from the number under No. onwards, so "
+              "0340 is the fourth word of row 0337. SeedPicker's own printed table also gives each pair's word "
+              "directly."),
     ],
     [
-        ("h", "Finding a row fast"),
-        ("p", "The lookup rows are in number order, which is also the order of every column read left to right, "
-              "as in a dictionary. So the first entry already narrows the search, and each later one narrows it "
-              "again:"),
+        ("h", "Reading the lookup"),
+        ("p", "The lookup holds the 2048 words in 256 rows of eight, in number order, one D6 first roll to a page. "
+              "Your first entries pick the row, read in the columns at its left; your last entries pick one of its "
+              "eight words, read in the three heading lines at the top. Rows are banded in fours, one D6 fourth "
+              "roll each, and ruled every sixteen, one D20 first roll each."),
         ("mono", (
-            "Coins   first flip  T: 0001-1024   H: 1025-2048",
-            "D6      first roll  1: 0001-0512   2: 0513-1024   3: 1025-1536   4: 1537-2048",
-            "D20     first roll  f: (f - 1) x 128 + 1 to f x 128, so 16: 1921-2048",
-            "Ticket  ticket T:   (T - 1) x 6 + 1 to (T - 1) x 6 + 6; the die picks one",
+            "Coins  1101 0010 | 100     row 1101 0010, column 100     ->  spoon",
+            "D6     4 2 1 3 | 3 2       row 4 2 1 3, column 3 1-2     ->  spoon",
+            "D20    16 1 | 10           row 16 1, column 9-10         ->  vacuum",
         )),
-        ("p", "Within a D6 first roll each second roll is 128 words and each third 32; within a D20 first roll each "
-              "second roll is 8 words. Each lookup page is headed with the numbers it holds."),
+        ("p", "A word's number is its row's number plus its place in the row, counting from 0: spoon is in row "
+              "1681, place 4, so 1685."),
     ],
     [
         ("h", "Finishing: the last word"),
@@ -348,10 +354,9 @@ GUIDE = [
               "bits, so 7 coin flips finish your 128. For 24 words, 23 words make 253 bits, 3 flips finish 256, "
               "and the checksum is 8 bits. Origo then computes the checksum, from SHA-256 of your bits, which no "
               "table can do, and with it the last word."),
-        ("p", "Part of the last word can still be checked here: its first bits are your final flips. For 12 words "
-              "the last word's Coins column starts with your 7 flips, for 24 with your 3. Seven flips H T T H H T "
-              "H are 1001101, so the twelfth word is one of the 16 rows whose Coins begin 1001 101, numbers 1233 "
-              "to 1248. The checksum itself can be checked on an offline computer with tools/origo_verify.py."),
+        ("p", "Part of the last word can still be checked here: its first bits are your final flips, 7 of them "
+              "for 12 words and 3 for 24. Seven flips H T T H H T H are 1001101, so the twelfth word is in one of "
+              "the two rows whose Coins begin 1001 101, numbers 1233 to 1248. The checksum itself can be checked on an offline computer with tools/origo_verify.py."),
         ("p", "SeedPicker's calculator always takes the alphabetically first valid 24th word: three tails give that "
               "same word."),
     ],
@@ -430,32 +435,79 @@ def guide_pages(size):
             top += advance
     return pages
 
-LOOKUP_HEADING = ("No.", "Word", "Coins", "D6", "D20", "Ticket")
-# Characters per column of a lookup row, and the gap between columns. Each
-# cell is placed at its own x rather than padded with spaces, so the columns
-# line up even where a viewer substitutes a bold Courier of another width.
-LOOKUP_WIDTHS = (4, 8, 13, 13, 11, 6)
-LOOKUP_GAP = 1.3
-LOOKUP_POINTS = 6.8
+LOOKUP_HEADING = ("No.", "Coins", "D6", "D20")
+LOOKUP_CAPTIONS = ("Coins: last 3 flips", "D6: 5th roll, 6th roll", "D20: 3rd roll")
+# Characters per label column and per word column, and the gap after each.
+# Every cell is placed at its own x rather than padded with spaces, so the
+# columns line up even where a viewer substitutes a Courier of another width.
+LOOKUP_WIDTHS = (4, 9, 7, 5)
+LOOKUP_GAP = 1.5
+WORD_CELL = 9.6
+LOOKUP_POINTS = 7.8
 
 
-def lookup_cells(page, x, top, font, cells):
+def lookup_pages(size):
+    """The grid, a D6 first roll to a page: 64 rows, each D6 fourth roll
+    banded, a rule at each D20 first roll."""
+    width, height = size
     advance = 0.6 * LOOKUP_POINTS
-    for cell, width in zip(cells, LOOKUP_WIDTHS):
-        page.text(x, top, font, LOOKUP_POINTS, cell)
-        x += (width + LOOKUP_GAP) * advance
+    label_x = [MARGIN]
+    for chars in LOOKUP_WIDTHS:
+        label_x.append(label_x[-1] + (chars + LOOKUP_GAP) * advance)
+    words_x = label_x.pop() + LOOKUP_GAP * advance
+    rule_x = words_x - 1.5 * advance
+    right = words_x + COLUMNS * WORD_CELL * advance
+    if right > width - MARGIN + advance:
+        raise RuntimeError("the lookup is wider than the page")
+
+    labels, headings, cells = lookup()
+    per_page = len(labels) // 4
+    first_row = MARGIN + 76
+    pitch = min(11.5, (height - MARGIN - first_row) / per_page)
+    pages = []
+    for page_index in range(4):
+        page = Page(height)
+        start = page_index * per_page
+        page.text(MARGIN, MARGIN, "HB", 12, f"Lookup: words {labels[start][0]} to {start * COLUMNS + per_page * COLUMNS:04}")
+        page.text(MARGIN, MARGIN + 15, "H", 8.5,
+                  f"D6 first roll {page_index + 1}, D20 first roll {4 * page_index + 1} to {4 * page_index + 4}, "
+                  f"coins begin {page_index >> 1}{page_index & 1}. Find the row by your first entries and the "
+                  f"column by your last.", 0.35)
+        for line, caption in enumerate(LOOKUP_CAPTIONS):
+            top = MARGIN + 28 + line * 10
+            page.text(rule_x - 4 - text_width("H", 7.5, caption), top + 0.5, "H", 7.5, caption, 0.35)
+            for column, heading in enumerate(headings):
+                page.text(words_x + column * WORD_CELL * advance, top, "CB", LOOKUP_POINTS, heading[line])
+        for x, heading in zip(label_x, LOOKUP_HEADING):
+            page.text(x, first_row - pitch - 2, "CB", LOOKUP_POINTS, heading)
+        # Bands and rules first, so no row's descenders are painted over.
+        page.line(rule_x, MARGIN + 26, rule_x, first_row + per_page * pitch - 2, 0.4, 0.5)
+        for line in range(per_page):
+            row = start + line
+            y = first_row + line * pitch
+            if (row // 4) % 2:
+                page.rect(MARGIN - 2, y - 1.6, right - MARGIN + 2, pitch, 0.92)
+            if line and not row % 16:
+                page.line(MARGIN - 2, y - 1.6, right, y - 1.6, 0.6, 0.35)
+        for line in range(per_page):
+            row = start + line
+            y = first_row + line * pitch
+            for x, label in zip(label_x, labels[row]):
+                page.text(x, y, "C", LOOKUP_POINTS, label)
+            for column, word in enumerate(cells[row]):
+                page.text(words_x + column * WORD_CELL * advance, y, "C", LOOKUP_POINTS, word)
+        pages.append(page)
+    return pages
 
 
 def build(paper):
     size = PAPERS[paper]
     width, height = size
-    pages = []
-
     pages = guide_pages(size)
 
     grid = Page(height)
     grid.text(MARGIN, MARGIN, "HB", 14, "Record a run")
-    grid.text(MARGIN, MARGIN + 20, "H", 9, "One row per word. Tick the last column once the lookup row matches what you wrote.")
+    grid.text(MARGIN, MARGIN + 20, "H", 9, "One row per word. Tick the last column once the lookup gives the same word.")
     grid.text(MARGIN, MARGIN + 38, "H", 10, "Method")
     grid.line(MARGIN + 40, MARGIN + 48, MARGIN + 220, MARGIN + 48, 0.4, 0.5)
     grid.text(MARGIN + 250, MARGIN + 38, "H", 10, "Words:   12   /   24")
@@ -478,37 +530,7 @@ def build(paper):
         grid.line(x, grid_top + 14, x, y_bottom - row_height, 0.4, 0.5)
     pages.append(grid)
 
-    all_rows = rows()
-    column_gap = 22
-    column_width = (width - 2 * MARGIN - column_gap) / 2
-    first_row = MARGIN + 30
-    # As few pages as the tightest pitch allows, then the rows spread evenly
-    # over them, so the last page is not a few stragglers.
-    room = height - MARGIN - first_row - 10
-    most = 2 * int(room // (LOOKUP_POINTS * 1.2))
-    page_count = (len(all_rows) + most - 1) // most
-    per_column = -(-len(all_rows) // (2 * page_count))
-    per_page = 2 * per_column
-    pitch = min(LOOKUP_POINTS * 1.3, room / per_column)
-    for page_index in range(page_count):
-        page = Page(height)
-        start = page_index * per_page
-        page.text(MARGIN, MARGIN, "HB", 11, f"Lookup: words {start + 1:04} to {min(start + per_page, 2048):04}")
-        for side in range(2):
-            x = MARGIN + side * (column_width + column_gap)
-            if start + side * per_column >= len(all_rows):
-                break
-            lookup_cells(page, x, first_row - pitch - 2, "CB", LOOKUP_HEADING)
-            for line in range(per_column):
-                position = start + side * per_column + line
-                if position >= len(all_rows):
-                    break
-                y = first_row + line * pitch
-                # A light band every other five rows keeps the eye on a row.
-                if (position // 5) % 2:
-                    page.rect(x - 2, y - 1.2, column_width + 4, pitch, 0.92)
-                lookup_cells(page, x, y, "C", all_rows[position])
-        pages.append(page)
+    pages += lookup_pages(size)
 
     for number, page in enumerate(pages, start=1):
         page.text(width - MARGIN - 70, MARGIN + 2, "H", 8, f"Page {number} of {len(pages)}", 0.35)

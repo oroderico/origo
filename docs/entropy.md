@@ -5,9 +5,10 @@ each word checkable against a printed table.
 
 **Print [the worksheet](worksheet.pdf)** before a run: a guide to how each
 method is done and how its entries convert to a word number by hand, a grid to
-record the run, then all 2048 words with the coin flips, D6 rolls, D20 rolls and SeedPicker ticket
-that make each, so any word is checked by eye with no arithmetic. Once a run is
-written on it, the sheet is the seed.
+record the run, then all 2048 words on four pages, 256 rows of eight: a word's
+first flips or rolls pick its row and its last ones its column, so any word is
+checked by eye with no arithmetic. Eight pages in all. Once a run is written on
+it, the sheet is the seed.
 
 ## Every word from a table
 
@@ -183,10 +184,12 @@ endings on its own. Every method above ends in this same arithmetic.
 
 ## Checking a run
 
-By hand, each word is a row of [the worksheet](worksheet.pdf): find the word
-the device shows and read its row under the method's column. A D6 row ends in a
-pair such as `1-2`, a D20 row in one such as `9-10`: the last roll keeps only
-its first bits, so either face of the pair makes the word.
+By hand, each word is a cell of [the worksheet](worksheet.pdf)'s lookup. A
+word's first eight bits pick the row - 8 flips, 4 D6 rolls or 2 D20 rolls -
+and its last three the column: the last 3 flips, the D6 fifth roll with a pair
+such as `1-2` for the sixth, or a D20 pair such as `9-10`. The last roll keeps
+only its first bits, so either face of the pair makes the word. A SeedPicker
+draw's number, (ticket − 1) × 6 + die, is found by the row numbers.
 
 `tools/origo_verify.py` reproduces each method from what was written down,
 word by word, printing each word's entries, number and word before the
