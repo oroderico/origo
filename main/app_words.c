@@ -237,10 +237,14 @@ bool enter_number(const char* title, const size_t max_digits, const uint32_t min
         for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
             const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
             /* Another digit only makes the number larger, so one is offered
-             * exactly when the number it makes is still in range. */
+             * exactly when the number it makes is still in range. A leading
+             * zero is the number zero: offered only where zero is in range,
+             * and nothing follows it, or a ticket keypad (from 1) could fill
+             * with 000 and leave only backspace. */
+            const bool leading_zero = digits_len ? typed == 0 : key == '0' && min > 0;
             enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
                 : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0 && typed >= min
-                                                       : digits_len < max_digits
+                                                       : digits_len < max_digits && !leading_zero
                         && typed * 10 + (uint32_t)(key - '0') <= max;
         }
         seedtool_zero(&typed, sizeof(typed));

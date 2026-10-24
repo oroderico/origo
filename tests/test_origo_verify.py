@@ -187,8 +187,8 @@ class SeedToolVerifierTests(unittest.TestCase):
             return out.getvalue()
 
         printed = run("000")
-        self.assertIn("word  1: T57 + 4  0340  clerk", printed)
-        self.assertIn("word  3: T342 + 2  2048  zoo", printed)
+        self.assertIn("word  1: T57 + die 4  0340  clerk", printed)
+        self.assertIn("word  3: T342 + die 2  2048  zoo", printed)
         mnemonic = printed.splitlines()[-1].split(None, 1)[1]
         self.assertEqual(mnemonic.split()[-2:], ["embark", "cabin"])
         self.assertTrue(run("101").rstrip().endswith("embark phrase"))

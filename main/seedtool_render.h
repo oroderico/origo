@@ -132,10 +132,6 @@ void seedtool_render_nav_rows(const seedtool_nav_t* nav, const char* title, cons
 void seedtool_render_nav_list(
     const seedtool_nav_t* nav, const char* title, const char* const* items, size_t count, size_t top);
 
-/* `enabled` is indexed by key position across the whole layout; disabled keys
- * are dimmed and meant to be unreachable. `selected` is the highlighted key.
- * `position` (1-based) of `total` fills a bar with the words already typed; a
- * `total` of 0 draws no bar. */
 /* A row of digit boxes, the one at `active` carrying up and down arrows. Boxes
  * before `active` are set, those after it still to come; a
  * SEEDTOOL_KEY_BACKSPACE at `active` draws the backspace glyph. `count` must not exceed
@@ -154,6 +150,11 @@ void seedtool_render_value_box(
  * drawn only where the level can still move. */
 void seedtool_render_level(const char* title, unsigned level, unsigned max, const char* footer);
 
+/* `enabled` is indexed by key position across the whole layout; disabled keys
+ * are dimmed and meant to be unreachable. `selected` is the highlighted key.
+ * `position` (1-based) of `total` fills a thin bar above the keys with
+ * position - 1 of total: the words already typed, or a run's bits on the
+ * ticket keypad. A `total` of 0 draws no bar. */
 void seedtool_render_keyboard(const char* title, const char* text, const char* layout, const bool* enabled,
     size_t selected, size_t position, size_t total);
 

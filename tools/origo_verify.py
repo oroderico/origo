@@ -481,7 +481,7 @@ def tickets(args):
         if number > 2048:
             raise ValueError(f"draw {position}: T{ticket} + {die} is past 2048; draw a new ticket")
         indices.append(number - 1)
-        print(f"word {position:2}: T{ticket} + {die}  {number:04}  {wl[number - 1]}")
+        print(f"word {position:2}: T{ticket} + die {die}  {number:04}  {wl[number - 1]}")
     entropy = ((int("".join(f"{i:011b}" for i in indices), 2) << needed) | int(args.bits, 2)).to_bytes(
         16 if needed == 7 else 32, "big")
     print(f"loose bits: {args.bits}")
