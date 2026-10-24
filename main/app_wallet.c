@@ -338,6 +338,9 @@ static size_t address_prefix_len(const char* address)
  * and six fit all but about one bech32 row in 3,400 (wide letters such as m
  * and w), which keeps five and five rather than running off the row. */
 #define ADDRESS_SIDE 6
+/* Find by ending takes the characters a row shows of the end, so an address
+ * read off the list can be looked up as it is read. */
+_Static_assert(ADDRESS_ENDING_LEN == ADDRESS_SIDE, "find by ending takes what a list row shows");
 /* The index takes two digits, so the address keeps the width. */
 _Static_assert(ADDRESS_SHOWN_ROWS <= 100, "a listed index runs past two digits");
 
@@ -492,14 +495,119 @@ static void show_extended_keys(const wallet_session_t* const session)
     }
 }
 
+/* Find by ending searches indices 0 to FIND_FIRST_COUNT - 1 of both branches,
+ * then, if asked, on to the last index. Measured on the board, an address
+ * takes about 18 ms (BIP84) to 35 ms (Taproot) once its branch is derived, so
+ * the first stage takes under a minute and the whole range up to about twelve;
+ * a wallet that has used a thousand addresses is rare. */
+#define FIND_FIRST_COUNT 1000
+/* Indices per call, between which the bar moves and the chord is read. */
+#define FIND_WINDOW 10
+
+/* Searches indices first..last of both branches for `ending`, a window at a
+ * time, with a bar and the chord to stop. Returns 1 found, 0 not found, -1
+ * stopped or failed. */
+static int search_addresses(const wallet_session_t* const session, const char* ending, const uint32_t first,
+    const uint32_t last, seedtool_chain_t* chain, uint32_t* index)
+{
+    char title[32], account[32], range[32];
+    (void)snprintf(title, sizeof(title), "Find ...%s", ending);
+    (void)snprintf(account, sizeof(account), "%s, account %u", address_type(session->type)->name,
+        (unsigned)session->account);
+    (void)snprintf(range, sizeof(range), "Indices %u to %u", (unsigned)first, (unsigned)last);
+    for (uint32_t start = first; start <= last; start += FIND_WINDOW) {
+        const seedtool_tally_t tally = { .done = start - first, .total = last + 1 - first, .unit = "" };
+        seedtool_render_tally_screen(title, account, range, "BOTH stops the search", &tally);
+        seedtool_display_flush();
+        /* The search is the reader's own doing and can run for minutes, so it
+         * counts as activity: the idle timer is for a reader who walked away,
+         * and resumes when the search ends. */
+        last_action = seedtool_platform_milliseconds();
+        bool ticked = false;
+        if (wait_key_or_tick(1, &ticked) == KEY_SELECT) {
+            return -1;
+        }
+        const uint32_t count = last + 1 - start < FIND_WINDOW ? last + 1 - start : FIND_WINDOW;
+        bool found = false;
+        if (seedtool_find_address(
+                &session->root, session->type, session->account, ending, start, count, chain, index, &found)
+            != SEEDTOOL_OK) {
+            notice("Error", "Could not derive addresses", NULL);
+            return -1;
+        }
+        if (found) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Is this address mine: the reader types the end of an address another
+ * wallet shows, and the search answers with its branch and index, then shows
+ * it whole to be compared, or says what it searched. Only the type, account
+ * and passphrase now set are searched, which is the usual reason for a miss. */
+static void find_address(const wallet_session_t* const session)
+{
+    const bool bech32 = session->type == SEEDTOOL_BIP84 || session->type == SEEDTOOL_BIP86;
+    char ending[ADDRESS_ENDING_LEN + 1] = { 0 };
+    while (enter_address_ending(bech32, ending)) {
+        seedtool_chain_t chain = SEEDTOOL_RECEIVE;
+        uint32_t index = 0;
+        int result = search_addresses(session, ending, 0, FIND_FIRST_COUNT - 1, &chain, &index);
+        char account[32];
+        (void)snprintf(account, sizeof(account), "%s, account %u", address_type(session->type)->name,
+            (unsigned)session->account);
+        if (!result) {
+            char further[32];
+            (void)snprintf(further, sizeof(further), "Search to %u?", (unsigned)SEEDTOOL_MAX_ADDRESS_INDEX);
+            char title[32];
+            (void)snprintf(title, sizeof(title), "Not in 0 to %u", (unsigned)FIND_FIRST_COUNT - 1);
+            if (!nav_acknowledge(title, account, further, "Search on", false)) {
+                continue;
+            }
+            result = search_addresses(
+                session, ending, FIND_FIRST_COUNT, SEEDTOOL_MAX_ADDRESS_INDEX, &chain, &index);
+            if (!result) {
+                char range[32];
+                (void)snprintf(range, sizeof(range), "Indices 0 to %u", (unsigned)SEEDTOOL_MAX_ADDRESS_INDEX);
+                notice("Not found", account, range);
+            }
+        }
+        if (result != 1) {
+            continue;
+        }
+        char one[1][SEEDTOOL_MAX_ADDRESS_LEN];
+        if (seedtool_mainnet_addresses(&session->root, session->type, session->account, chain, index, 1, one)
+            != SEEDTOOL_OK) {
+            notice("Error", "Could not derive address", NULL);
+            continue;
+        }
+        char where[32];
+        (void)snprintf(where, sizeof(where), "%s, index %u", chain == SEEDTOOL_RECEIVE ? "Receive" : "Change",
+            (unsigned)index);
+        /* The ending matched; the whole address is what is checked. */
+        if (nav_acknowledge("Found", where, "Compare the whole address", "Show it", false)) {
+            char path[40];
+            (void)snprintf(path, sizeof(path), "m/%u'/0'/%u'/%u/%u", (unsigned)session->type,
+                (unsigned)session->account, (unsigned)chain, (unsigned)index);
+            show_address_qr(path, one[0]);
+        }
+        seedtool_zero(one, sizeof(one));
+    }
+}
+
 /* The address list for the type and account currently set, on whichever
- * branch is asked for first. */
+ * branch is asked for first, or Find by ending. */
 static void show_addresses(const wallet_session_t* const session)
 {
     /* Which branch, asked before the list, as xpub/zpub is. */
-    const char* const branches[] = { "Receive", "Change" };
+    const char* const branches[] = { "Receive", "Change", "Find by ending" };
     const int branch = choose_menu("Addresses", branches, ARRAY_LEN(branches));
     if (branch == NAV_BACK) {
+        return;
+    }
+    if (branch == 2) {
+        find_address(session);
         return;
     }
     const seedtool_chain_t chain = branch == 0 ? SEEDTOOL_RECEIVE : SEEDTOOL_CHANGE;

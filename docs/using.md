@@ -218,6 +218,19 @@ whatever is set:
   re-derives, which costs what changing the account already costs. The chain step
   sits below the account key, so only the cheap half of the derivation
   actually repeats;
+- **Find by ending**, the third choice under `Addresses`, answers "is this
+  address mine?" for one another wallet shows, say a receive address on a
+  computer that could have been tampered with. Type its last six characters —
+  the six a list row keeps of the end; the keyboard offers only characters an
+  address of the type can hold, both cases for base58 — and Origo derives
+  index by index, receive then change, until one ends that way. It answers
+  with the branch and index, then shows that address whole with its QR: the
+  six characters only find it, the whole address is what is compared. The
+  search covers indices 0 to 999 first, under a minute on the board, then
+  offers to go on to 9999, which takes up to about twelve minutes for Taproot;
+  both buttons stop it. A miss names what was searched — the type, account
+  and passphrase set under Derivation, and nothing else — which is the usual
+  reason an address that is yours is not found;
 - its BIP380 output descriptor, the third entry under Extended public key —
   script type, key origin, account key and an
   8-character checksum in the one string a watch-only wallet imports directly,

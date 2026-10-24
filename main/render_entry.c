@@ -218,9 +218,10 @@ void draw_tally(const seedtool_tally_t* tally)
         return;
     }
     const unsigned done = tally->done > tally->total ? tally->total : tally->done;
-    char count[32], widest[32];
-    (void)snprintf(count, sizeof(count), "%u/%u bits", done, tally->total);
-    (void)snprintf(widest, sizeof(widest), "%u/%u bits", tally->total, tally->total);
+    const char* const unit = tally->unit ? tally->unit : "bits";
+    char count[48], widest[48];
+    (void)snprintf(count, sizeof(count), "%u/%u%s%s", done, tally->total, *unit ? " " : "", unit);
+    (void)snprintf(widest, sizeof(widest), "%u/%u%s%s", tally->total, tally->total, *unit ? " " : "", unit);
     const int slot = text_width(tft_DefaultFont, widest, strlen(widest));
     const int bar_width = BAND_WIDTH - TALLY_GAP - slot;
     const int filled = (int)((unsigned)(bar_width - 4) * done / tally->total);

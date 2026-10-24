@@ -30,6 +30,9 @@ void seedtool_render_screen(const char* title, const char* line1, const char* li
 typedef struct {
     unsigned done;
     unsigned total;
+    /* What is counted, after the numbers. NULL, the zero value, is "bits";
+     * "" is none, for a count its screen already names. */
+    const char* unit;
 } seedtool_tally_t;
 
 /* seedtool_render_screen with the tally under line2; NULL draws none. */

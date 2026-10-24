@@ -146,12 +146,22 @@ seedtool_result_t seedtool_account_xpub(const seedtool_root_t* root, seedtool_ad
     seedtool_key_format_t format, char* output, size_t output_len);
 
 /* Mainnet addresses at m/type'/0'/account'/chain/first..first+count-1. The
- * hardened account derivation runs once rather than per address. `chain`
- * outside seedtool_chain_t, or an index past SEEDTOOL_MAX_ADDRESS_INDEX, is
- * EINVAL. `addresses` must hold `count` rows, and is zeroed on failure. */
+ * hardened account derivation and the branch's run once rather than per
+ * address. `chain` outside seedtool_chain_t, or an index past
+ * SEEDTOOL_MAX_ADDRESS_INDEX, is EINVAL. `addresses` must hold `count` rows, and is zeroed on failure. */
 seedtool_result_t seedtool_mainnet_addresses(const seedtool_root_t* root, seedtool_address_type_t type,
     uint32_t account, seedtool_chain_t chain, uint32_t first, uint32_t count,
     char addresses[][SEEDTOOL_MAX_ADDRESS_LEN]);
+
+/* Looks for the address ending in `ending` among indices first..first+count-1
+ * of both branches of m/type'/0'/account', index by index, receive before
+ * change. The match is exact and case-sensitive on the address's last
+ * characters. OK with `*found_out` false when none ends that way; with it true,
+ * the first that does is at `*chain_out`/`*index_out`. Searching a long range
+ * a window at a time lets the caller show progress and stop between windows. */
+seedtool_result_t seedtool_find_address(const seedtool_root_t* root, seedtool_address_type_t type, uint32_t account,
+    const char* ending, uint32_t first, uint32_t count, seedtool_chain_t* chain_out, uint32_t* index_out,
+    bool* found_out);
 
 /* Writes `descriptor` + "#" + its 8-character BIP380 checksum to `output`,
  * which must not overlap it. EINVAL for a character outside BIP380's charset,

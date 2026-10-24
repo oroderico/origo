@@ -1041,7 +1041,9 @@ static bool remaining_screens_render(void)
         "About", "Erase and restart" };
     seedtool_render_screen("ORIGO", "HOST SELF-TEST", expected_address, "OK");
     seedtool_render_splash();
-    const seedtool_tally_t tallies[] = { { 0, 128 }, { 86, 128 }, { 256, 256 }, { 300, 256 }, { 0, 0 } };
+    const seedtool_tally_t tallies[] = { { .done = 0, .total = 128 }, { .done = 86, .total = 128 },
+        { .done = 256, .total = 256 }, { .done = 300, .total = 256 }, { .done = 0, .total = 0 },
+        { .done = 8990, .total = 9000, .unit = "" } };
     for (size_t i = 0; i < sizeof(tallies) / sizeof(tallies[0]); ++i) {
         seedtool_render_tally_screen("Word 1/23, flip 1/11", "Heads (up)   Tails (down)", "0110", "OK", &tallies[i]);
         seedtool_render_value_box("Word 1/11, roll 1/6", "4", false, "OK", &tallies[i]);
