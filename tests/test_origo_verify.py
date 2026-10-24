@@ -604,6 +604,73 @@ class SeedToolVerifierTests(unittest.TestCase):
                                .replace('\\"', '"').replace("\\\\", "\\"))
             self.assertEqual(covered, {chr(c) for c in range(0x20, 0x7F)}, name)
 
+    def test_worksheet_pdf_is_what_the_tables_generate(self):
+        # docs/worksheet.pdf is committed for printing and tools/make_worksheet.py
+        # is what gets edited; regenerating into a scratch file must give the
+        # same bytes, which the generator keeps free of dates and IDs.
+        import subprocess, tempfile
+        root = Path(__file__).parents[1]
+        with tempfile.TemporaryDirectory() as scratch:
+            pdf = Path(scratch) / "worksheet.pdf"
+            subprocess.run(
+                [sys.executable, "-I", str(root / "tools/make_worksheet.py"), "--out", str(pdf)],
+                check=True, capture_output=True,
+            )
+            self.assertEqual(pdf.read_bytes(), (root / "docs/worksheet.pdf").read_bytes())
+
+    def test_worksheet_lookup_names_its_words(self):
+        # Every printed cell is checked against the verifier, which reads the
+        # methods its own way: a row's first flips and rolls with a column's
+        # last ones must make the word in that cell. The last roll prints as a
+        # pair of faces; every face is tried, and exactly the two printed must
+        # give the cell's word.
+        import argparse, contextlib, io
+        spec = importlib.util.spec_from_file_location(
+            "make_worksheet", Path(__file__).parents[1] / "tools/make_worksheet.py")
+        worksheet = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(worksheet)
+        labels, headings, cells = worksheet.lookup()
+        self.assertEqual(len(headings), 8)
+        self.assertEqual([word for row in cells for word in row], verify.words())
+        self.assertEqual([label[0] for label in labels], [f"{n:04}" for n in range(1, 2049, 8)])
+
+        # Per word, as printed: the flips, and each die's leading rolls and
+        # last pair.
+        flips, d6, d20 = [], [], []
+        for label in labels:
+            for heading in headings:
+                flips.append(label[1].replace(" ", "") + heading[0])
+                fifth, pair = heading[1].split()
+                d6.append(([int(f) for f in label[2].split()] + [int(fifth)], pair))
+                d20.append(([int(f) for f in label[3].split()], heading[2]))
+
+        def numbers(command, args):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                command(argparse.Namespace(**args))
+            return [int(line.split()[-2]) for line in out.getvalue().splitlines() if line.startswith("word ")]
+
+        # Eleven words to a call, the shortest run the verifier takes; the last
+        # batch wraps round to the first words.
+        batches = [[(start + k) % 2048 for k in range(11)] for start in range(0, 2048, 11)]
+
+        for batch in batches:
+            run = "".join(flips[i] for i in batch) + "0" * 7
+            self.assertEqual(numbers(verify.coin_words, {"flips": run, "words": 12}), [i + 1 for i in batch])
+
+        for die, faces, rolls_per_word, printed in (("d6", 4, 6, d6), ("d20", 16, 3, d20)):
+            for last in range(1, faces + 1):
+                for batch in batches:
+                    rolls = []
+                    for i in batch:
+                        leading, _ = printed[i]
+                        self.assertEqual(len(leading), rolls_per_word - 1)
+                        rolls += leading + [last]
+                    named = numbers(verify.dice, {"die": die, "rolls": [str(r) for r in rolls], "bits": "0000000"})
+                    for i, number in zip(batch, named):
+                        low, high = (int(face) for face in printed[i][1].split("-"))
+                        self.assertEqual(number == i + 1, low <= last <= high, (die, printed[i], last))
+
     def test_logo_c_file_is_what_the_cells_generate(self):
         # The C file is committed and the cells are what gets edited, so the two
         # can drift; regenerating into a scratch file must give the same bytes.
