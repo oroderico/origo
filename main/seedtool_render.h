@@ -44,11 +44,11 @@ void seedtool_render_splash(void);
  * character count. */
 size_t seedtool_render_fit(const char* text, size_t limit);
 
-/* How many leading characters of a list item fit its row. Values meant to be
- * transcribed are never listed; they are paged with seedtool_render_fit. Only
- * the tests call this: it is the row's fit with no ellipsis, which they hold
- * the drawn row against, and the drawing itself measures with the same
- * fit_in. */
+/* How many leading characters of a list item fit its row, with no ellipsis:
+ * the drawing measures with the same fit_in. Values meant to be transcribed
+ * are never listed; they are paged with seedtool_render_fit. The address list
+ * uses this to cut its rows in the middle, keeping both ends, and the tests
+ * hold the drawn row against it. */
 size_t seedtool_render_fit_row(const char* text);
 
 /* Characters per group, as wallets group addresses. */
