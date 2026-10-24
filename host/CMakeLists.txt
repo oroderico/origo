@@ -95,7 +95,7 @@ set(RENDER_SOURCES
     "${ORIGO_ROOT}/main/fonts/UbuntuMedium16.c")
 
 enable_testing()
-foreach(suite core entropy_stats render)
+foreach(suite core render)
     add_executable(test_${suite} "${ORIGO_ROOT}/tests/test_${suite}.c" ${CORE_SOURCES})
     origo_target(test_${suite})
     target_link_libraries(test_${suite} PRIVATE wally_host m)

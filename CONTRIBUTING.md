@@ -1,8 +1,8 @@
 # Contributing
 
-Origo does one thing — turn hand-recorded dice, coin or card entropy into a
-BIP39 mnemonic, deterministically and without touching the device RNG — and
-its value is being small enough to audit in full. Read
+Origo does one thing — turn hand-recorded dice, coins or tickets into a
+BIP39 mnemonic, a word at a time, deterministically and without touching the
+device RNG — and its value is being small enough to audit in full. Read
 [docs/why.md](docs/why.md) before proposing anything: every change here gets
 judged against the threat model described there, not against how useful or
 interesting it is in isolation.
@@ -13,9 +13,10 @@ For a small, self-contained bug fix, just open a pull request. For anything
 bigger — a new entropy source, a new dependency, a new derivation path, a new
 screen — open an issue first and describe the problem it solves. This project
 turns down otherwise-reasonable features on scope grounds alone: anything
-that isn't a pure function of what the user typed, or that reintroduces a
-device-side source of randomness into the seed path, works against the one
-property Origo exists to guarantee. Discussing it before writing code saves
+that isn't a pure function of what the user typed, that reintroduces a
+device-side source of randomness into the seed path, or whose words cannot
+each be checked against a printed table (a hash, an estimate), works against
+the one property Origo exists to guarantee. Discussing it before writing code saves
 you from a rewrite.
 
 ## Building and testing locally
@@ -51,7 +52,7 @@ python3 tools/audit_origo_elf.py build-a/origo.elf --map build-a/origo.map \
 ```
 
 A change that only touches host-testable code (most of `main/seedtool_core.c`,
-the render/transcript logic) can be fully verified with the first three steps
+the render logic) can be fully verified with the first three steps
 and never needs a flashed board. A change to the app (`main/app_*.c`,
 `main/seedtool_app.c`) that is not meant to change what the device shows can be
 checked with `origo-replay`, which runs the app from a key script and prints a
@@ -97,7 +98,7 @@ the norm in this repo's history; keep it going.
 ## Security issues
 
 Do not open an issue or PR for a vulnerability, and never paste a real
-mnemonic, passphrase, entropy transcript, private key or funded address
+mnemonic, passphrase, rolls or flips, private key or funded address
 anywhere in one — see [SECURITY.md](SECURITY.md) for how to report instead.
 
 ## License

@@ -322,6 +322,43 @@ static char addresses[ADDRESS_SHOWN_ROWS][SEEDTOOL_MAX_ADDRESS_LEN];
 static char address_labels[ADDRESS_SHOWN_ROWS][ADDRESS_LABEL_LEN];
 static const char* address_items[ADDRESS_SHOWN_ROWS + 2]; /* + Go to index + Back */
 
+/* What every mainnet address of its type starts with, so it says nothing about
+ * which address it is: "bc1q" or "bc1p" (the HRP, its separator and the
+ * witness version), or a base58 address's leading "1" or "3". */
+static size_t address_prefix_len(const char* address)
+{
+    return strncmp(address, "bc1", 3) == 0 ? 4 : 1;
+}
+
+/* An address is checked by both ends, so a row keeps its type prefix and then
+ * ADDRESS_SIDE characters of its start and as many of its end:
+ * "48 bc1qnjg0jd...rerkf9g". The same count on every row, so the reader
+ * learns one habit; cutting only the end would show the start alone, the half
+ * an address made to look alike copies first. The font is proportional: six
+ * and six fit all but about one bech32 row in 3,400 (wide letters such as m
+ * and w), which keeps five and five rather than running off the row. */
+#define ADDRESS_SIDE 6
+/* The index takes two digits, so the address keeps the width. */
+_Static_assert(ADDRESS_SHOWN_ROWS <= 100, "a listed index runs past two digits");
+
+static void address_row(const uint32_t index, const char* address, char label[ADDRESS_LABEL_LEN])
+{
+    const size_t len = strnlen(address, SEEDTOOL_MAX_ADDRESS_LEN - 1);
+    const size_t prefix = address_prefix_len(address);
+    /* %.*s: GCC's format-truncation analysis loses the bound on the address. */
+    (void)snprintf(label, ADDRESS_LABEL_LEN, "%2u %.*s", (unsigned)index, (int)len, address);
+    if (len <= prefix + 2 * ADDRESS_SIDE) {
+        return;
+    }
+    for (size_t each = ADDRESS_SIDE; each > 0; --each) {
+        (void)snprintf(label, ADDRESS_LABEL_LEN, "%2u %.*s...%.*s", (unsigned)index, (int)(prefix + each), address,
+            (int)each, address + len - each);
+        if (seedtool_render_fit_row(label) == strlen(label)) {
+            return;
+        }
+    }
+}
+
 /* Fills the list for one type, account and branch. Returns false, having told
  * the reader, on a derivation error. */
 static bool derive_addresses(
@@ -338,10 +375,7 @@ static bool derive_addresses(
         return false;
     }
     for (uint32_t i = 0; i < ADDRESS_SHOWN_ROWS; ++i) {
-        /* %.*s: GCC's format-truncation analysis loses the bound on
-         * addresses[i]. */
-        (void)snprintf(address_labels[i], ADDRESS_LABEL_LEN, "%3u  %.*s", (unsigned)i,
-            (int)(SEEDTOOL_MAX_ADDRESS_LEN - 1), addresses[i]);
+        address_row(i, addresses[i], address_labels[i]);
         address_items[i] = address_labels[i];
     }
     address_items[ADDRESS_SHOWN_ROWS] = "Go to index";
@@ -359,7 +393,7 @@ static int browse_addresses(const wallet_session_t* const session, const seedtoo
         const int selected = choose_menu_at(prefix, address_items, ADDRESS_SHOWN_ROWS + 1, cursor);
         if (selected == (int)ADDRESS_SHOWN_ROWS) {
             uint32_t index = 0;
-            if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, 0, SEEDTOOL_MAX_ADDRESS_INDEX, &index)) {
+            if (!enter_number("Go to index", ADDRESS_INDEX_DIGITS, 0, SEEDTOOL_MAX_ADDRESS_INDEX, &index, NULL)) {
                 continue;
             }
             if (index < ADDRESS_SHOWN_ROWS) {
@@ -714,7 +748,7 @@ static void show_derivation_menu(wallet_session_t* const session)
             (void)choose_address_type(&session->type);
         } else {
             uint32_t chosen = session->account;
-            if (enter_number("Account", ACCOUNT_DIGITS, 0, SEEDTOOL_MAX_ACCOUNT_INDEX, &chosen)) {
+            if (enter_number("Account", ACCOUNT_DIGITS, 0, SEEDTOOL_MAX_ACCOUNT_INDEX, &chosen, NULL)) {
                 session->account = chosen;
             }
         }
@@ -855,7 +889,7 @@ bool review_backup_and_show_wallet(const char* mnemonic, const size_t words)
             (void)snprintf(
                 intro, sizeof(intro), "Retype %u of the %u words", (unsigned)(words / 3), (unsigned)words);
             const int taken
-                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", false, NULL);
+                = nav_screen("Confirm backup", intro, "Have your backup ready", "Start quiz", false);
             stage = taken == NAV_CONFIRM ? STAGE_QUIZ : STAGE_WORDS;
             break;
         }

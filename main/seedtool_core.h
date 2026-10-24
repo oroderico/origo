@@ -10,19 +10,6 @@
 #include "seedtool_wordlist.h"
 
 #define SEEDTOOL_HASH_LEN 32
-/* Longest transcript any source builds: 256 one-character coin flips for 24
- * words. D20/24 words is next at up to 203 characters. */
-#define SEEDTOOL_MAX_TRANSCRIPT_LEN 256
-
-/* Upper bound on seedtool_required_events (a coin's 256 flips for 24 words)
- * and the size of every buffer that collects a run. The collection loop trusts
- * that return, so a larger count would overflow those buffers; the tests
- * check every source and word count against this. */
-#define SEEDTOOL_MAX_EVENTS 256
-
-/* A coin spends one transcript character per flip. */
-_Static_assert(SEEDTOOL_MAX_TRANSCRIPT_LEN >= SEEDTOOL_MAX_EVENTS,
-    "a transcript must hold at least one character per collected event");
 
 #define SEEDTOOL_MAX_MNEMONIC_LEN 240
 #define SEEDTOOL_MAX_PASSPHRASE_LEN 100
@@ -45,17 +32,6 @@ typedef enum {
     SEEDTOOL_ECRYPTO = -3,
     SEEDTOOL_ENOSPACE = -4,
 } seedtool_result_t;
-
-typedef enum {
-    SEEDTOOL_D6,
-    SEEDTOOL_D20,
-    SEEDTOOL_COIN,
-    SEEDTOOL_CARDS,
-    /* The same deck drawn with replacement, i.e. a 52-sided die. Used only
-     * for 24 words: a full draw without replacement carries log2(52!) ~ 225.6
-     * bits, short of 256. */
-    SEEDTOOL_CARDS_REPLACE,
-} seedtool_source_t;
 
 /* Script types, each the BIP number its accounts use as the path's purpose:
  * legacy P2PKH, nested segwit P2SH-P2WPKH, native segwit, taproot. */
@@ -86,57 +62,6 @@ typedef enum {
     SEEDTOOL_ZPUB,
 } seedtool_key_format_t;
 
-typedef struct {
-    char transcript[SEEDTOOL_MAX_TRANSCRIPT_LEN + 1];
-    uint8_t hash[SEEDTOOL_HASH_LEN];
-    char mnemonic[SEEDTOOL_MAX_MNEMONIC_LEN + 1];
-    size_t words;
-} seedtool_generated_t;
-
-size_t seedtool_required_events(seedtool_source_t source, size_t words);
-
-/* 128 or 256: the bits a 12- or 24-word mnemonic needs. Used to grade the
- * quality estimate below, never to gate generation. */
-size_t seedtool_min_entropy_bits(size_t words);
-
-/* Shannon entropy, in bits, of a die-like run, and whether consecutive values
- * look patterned (e.g. 1,2,3,4,...). Values are 1-indexed faces for every
- * source, coin and with-replacement cards included (unlike seedtool_transcript's
- * 0/1 and 0..51). A UI quality signal only: seedtool_generate never sees it.
- * EINVAL for SEEDTOOL_CARDS. Adapted from Krux
- * (src/krux/pages/new_mnemonic/dice_rolls.py). */
-seedtool_result_t seedtool_dice_entropy_bits(
-    seedtool_source_t source, const uint8_t* values, size_t values_len, int* bits_out);
-seedtool_result_t seedtool_dice_pattern_detected(
-    seedtool_source_t source, const uint8_t* values, size_t values_len, bool* detected_out);
-
-/* Miller-Madow correction, (sides-1)/(2 ln 2) bits: the expected shortfall
- * of the plug-in estimator above. Add it back before grading against
- * seedtool_min_entropy_bits, or honest runs (D20 especially) read as poor.
- * 0.0 for a non-dice source. */
-double seedtool_dice_entropy_bias_bits(seedtool_source_t source);
-
-/* Cards without replacement: the entropy is exact, log2(52!/(52-n)!), not
- * estimated. EINVAL past 52 cards. The pattern check looks at rank alone.
- * UI quality signals only, like their dice counterparts. */
-seedtool_result_t seedtool_card_entropy_bits(size_t drawn_count, int* bits_out);
-seedtool_result_t seedtool_card_pattern_detected(
-    const uint8_t* values, size_t values_len, bool* detected_out);
-
-/* Canonical transcript of the first `values_len` events. A prefix of a run
- * yields a prefix of the full transcript, so it can be shown as it grows. */
-seedtool_result_t seedtool_transcript(
-    seedtool_source_t source, const uint8_t* values, size_t values_len, char* output, size_t output_len);
-
-/* What a card transcript starts with, naming its encoding for the hash. It is
- * part of what is hashed, not of what the reader entered. */
-#define SEEDTOOL_CARDS_TRANSCRIPT_PREFIX "cards-v1:"
-
-/* Values are numeric: D6=1..6, D20=1..20, coin=0/1. Cards are
- * 0..51 in canonical AC..KC, AD..KD, AH..KH, AS..KS order. */
-seedtool_result_t seedtool_generate(
-    seedtool_source_t source, size_t words, const uint8_t* values, size_t values_len, seedtool_generated_t* output);
-
 /* Complete 11 or 23 known BIP39 words with respectively 7 or 3 user coin
  * flips. The coin bits are interpreted in entry order, most significant first. */
 seedtool_result_t seedtool_complete_checksum(
@@ -166,6 +91,29 @@ seedtool_result_t seedtool_ticket_word(unsigned ticket, unsigned die, uint16_t* 
  * device shows to check a draw against the seed form. SEEDTOOL_EINVAL for an
  * index past the wordlist. */
 seedtool_result_t seedtool_word_ticket(uint16_t index, unsigned* ticket_out, unsigned* die_out);
+
+/* A die read as bits, one word at a time. Only as many faces count as are a
+ * power of two - 1 to 4 on a D6, 1 to 16 on a D20 - and the rest are rolled
+ * again, so every counted face is equally likely: face f is the bits of f - 1,
+ * most significant first, from a printed table. Eleven bits do not divide by 2
+ * or 4, so a word's last roll keeps only its first bits: a D6 word is five
+ * rolls of 2 bits and one of 1 (1 or 2 is 0, 3 or 4 is 1), a D20 word two of 4
+ * bits and one of 3. */
+typedef enum {
+    SEEDTOOL_D6,
+    SEEDTOOL_D20,
+} seedtool_die_t;
+
+/* The faces that count (4 or 16), the bits each roll gives (2 or 4; a
+ * word's last roll keeps fewer) and the rolls a word takes (6 or 3). */
+unsigned seedtool_die_faces(seedtool_die_t die);
+unsigned seedtool_die_bits(seedtool_die_t die);
+size_t seedtool_die_rolls_per_word(seedtool_die_t die);
+#define SEEDTOOL_DIE_MAX_ROLLS 6
+
+/* The zero-based word index a word's rolls name, or SEEDTOOL_EINVAL for a
+ * wrong roll count or a face that does not count. */
+seedtool_result_t seedtool_die_word(seedtool_die_t die, const uint8_t* rolls, size_t count, uint16_t* index_out);
 
 seedtool_result_t seedtool_validate_mnemonic(const char* mnemonic, size_t* words_out);
 seedtool_result_t seedtool_validate_passphrase(const char* passphrase);

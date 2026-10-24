@@ -90,11 +90,11 @@ as you would on the device. `Q` or `Escape` closes the simulator.
 
 The tests need no SDL: `cmake -S host -B build-host && cmake --build build-host
 && ctest --test-dir build-host`. `tests/test_core.c` checks the published BIP39,
-BIP44, BIP49, BIP84, BIP86, SLIP-132 and BIP380 vectors and exhaustive wordlist properties;
+BIP44, BIP49, BIP84, BIP86, SLIP-132 and BIP380 vectors, exhaustive wordlist
+properties, and that every dice and ticket word is reached equally often;
 `tests/test_render.c` checks that what the screens draw is the value held (paged
 text, grouped addresses, Stackbit grids, Compact SeedQR payloads) and that the
-keyboards reach every character; `tests/test_entropy_stats.c` checks the
-entropy quality signal by simulation.
+keyboards reach every character.
 
 The simulator is for development with published test vectors. Do not enter a
-real mnemonic, passphrase or entropy transcript on a network-connected PC.
+real mnemonic, passphrase or rolls on a network-connected PC.

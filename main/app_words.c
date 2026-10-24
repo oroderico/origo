@@ -146,19 +146,22 @@ static bool enter_word_number(const size_t position, const size_t total, const s
         for (size_t i = at + 1; i < SEEDTOOL_MAX_WORD_DIGITS; ++i) {
             shown[i] = ' ';
         }
-        seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER, NULL);
+        seedtool_render_digits(title, shown, SEEDTOOL_MAX_WORD_DIGITS, at, DIGIT_FOOTER);
         seedtool_display_flush();
 
         const seedtool_key_t key = wait_key();
         if (key == KEY_REDRAW) {
             continue;
         }
+        /* KEY_PREV, the physical "up" button, raises the digit, as on
+         * enter_value's carousel: up from 9 is OK, then backspace, then 0
+         * again, and down from 0 is backspace. */
         if (key == KEY_PREV) {
-            on = on ? on - 1 : ring_len - 1;
+            on = on + 1 < ring_len ? on + 1 : 0;
             continue;
         }
         if (key == KEY_NEXT) {
-            on = on + 1 < ring_len ? on + 1 : 0;
+            on = on ? on - 1 : ring_len - 1;
             continue;
         }
 
@@ -194,7 +197,7 @@ static bool enter_word_number(const size_t position, const size_t total, const s
         (void)snprintf(counted, sizeof(counted), "Number %u of %u", number, (unsigned)SEEDTOOL_WORDLIST_LEN);
         /* The number just typed is what is being checked, so the bar names
          * it rather than saying "Continue". */
-        const int answer = word ? nav_screen(title, word, counted, "Use this word", false, NULL) : NAV_BACK;
+        const int answer = word ? nav_screen(title, word, counted, "Use this word", false) : NAV_BACK;
         seedtool_zero(counted, sizeof(counted));
         if (answer == NAV_CONFIRM) {
             strcpy(output, word);
@@ -214,10 +217,11 @@ static bool enter_word_number(const size_t position, const size_t total, const s
 /* A number in [min, max] of up to `max_digits` digits on the word-number
  * keypad. Only digits that keep the number at or below `max` are offered, and
  * Accept only once it is at least `min`, so a number out of range cannot be
- * typed rather than being refused after it has been. Returns true with
+ * typed rather than being refused after it has been. A `tally` fills the
+ * keyboard's thin bar with a run's bits; NULL draws none. Returns true with
  * `*value` set on Accept, false when the reader backed out of the first digit. */
-bool enter_number(
-    const char* title, const size_t max_digits, const uint32_t min, const uint32_t max, uint32_t* value)
+bool enter_number(const char* title, const size_t max_digits, const uint32_t min, const uint32_t max,
+    uint32_t* value, const seedtool_tally_t* tally)
 {
     char digits[NUMBER_MAX_DIGITS + 1] = { 0 };
     size_t digits_len = 0;
@@ -233,10 +237,14 @@ bool enter_number(
         for (size_t i = 0; i < WORD_NUMBER_KEYS; ++i) {
             const char key = seedtool_layout_key(WORD_NUMBER_LAYOUT, i);
             /* Another digit only makes the number larger, so one is offered
-             * exactly when the number it makes is still in range. */
+             * exactly when the number it makes is still in range. A leading
+             * zero is the number zero: offered only where zero is in range,
+             * and nothing follows it, or a ticket keypad (from 1) could fill
+             * with 000 and leave only backspace. */
+            const bool leading_zero = digits_len ? typed == 0 : key == '0' && min > 0;
             enabled[i] = key == SEEDTOOL_KEY_BACKSPACE ? true
                 : key == SEEDTOOL_KEY_ACCEPT           ? digits_len > 0 && typed >= min
-                                                       : digits_len < max_digits
+                                                       : digits_len < max_digits && !leading_zero
                         && typed * 10 + (uint32_t)(key - '0') <= max;
         }
         seedtool_zero(&typed, sizeof(typed));
@@ -245,7 +253,9 @@ bool enter_number(
             = !enabled[selected] && digits_len ? accept_index : nearest_enabled(enabled, WORD_NUMBER_KEYS, selected);
         bool picked = false;
         while (!picked) {
-            seedtool_render_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected, 0, 0);
+            /* The bar fills with position - 1 of total, so done + 1. */
+            seedtool_render_keyboard(title, digits_len ? digits : "-", WORD_NUMBER_LAYOUT, enabled, selected,
+                tally ? tally->done + 1 : 0, tally ? tally->total : 0);
             seedtool_display_flush();
             switch (wait_key()) {
             case KEY_SELECT:
