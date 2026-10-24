@@ -8,8 +8,8 @@ The board has two buttons and no select button. In a list, the left button
 moves to the previous item and the right button to the next; both pressed
 together select. Holding one button repeats it. A press is acted on only once
 both buttons are released, so a chord is never mistaken for a step. A numeric
-carousel (a die's face) reads the same two buttons the other way: left
-raises the value, right lowers it, since there the physical button read as
+carousel (a die's face, a word number's digit) reads the same two buttons the
+other way: left raises the value, right lowers it, since there the physical button read as
 "up" raising what is on screen matters more than reusing a list's sense of
 "previous".
 
@@ -201,7 +201,13 @@ whatever is set:
   follows is `m/84'/0'/0'/0/i`, `m/86'/0'/0'/0/i`, `m/49'/0'/0'/0/i` or
   `m/44'/0'/0'/0/i` for receive,
   `.../1/i` for change, with each address titled by its own full path so the
-  branch is never inferred from which menu it was reached through. The list
+  branch is never inferred from which menu it was reached through. Each row
+  keeps both ends of its address, `0 bc1qcr8te4...306fyu`: after the `bc1q`
+  every address of the type shares, six characters of the start and six of the
+  end on every row, since an address is checked by its start and end and one
+  made to look alike copies both. The font is proportional, so about one bech32
+  row in 3,400, crowded with wide letters, keeps five and five instead. The
+  address's own screen shows it whole. The list
   shows the first fifty; a "Go to index" entry at the end of it takes any
   index in range on a four-digit keypad, since scrolling five rows at a time
   to reach index 87 is not browsing, and a wallet used for years passes a

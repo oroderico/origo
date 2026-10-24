@@ -88,8 +88,8 @@ these faces count"; the last roll simply contributes less of what it rolled,
 and every word stays equally likely.
 
 ```
-D6   4 2 1 3 3 2   ->  11 01 00 10 10 0  ->  1685  spoon
-D20  16 1 10       ->  1111 0000 100     ->  1925  vacuum
+D6   4, 2, 1, 3, 3, 2  ->  11 01 00 10 10 0  ->  1685  spoon
+D20  16, 1, 10        ->  1111 0000 100     ->  1925  vacuum
 ```
 
 ## SeedPicker tickets
@@ -146,7 +146,7 @@ which faces count — and then, for each word:
 
 1. the flips, rolls, or ticket and die, one at a time, each step undoable;
 2. a confirmation showing what made the word, its number and the word itself —
-   `4 2 1 3 3 2`, `1685  spoon` — to check against the table before it is
+   `4, 2, 1, 3, 3, 2`, `1685  spoon` — to check against the table before it is
    used. Declining throws that word's entries away and asks for them again.
 
 Under each flip, roll and ticket a bar counts the bits taken so far against
@@ -158,7 +158,7 @@ hundred rolls: a sequence like `1 2 3 4 1 2 3 4` has perfectly even faces and
 no randomness at all, which is why Origo estimates nothing.
 
 After the last word, a review lists every word with what made it, four to a
-page — `01. 4 2 1 3 3 2 spoon`, `01. T57 + die 4 clerk` — to compare with the
+page — `01. 4,2,1,3,3,2 spoon`, `01. T57+4 clerk` — to compare with the
 paper in one pass; its arrow returns to the last word. Then the loose coin
 flips, BIP39's checksum, and the finished mnemonic, read back and confirmed
 like any other.
